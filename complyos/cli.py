@@ -17,6 +17,8 @@ from complyos.api.mcp_server import (
     get_user_compliance_status,
 )
 from complyos.core.repository import LocalRepository
+from complyos.core.rules import AssignmentRuleEngine
+from complyos.models.domain import AssignmentRule
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 console = Console()
@@ -186,6 +188,64 @@ def mcp():
     """Run the MCP server."""
     from complyos.api.mcp_server import main
     main()
+
+
+@app.command()
+def validate_rule(
+    rule_file: str = typer.Argument(..., help="Path to JSON rule definition"),
+    db_path: str = typer.Option("complyos.db", "--db"),
+):
+    """Validate an assignment rule before deployment."""
+    with open(rule_file) as f:
+        data = json.load(f)
+
+    rule = AssignmentRule(**data)
+    engine = AssignmentRuleEngine(LocalRepository(db_path))
+    result = engine.validate_rule(rule)
+
+    if result["valid"]:
+        console.print("[green]Rule is valid[/green]")
+    else:
+        console.print("[red]Rule has issues:[/red]")
+        for issue in result["issues"]:
+            console.print(f"  • {issue}")
+
+    preview = result["preview"]
+    console.print(f"Would affect {len(preview['users'])} users")
+
+
+@app.command()
+def preview_rule(
+    rule_file: str = typer.Argument(..., help="Path to JSON rule definition"),
+    db_path: str = typer.Option("complyos.db", "--db"),
+):
+    """Preview which users would be affected by a rule."""
+    with open(rule_file) as f:
+        data = json.load(f)
+
+    rule = AssignmentRule(**data)
+    engine = AssignmentRuleEngine(LocalRepository(db_path))
+    result = engine.preview_rule(rule)
+
+    console.print(f"[bold]Rule:[/bold] {result['rule_name']}")
+    console.print(
+        f"[bold]Affected users:[/bold] {len(result['users'])} "
+        f"({result['total_missing_enrollments']} missing enrollments)"
+    )
+
+    if result["users"]:
+        table = Table(title="Affected Users")
+        table.add_column("User")
+        table.add_column("Department")
+        table.add_column("Missing Courses")
+        for item in result["users"]:
+            user = item["user"]
+            table.add_row(
+                f"{user.first_name} {user.last_name}",
+                user.department,
+                ", ".join(c.title for c in item["missing_courses"]),
+            )
+        console.print(table)
 
 
 if __name__ == "__main__":

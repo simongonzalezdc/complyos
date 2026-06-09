@@ -11,6 +11,9 @@ from complyos.connectors.base import LMSConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
+from complyos.core.repository import LocalRepository
+from complyos.core.rules import AssignmentRuleEngine
+from complyos.models.domain import AssignmentRule
 
 mcp = FastMCP("complyos")
 
@@ -131,6 +134,66 @@ async def check_connector_health() -> dict[str, Any]:
     """
     connector = _get_connector()
     return await connector.health_check()
+
+
+@mcp.tool()
+async def validate_assignment_rule(
+    name: str,
+    target_criteria: dict[str, Any],
+    course_ids: list[str],
+    deadline_days: int = 30,
+) -> dict[str, Any]:
+    """Validate an assignment rule before deployment.
+
+    Checks for unknown courses, empty targets, and users who would match.
+
+    Args:
+        name: Rule name
+        target_criteria: Filters like {"department": "Engineering"}
+        course_ids: List of course IDs to assign
+        deadline_days: Days until deadline
+
+    Returns:
+        Validation result with valid flag, issues list, and preview.
+    """
+    repo = LocalRepository()
+    engine = AssignmentRuleEngine(repo)
+    rule = AssignmentRule(
+        name=name,
+        target_criteria=target_criteria,
+        course_ids=course_ids,
+        deadline_days_from_trigger=deadline_days,
+    )
+    return engine.validate_rule(rule)
+
+
+@mcp.tool()
+async def preview_assignment_rule(
+    name: str,
+    target_criteria: dict[str, Any],
+    course_ids: list[str],
+    deadline_days: int = 30,
+) -> dict[str, Any]:
+    """Preview which users would be affected by an assignment rule.
+
+    Args:
+        name: Rule name
+        target_criteria: Filters like {"department": "Engineering"}
+        course_ids: List of course IDs to assign
+        deadline_days: Days until deadline
+
+    Returns:
+        Affected users, missing courses, and total enrollment count.
+    """
+    repo = LocalRepository()
+    engine = AssignmentRuleEngine(repo)
+    rule = AssignmentRule(
+        name=name,
+        target_criteria=target_criteria,
+        course_ids=course_ids,
+        deadline_days_from_trigger=deadline_days,
+    )
+    return engine.preview_rule(rule)
 
 
 def main() -> None:

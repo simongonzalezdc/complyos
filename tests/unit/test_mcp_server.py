@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from complyos.api.mcp_server import (
     _get_connector,
     audit_compliance_gaps,
@@ -75,3 +77,74 @@ class TestConnectorSelection:
         monkeypatch.setenv("WORKDAY_PASSWORD", "test_pass")
         connector = _get_connector()
         assert isinstance(connector, WorkdayConnector)
+
+
+class TestRulesMCPTools:
+    async def test_validate_assignment_rule(self, monkeypatch, tmp_path):
+        from complyos.api.mcp_server import validate_assignment_rule
+
+        # Seed a local repo
+        from complyos.core.repository import LocalRepository
+        from complyos.models.domain import Course, User
+
+        db = str(tmp_path / "mcp_rules.db")
+        repo = LocalRepository(db)
+        repo.save_user(
+            User(
+                id="u1",
+                employee_id="E001",
+                email="a@example.com",
+                first_name="A",
+                last_name="A",
+                department="Engineering",
+                region="US",
+                hire_date=date(2023, 1, 1),
+                employment_status="active",
+            )
+        )
+        repo.save_course(Course(id="c1", code="SEC-101", title="Security"))
+
+        monkeypatch.setattr("complyos.api.mcp_server.LocalRepository", lambda: LocalRepository(db))
+
+        result = await validate_assignment_rule(
+            name="Eng Security",
+            target_criteria={"department": "Engineering"},
+            course_ids=["c1"],
+            deadline_days=30,
+        )
+        assert result["valid"] is True
+        assert result["issues"] == []
+
+    async def test_preview_assignment_rule(self, monkeypatch, tmp_path):
+        from complyos.api.mcp_server import preview_assignment_rule
+        from complyos.core.repository import LocalRepository
+        from complyos.models.domain import Course, User
+
+        db = str(tmp_path / "mcp_preview.db")
+        repo = LocalRepository(db)
+        repo.save_user(
+            User(
+                id="u1",
+                employee_id="E001",
+                email="a@example.com",
+                first_name="A",
+                last_name="A",
+                department="Engineering",
+                region="US",
+                hire_date=date(2023, 1, 1),
+                employment_status="active",
+            )
+        )
+        repo.save_course(Course(id="c1", code="SEC-101", title="Security"))
+
+        monkeypatch.setattr("complyos.api.mcp_server.LocalRepository", lambda: LocalRepository(db))
+
+        result = await preview_assignment_rule(
+            name="Eng Security",
+            target_criteria={"department": "Engineering"},
+            course_ids=["c1"],
+            deadline_days=30,
+        )
+        assert result["rule_name"] == "Eng Security"
+        assert len(result["users"]) == 1
+        assert result["total_missing_enrollments"] == 1

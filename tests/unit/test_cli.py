@@ -116,6 +116,40 @@ class TestMCPCommand:
         assert called
 
 
+class TestRulesCommands:
+    def test_validate_rule_valid(self, tmp_path):
+        rule_file = tmp_path / "rule.json"
+        rule_file.write_text(
+            json.dumps(
+                {
+                    "name": "Test Rule",
+                    "target_criteria": {"department": "Engineering"},
+                    "course_ids": ["c1"],
+                    "deadline_days_from_trigger": 30,
+                }
+            )
+        )
+        result = runner.invoke(app, ["validate-rule", str(rule_file)])
+        assert result.exit_code == 0
+        assert "Rule is valid" in result.output or "Rule has issues" in result.output
+
+    def test_preview_rule(self, tmp_path):
+        rule_file = tmp_path / "rule.json"
+        rule_file.write_text(
+            json.dumps(
+                {
+                    "name": "Preview Rule",
+                    "target_criteria": {"department": "Engineering"},
+                    "course_ids": ["c1"],
+                    "deadline_days_from_trigger": 30,
+                }
+            )
+        )
+        result = runner.invoke(app, ["preview-rule", str(rule_file)])
+        assert result.exit_code == 0
+        assert "Rule:" in result.output
+
+
 class TestSyncCommand:
     def test_sync_success(self, monkeypatch, tmp_path):
         class FakeConnector:
