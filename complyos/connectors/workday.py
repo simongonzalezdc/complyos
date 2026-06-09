@@ -23,7 +23,12 @@ class WorkdayConnector(LMSConnector):
 
     name = "workday"
 
-    def __init__(self, base_url: str | None = None, username: str | None = None, password: str | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+    ):
         self.base_url = (base_url or os.getenv("WORKDAY_BASE_URL", "")).rstrip("/")
         self.username = username or os.getenv("WORKDAY_USERNAME", "")
         self.password = password or os.getenv("WORKDAY_PASSWORD", "")
@@ -42,7 +47,9 @@ class WorkdayConnector(LMSConnector):
         if not self.base_url or not self.username:
             return False
         try:
-            response = await self.client.get(f"{self.base_url}/learning/v1/workers", params={"limit": 1})
+            response = await self.client.get(
+                f"{self.base_url}/learning/v1/workers", params={"limit": 1}
+            )
             return response.status_code == 200
         except Exception:
             return False
@@ -122,10 +129,14 @@ def _parse_workday_user(data: dict[str, Any]) -> User:
         employment_status=status_map.get(data.get("workerStatus", ""), EmploymentStatus.ACTIVE),
         manager_id=data.get("manager", {}).get("id"),
         job_title=data.get("jobProfile", {}).get("descriptor"),
-        custom_attributes={k: v for k, v in data.items() if k not in {
-            "id", "employeeID", "firstName", "lastName", "primaryWorkEmail",
-            "supervisoryOrganization", "location", "hireDate", "workerStatus", "manager", "jobProfile"
-        }},
+        custom_attributes={
+            k: v for k, v in data.items() if k not in {
+                "id", "employeeID", "firstName", "lastName",
+                "primaryWorkEmail", "supervisoryOrganization",
+                "location", "hireDate", "workerStatus",
+                "manager", "jobProfile",
+            }
+        },
     )
 
 
@@ -134,10 +145,10 @@ def _parse_workday_course(data: dict[str, Any]) -> Course:
         id=data.get("id", ""),
         code=data.get("courseNumber", data.get("id", "")),
         title=data.get("title", ""),
-        description=data.get("description", None),
-        duration_minutes=data.get("duration", None),
+        description=data.get("description"),
+        duration_minutes=data.get("duration"),
         mandatory=data.get("required", False),
-        category=data.get("topic", None),
+        category=data.get("topic"),
     )
 
 

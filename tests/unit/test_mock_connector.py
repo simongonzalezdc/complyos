@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from complyos.connectors.mock import MockConnector
 from complyos.models.domain import EmploymentStatus
 

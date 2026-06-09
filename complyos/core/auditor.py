@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from complyos.connectors.base import LMSConnector
@@ -15,7 +15,6 @@ from complyos.models.domain import (
     Course,
     EnrollmentStatus,
     EvidenceLedgerEntry,
-    User,
 )
 
 
@@ -96,9 +95,12 @@ class ComplianceAuditor:
                     days_overdue = None
                     for course in missing:
                         key = (user.id, course.id)
-                        if key in enrollment_map and enrollment_map[key].due_date:
-                            if enrollment_map[key].due_date < date.today():
-                                days_overdue = (date.today() - enrollment_map[key].due_date).days
+                        if (
+                            key in enrollment_map
+                            and enrollment_map[key].due_date
+                            and enrollment_map[key].due_date < date.today()
+                        ):
+                            days_overdue = (date.today() - enrollment_map[key].due_date).days
 
                     severity = self._calculate_severity(missing, days_overdue)
                     gaps.append(
@@ -164,7 +166,10 @@ class ComplianceAuditor:
                 "total_mandatory": total_count,
                 "completed": compliant_count,
                 "missing": total_count - compliant_count,
-                "compliance_rate": round(compliant_count / total_count, 2) if total_count > 0 else 0,
+                "compliance_rate": (
+                    round(compliant_count / total_count, 2)
+                    if total_count > 0 else 0
+                ),
             },
         }
 
@@ -247,5 +252,8 @@ class ComplianceAuditor:
                 "calculate_severity",
             ],
             output_hash=output_hash,
-            output_summary=f"Found {len(output)} compliance gaps across {len({g.user.id for g in output})} users",
+            output_summary=(
+                f"Found {len(output)} compliance gaps across "
+                f"{len({g.user.id for g in output})} users"
+            ),
         )

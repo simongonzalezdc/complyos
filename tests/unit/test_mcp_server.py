@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from complyos.api.mcp_server import (
     audit_compliance_gaps,
     check_connector_health,

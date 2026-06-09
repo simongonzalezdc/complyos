@@ -6,7 +6,7 @@ import pytest
 
 from complyos.connectors.mock import MockConnector
 from complyos.core.auditor import ComplianceAuditor
-from complyos.models.domain import AssignmentRule, EnrollmentStatus
+from complyos.models.domain import AssignmentRule
 
 
 @pytest.fixture
@@ -106,5 +106,5 @@ class TestGenerateReport:
         report = await auditor.generate_report(department="HR")
 
         assert report.scope == "department=HR, region=None"
-        for dept, count in report.gaps_by_department.items():
+        for dept, _count in report.gaps_by_department.items():
             assert dept == "HR"

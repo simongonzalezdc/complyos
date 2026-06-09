@@ -56,9 +56,18 @@ class MockConnector(LMSConnector):
             ),
         ]
         self.courses = [
-            Course(id="c1", code="RESPECT-101", title="Respectful Environment", mandatory=True, category="Compliance"),
-            Course(id="c2", code="SECURITY-101", title="Information Security Basics", mandatory=True, category="Compliance"),
-            Course(id="c3", code="LEAD-201", title="Leadership Fundamentals", mandatory=False, category="Development"),
+            Course(
+                id="c1", code="RESPECT-101", title="Respectful Environment",
+                mandatory=True, category="Compliance",
+            ),
+            Course(
+                id="c2", code="SECURITY-101", title="Information Security Basics",
+                mandatory=True, category="Compliance",
+            ),
+            Course(
+                id="c3", code="LEAD-201", title="Leadership Fundamentals",
+                mandatory=False, category="Development",
+            ),
         ]
         self.enrollments = [
             # Alice: completed respect, missing security
@@ -90,7 +99,10 @@ class MockConnector(LMSConnector):
             if "region" in filters:
                 result = [u for u in result if u.region == filters["region"]]
             if "employment_status" in filters:
-                result = [u for u in result if u.employment_status.value == filters["employment_status"]]
+                result = [
+                    u for u in result
+                    if u.employment_status.value == filters["employment_status"]
+                ]
         return result
 
     async def get_courses(self, filters: dict[str, Any] | None = None) -> list[Course]:

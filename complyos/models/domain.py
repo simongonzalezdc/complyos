@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class EmploymentStatus(str, Enum):
+class EmploymentStatus(StrEnum):
     ACTIVE = "active"
     TERMINATED = "terminated"
     ON_LEAVE = "on_leave"
@@ -45,7 +45,7 @@ class Course(BaseModel):
     category: str | None = None
 
 
-class EnrollmentStatus(str, Enum):
+class EnrollmentStatus(StrEnum):
     NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
