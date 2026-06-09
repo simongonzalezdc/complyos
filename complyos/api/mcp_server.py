@@ -11,6 +11,7 @@ from complyos.connectors.base import LMSConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
+from complyos.core.remediation import RemediationEngine
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
@@ -194,6 +195,56 @@ async def preview_assignment_rule(
         deadline_days_from_trigger=deadline_days,
     )
     return engine.preview_rule(rule)
+
+
+@mcp.tool()
+async def remediate_compliance_gaps(
+    department: str | None = None,
+    region: str | None = None,
+    auto_remind: bool = True,
+    auto_enroll: bool = False,
+    notify_manager: bool = False,
+) -> dict[str, Any]:
+    """Audit and remediate compliance gaps in one operation.
+
+    Runs a compliance audit, then applies remediation actions based on severity.
+
+    Args:
+        department: Filter by department
+        region: Filter by region
+        auto_remind: Send reminders for high/critical gaps
+        auto_enroll: Auto-enroll users in missing courses
+        notify_manager: Notify managers for critical gaps
+
+    Returns:
+        Summary of gaps found and remediation actions taken.
+    """
+    auditor = _get_auditor()
+    gaps, ledger = await auditor.audit_gaps(department=department, region=region)
+
+    connector = _get_connector()
+    engine = RemediationEngine(connector)
+    actions = await engine.remediate_gaps(
+        gaps,
+        auto_remind=auto_remind,
+        auto_enroll=auto_enroll,
+        notify_manager=notify_manager,
+    )
+
+    return {
+        "gaps_found": len(gaps),
+        "actions_taken": len(actions),
+        "actions": [
+            {
+                "type": a.action_type,
+                "user_id": a.user_id,
+                "course_id": a.course_id,
+                "status": a.status,
+            }
+            for a in actions
+        ],
+        "evidence_hash": ledger.output_hash,
+    }
 
 
 def main() -> None:

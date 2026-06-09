@@ -150,6 +150,20 @@ class TestRulesCommands:
         assert "Rule:" in result.output
 
 
+class TestRemediateCommand:
+    def test_remediate_default(self):
+        result = runner.invoke(app, ["remediate"])
+        assert result.exit_code == 0
+        assert "Gaps found:" in result.output
+        assert "Actions taken:" in result.output
+        assert "Evidence hash:" in result.output
+
+    def test_remediate_no_remind(self):
+        result = runner.invoke(app, ["remediate", "--no-remind"])
+        assert result.exit_code == 0
+        assert "Gaps found:" in result.output
+
+
 class TestSyncCommand:
     def test_sync_success(self, monkeypatch, tmp_path):
         class FakeConnector:

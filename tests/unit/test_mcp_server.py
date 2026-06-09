@@ -148,3 +148,23 @@ class TestRulesMCPTools:
         assert result["rule_name"] == "Eng Security"
         assert len(result["users"]) == 1
         assert result["total_missing_enrollments"] == 1
+
+
+class TestRemediationMCPTool:
+    async def test_remediate_compliance_gaps(self):
+        from complyos.api.mcp_server import remediate_compliance_gaps
+
+        result = await remediate_compliance_gaps()
+        assert result["gaps_found"] >= 2
+        assert result["actions_taken"] >= 2
+        assert len(result["actions"]) == result["actions_taken"]
+        assert len(result["evidence_hash"]) == 64
+
+    async def test_remediate_with_no_actions(self):
+        from complyos.api.mcp_server import remediate_compliance_gaps
+
+        result = await remediate_compliance_gaps(
+            department="Nonexistent", auto_remind=False
+        )
+        assert result["gaps_found"] == 0
+        assert result["actions_taken"] == 0

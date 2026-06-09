@@ -16,6 +16,7 @@ from complyos.api.mcp_server import (
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.core.remediation import RemediationEngine
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
@@ -244,6 +245,53 @@ def preview_rule(
                 f"{user.first_name} {user.last_name}",
                 user.department,
                 ", ".join(c.title for c in item["missing_courses"]),
+            )
+        console.print(table)
+
+
+@app.command()
+def remediate(
+    department: str | None = typer.Option(None, "--department", "-d"),
+    region: str | None = typer.Option(None, "--region", "-r"),
+    auto_remind: bool = typer.Option(True, "--remind/--no-remind"),
+    auto_enroll: bool = typer.Option(False, "--enroll/--no-enroll"),
+    notify_manager: bool = typer.Option(False, "--notify-manager/--no-notify-manager"),
+):
+    """Audit and remediate compliance gaps."""
+    from complyos.api.mcp_server import _get_auditor, _get_connector
+
+    async def _remediate():
+        auditor = _get_auditor()
+        gaps, ledger = await auditor.audit_gaps(department=department, region=region)
+
+        connector = _get_connector()
+        engine = RemediationEngine(connector)
+        actions = await engine.remediate_gaps(
+            gaps,
+            auto_remind=auto_remind,
+            auto_enroll=auto_enroll,
+            notify_manager=notify_manager,
+        )
+
+        return gaps, actions, ledger
+
+    gaps, actions, ledger = asyncio.run(_remediate())
+    console.print(f"[bold]Gaps found:[/bold] {len(gaps)}")
+    console.print(f"[bold]Actions taken:[/bold] {len(actions)}")
+    console.print(f"[bold]Evidence hash:[/bold] {ledger.output_hash}")
+
+    if actions:
+        table = Table(title="Remediation Actions")
+        table.add_column("Action")
+        table.add_column("User")
+        table.add_column("Course")
+        table.add_column("Status")
+        for action in actions:
+            table.add_row(
+                action.action_type,
+                action.user_id,
+                action.course_id,
+                action.status,
             )
         console.print(table)
 
