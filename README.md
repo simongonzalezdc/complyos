@@ -71,6 +71,15 @@ complyos report --department Engineering --json
 # Check a single user's status
 complyos status u1
 
+# Sync LMS data to local SQLite
+complyos sync
+
+# Validate an assignment rule before deploying
+complyos validate-rule rule.json
+
+# Preview who would be affected by a rule
+complyos preview-rule rule.json
+
 # Check connector health
 complyos health
 ```
@@ -144,8 +153,8 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 ## Roadmap
 
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
-- [ ] Phase 2 — SQLite persistence, assignment rules engine, remediation workflows
-- [ ] Phase 3 — Web UI, Slack/Teams notifications, advanced reporting
+- [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
+- [ ] Phase 3 — Remediation workflows, Web UI, Slack/Teams notifications
 
 ---
 
