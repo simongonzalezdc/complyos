@@ -1,0 +1,11 @@
+{
+  "name": "Engineering Security Compliance",
+  "description": "All Engineering employees must complete Security Basics within 30 days",
+  "target_criteria": {
+    "department": "Engineering"
+  },
+  "course_ids": ["c1"],
+  "deadline_days_from_trigger": 30,
+  "exceptions": [],
+  "active": true
+}
