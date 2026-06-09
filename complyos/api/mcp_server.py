@@ -12,6 +12,7 @@ from complyos.connectors.mock import MockConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
 from complyos.core.remediation import RemediationEngine
+from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
@@ -244,6 +245,33 @@ async def remediate_compliance_gaps(
             for a in actions
         ],
         "evidence_hash": ledger.output_hash,
+    }
+
+
+@mcp.tool()
+async def export_audit_report_html(
+    output_path: str = "report.html",
+    department: str | None = None,
+    region: str | None = None,
+) -> dict[str, Any]:
+    """Export an audit report to a styled HTML file.
+
+    Args:
+        output_path: Where to save the HTML file
+        department: Filter by department
+        region: Filter by region
+
+    Returns:
+        Path to the generated file and report summary.
+    """
+    auditor = _get_auditor()
+    report = await auditor.generate_report(department=department, region=region)
+    path = export_html(report, output_path)
+    return {
+        "output_path": path,
+        "gaps_found": report.gaps_found,
+        "total_users": report.total_users_audited,
+        "evidence_hash": report.evidence_hash,
     }
 
 

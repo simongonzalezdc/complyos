@@ -164,6 +164,17 @@ class TestRemediateCommand:
         assert "Gaps found:" in result.output
 
 
+class TestExportCommand:
+    def test_export_html(self, tmp_path):
+        output = tmp_path / "report.html"
+        result = runner.invoke(app, ["export", str(output)])
+        assert result.exit_code == 0
+        assert "Report exported to" in result.output
+        assert output.exists()
+        content = output.read_text()
+        assert "ComplyOS Audit Report" in content
+
+
 class TestSyncCommand:
     def test_sync_success(self, monkeypatch, tmp_path):
         class FakeConnector:

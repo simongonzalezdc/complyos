@@ -17,6 +17,7 @@ from complyos.api.mcp_server import (
     get_user_compliance_status,
 )
 from complyos.core.remediation import RemediationEngine
+from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
@@ -294,6 +295,25 @@ def remediate(
                 action.status,
             )
         console.print(table)
+
+
+@app.command()
+def export(
+    output: str = typer.Argument("report.html", help="Output HTML file path"),
+    department: str | None = typer.Option(None, "--department", "-d"),
+    region: str | None = typer.Option(None, "--region", "-r"),
+):
+    """Export an audit report to HTML."""
+    from complyos.api.mcp_server import _get_auditor
+
+    async def _export():
+        auditor = _get_auditor()
+        report = await auditor.generate_report(department=department, region=region)
+        return report
+
+    report = asyncio.run(_export())
+    path = export_html(report, output)
+    console.print(f"[green]Report exported to {path}[/green]")
 
 
 if __name__ == "__main__":

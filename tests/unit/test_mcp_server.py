@@ -168,3 +168,14 @@ class TestRemediationMCPTool:
         )
         assert result["gaps_found"] == 0
         assert result["actions_taken"] == 0
+
+
+class TestExportMCPTool:
+    async def test_export_audit_report_html(self, tmp_path):
+        from complyos.api.mcp_server import export_audit_report_html
+
+        output = str(tmp_path / "report.html")
+        result = await export_audit_report_html(output_path=output)
+        assert result["output_path"] == output
+        assert result["gaps_found"] >= 2
+        assert len(result["evidence_hash"]) == 64
