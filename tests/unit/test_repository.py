@@ -266,3 +266,18 @@ class TestSyncHelpers:
 
         assert repo.get_user("u1") is None
         assert repo.get_course("c1") is None
+
+
+class TestEmptyResults:
+    def test_list_users_no_match(self, tmp_path):
+        repo = LocalRepository(str(tmp_path / "test.db"))
+        assert repo.list_users(department="Nonexistent") == []
+
+    def test_list_courses_no_match(self, tmp_path):
+        repo = LocalRepository(str(tmp_path / "test.db"))
+        repo.save_course(Course(id="c1", code="OPT-101", title="Optional", mandatory=False))
+        assert repo.list_courses(mandatory=True) == []
+
+    def test_list_enrollments_no_match(self, tmp_path):
+        repo = LocalRepository(str(tmp_path / "test.db"))
+        assert repo.list_enrollments(user_id="nobody") == []

@@ -34,6 +34,14 @@ class TestAuditCommand:
         assert result.exit_code == 0
         assert "Gaps found:" in result.output
 
+    def test_audit_json_skips_table(self):
+        result = runner.invoke(app, ["audit", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "gaps" in data
+        # Table headers should not appear in JSON output
+        assert "User" not in result.output
+
 
 class TestReportCommand:
     def test_report_default_output(self):
@@ -50,6 +58,12 @@ class TestReportCommand:
         assert "generated_at" in data
         assert "gaps_found" in data
         assert "gaps_by_severity" in data
+
+    def test_report_json_skips_tables(self):
+        result = runner.invoke(app, ["report", "--json"])
+        assert result.exit_code == 0
+        # Table headers should not appear in JSON output
+        assert "Severity" not in result.output
 
 
 class TestStatusCommand:
@@ -71,6 +85,12 @@ class TestStatusCommand:
         assert "user" in data
         assert "summary" in data
         assert "courses" in data
+
+    def test_status_json_skips_table(self):
+        result = runner.invoke(app, ["status", "u1", "--json"])
+        assert result.exit_code == 0
+        # Table headers should not appear in JSON output
+        assert "Course Status" not in result.output
 
 
 class TestHealthCommand:

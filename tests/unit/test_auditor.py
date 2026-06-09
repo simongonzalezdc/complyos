@@ -108,3 +108,35 @@ class TestGenerateReport:
         assert report.scope == "department=HR, region=None"
         for dept, _count in report.gaps_by_department.items():
             assert dept == "HR"
+
+
+class TestSeverityCalculation:
+    def test_no_mandatory_is_low(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="OPT-101", title="Optional", mandatory=False)
+        assert auditor._calculate_severity([course], None) == "low"
+
+    def test_no_overdue_is_medium(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
+        assert auditor._calculate_severity([course], None) == "medium"
+
+    def test_overdue_60_plus_is_critical(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
+        assert auditor._calculate_severity([course], 61) == "critical"
+
+    def test_overdue_30_plus_is_high(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
+        assert auditor._calculate_severity([course], 31) == "high"
+
+    def test_overdue_7_plus_is_medium(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
+        assert auditor._calculate_severity([course], 8) == "medium"
+
+    def test_overdue_under_7_is_low(self, auditor: ComplianceAuditor):
+        from complyos.models.domain import Course
+        course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
+        assert auditor._calculate_severity([course], 3) == "low"

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from complyos.api.mcp_server import (
+    _get_connector,
     audit_compliance_gaps,
     check_connector_health,
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.connectors.workday import WorkdayConnector
 
 
 class TestMCPTools:
@@ -60,3 +62,16 @@ class TestMCPTools:
         assert result["connector"] == "mock"
         assert result["authenticated"] is True
         assert result["status"] == "healthy"
+
+
+class TestConnectorSelection:
+    def test_get_connector_defaults_to_mock(self):
+        connector = _get_connector()
+        assert connector.name == "mock"
+
+    def test_get_connector_selects_workday_with_env(self, monkeypatch):
+        monkeypatch.setenv("WORKDAY_BASE_URL", "https://wd2-impl-services1.workday.com/test")
+        monkeypatch.setenv("WORKDAY_USERNAME", "test_user")
+        monkeypatch.setenv("WORKDAY_PASSWORD", "test_pass")
+        connector = _get_connector()
+        assert isinstance(connector, WorkdayConnector)
