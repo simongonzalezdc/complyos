@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, create_engine
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -26,6 +27,7 @@ class DBUser(Base):
     employment_status: Mapped[str] = mapped_column(String, default="active")
     manager_id: Mapped[str | None] = mapped_column(String, nullable=True)
     job_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    custom_attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     enrollments: Mapped[list[DBEnrollment]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

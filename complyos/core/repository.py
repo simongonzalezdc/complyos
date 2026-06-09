@@ -42,6 +42,7 @@ class LocalRepository:
             db_user.hire_date = user.hire_date
             db_user.employment_status = user.employment_status.value
             db_user.manager_id = user.manager_id
+            db_user.custom_attributes = user.custom_attributes
             session.commit()
 
     def get_user(self, user_id: str) -> User | None:
@@ -179,6 +180,7 @@ class LocalRepository:
             hire_date=db.hire_date,
             employment_status=db.employment_status,
             manager_id=db.manager_id,
+            custom_attributes=db.custom_attributes or {},
         )
 
     @staticmethod
