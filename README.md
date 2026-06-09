@@ -1,41 +1,153 @@
 # ComplyOS
 
-L&D Compliance & Learning Operations MCP Server
+[![CI](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml/badge.svg)](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-An AI-native compliance auditing tool for enterprise learning management systems.
+**L&D Compliance & Learning Operations MCP Server**
 
-## Features
+An AI-native compliance auditing engine for enterprise learning management systems. Built by someone who spent 12 years in L&D ops and got tired of explaining to regulators why the CSV export didn't match the dashboard.
 
-- **Compliance Gap Auditor** — Find users missing required training with evidence-backed reports
-- **Assignment Rule Validator** — Test workflows before they affect thousands of users
-- **Forensic Tracer** — Trace exactly how any assignment happened
-- **Audit Report Generator** — Regulator-ready reports with proof ledgers
-- **MCP Server** — Query compliance status from Claude Code, Cursor, and other AI agents
-- **Local-First** — All data stays in local SQLite by default
+---
+
+## Why ComplyOS?
+
+Enterprise compliance tracking is a disaster of CSV exports, stale dashboards, and "I thought they completed that" moments. ComplyOS treats compliance as a **first-class engineering problem**:
+
+- **Evidence-backed audits** — Every report includes a SHA256-hashed evidence ledger
+- **Assignment rule validation** — Test targeting rules before they hit 10,000 users
+- **AI-native interface** — Query status via Claude Code, Cursor, or any MCP client
+- **Local-first** — SQLite by default; no SaaS lock-in
+
+---
+
+## Architecture
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   MCP Client    │────▶│  ComplyOS MCP    │────▶│ Compliance      │
+│ (Claude/Cursor) │     │  Server (FastMCP)│     │ Auditor         │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                           ┌──────────────────────────────┼──────────────┐
+                           │                              │              │
+                    ┌──────▼──────┐            ┌──────────▼─────┐  ┌────▼─────┐
+                    │   Mock      │            │   Workday      │  │  SAP/CSOD│
+                    │ Connector   │            │   Connector    │  │ (planned)│
+                    └─────────────┘            └────────────────┘  └──────────┘
+```
+
+---
 
 ## Quick Start
 
+### Installation
+
 ```bash
-pip install complyos
+# Clone the repo
+git clone https://github.com/simongonzalezdc/complyos.git
+cd complyos
+
+# Install with uv (recommended)
+uv sync --all-extras --dev
+
+# Or with pip
+pip install -e ".[dev]"
 ```
 
-Run the MCP server:
+### CLI Usage
+
 ```bash
+# Run a compliance audit
+complyos audit
+
+# Filter by department
+complyos audit --department Engineering
+
+# Generate a structured report
+complyos report --department Engineering --json
+
+# Check a single user's status
+complyos status u1
+
+# Check connector health
+complyos health
+```
+
+### MCP Server
+
+```bash
+# Start the MCP server
 complyos mcp
 ```
 
-Or use the CLI:
+Then configure your MCP client (Claude Code, Cursor, etc.) to point to the server.
+
+---
+
+## Connectors
+
+| Platform | Status | Auth |
+|----------|--------|------|
+| Workday Learning | ✅ Supported | Basic Auth (env vars) |
+| Mock (seed data) | ✅ Built-in | None |
+| SAP SuccessFactors | 🚧 Planned | OAuth 2.0 |
+| Cornerstone OnDemand | 🚧 Planned | API Key |
+
+### Workday Configuration
+
+Set environment variables:
+
 ```bash
-complyos audit
-complyos report --department Engineering
-complyos status --user u123
+export WORKDAY_BASE_URL="https://your-workday-instance.com"
+export WORKDAY_USERNAME="your-user"
+export WORKDAY_PASSWORD="your-pass"
 ```
 
-## Supported LMS Platforms
+---
 
-- Workday Learning
-- SAP SuccessFactors (planned)
-- Cornerstone OnDemand (planned)
+## Development
+
+```bash
+# Run tests
+uv run pytest -q
+
+# Run with coverage
+uv run pytest --cov=complyos --cov-report=term-missing
+
+# Lint
+uv run ruff check complyos tests
+
+# Type check
+uv run mypy complyos --ignore-missing-imports
+```
+
+---
+
+## Domain Model
+
+```python
+ComplianceGap(
+    user=User(id="u1", department="Engineering", ...),
+    missing_courses=[Course(code="SEC-101", mandatory=True)],
+    severity=ComplianceGapSeverity.HIGH,  # critical | high | medium | low
+    days_overdue=14,
+    remediation_action=RemediationAction(...),
+)
+```
+
+Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-ready audit trails.
+
+---
+
+## Roadmap
+
+- [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
+- [ ] Phase 2 — SQLite persistence, assignment rules engine, remediation workflows
+- [ ] Phase 3 — Web UI, Slack/Teams notifications, advanced reporting
+
+---
 
 ## License
 
