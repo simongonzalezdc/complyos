@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 import respx
 from httpx import Response
 
-from complyos.connectors.workday import WorkdayConnector
+from complyos.connectors.workday import (
+    WorkdayConnector,
+    _parse_date,
+    _parse_datetime,
+)
 from complyos.models.domain import EmploymentStatus, EnrollmentStatus
 
 
@@ -108,3 +114,82 @@ class TestWorkdayConnector:
         )
         result = await connector.trigger_reminder("w1", "c1")
         assert result is True
+
+    async def test_authenticate_missing_config(self):
+        empty = WorkdayConnector(base_url="", username="", password="")
+        result = await empty.authenticate()
+        assert result is False
+
+    @respx.mock
+    async def test_authenticate_exception(self, connector: WorkdayConnector):
+        respx.get("https://wd2-impl-services1.workday.com/test/learning/v1/workers").mock(
+            side_effect=ConnectionError("network down")
+        )
+        result = await connector.authenticate()
+        assert result is False
+
+    @respx.mock
+    async def test_get_users_with_filters(self, connector: WorkdayConnector):
+        route = respx.get(
+            "https://wd2-impl-services1.workday.com/test/learning/v1/workers"
+        ).mock(return_value=Response(200, json={"data": []}))
+        await connector.get_users(filters={"department": "Engineering", "region": "US"})
+        assert route.called
+        request = route.calls[0].request
+        assert "department=Engineering" in str(request.url)
+        assert "region=US" in str(request.url)
+
+    @respx.mock
+    async def test_get_courses_mandatory_filter(self, connector: WorkdayConnector):
+        route = respx.get(
+            "https://wd2-impl-services1.workday.com/test/learning/v1/courses"
+        ).mock(return_value=Response(200, json={"data": []}))
+        await connector.get_courses(filters={"mandatory": True})
+        assert route.called
+        request = route.calls[0].request
+        assert "mandatoryOnly=true" in str(request.url)
+
+    @respx.mock
+    async def test_get_enrollments_with_filters(self, connector: WorkdayConnector):
+        route = respx.get(
+            "https://wd2-impl-services1.workday.com/test/learning/v1/enrollments"
+        ).mock(return_value=Response(200, json={"data": []}))
+        await connector.get_enrollments(user_ids=["w1", "w2"], course_ids=["c1"])
+        assert route.called
+        request = route.calls[0].request
+        assert "worker=w1%2Cw2" in str(request.url)
+        assert "course=c1" in str(request.url)
+
+    async def test_lazy_client_initialization(self, connector: WorkdayConnector):
+        assert connector._client is None
+        client = connector.client
+        assert client is not None
+        assert connector._client is client
+
+    async def test_close(self, connector: WorkdayConnector):
+        _ = connector.client  # trigger initialization
+        assert connector._client is not None
+        await connector.close()
+        assert connector._client is None or connector._client.is_closed
+
+
+class TestParseHelpers:
+    def test_parse_date_valid(self):
+        assert _parse_date("2024-06-01") == date(2024, 6, 1)
+
+    def test_parse_date_invalid(self):
+        assert _parse_date("not-a-date") is None
+
+    def test_parse_date_none(self):
+        assert _parse_date(None) is None
+
+    def test_parse_datetime_valid(self):
+        dt = _parse_datetime("2024-06-01T12:00:00Z")
+        assert dt is not None
+        assert dt.year == 2024
+
+    def test_parse_datetime_invalid(self):
+        assert _parse_datetime("not-a-datetime") is None
+
+    def test_parse_datetime_none(self):
+        assert _parse_datetime(None) is None
