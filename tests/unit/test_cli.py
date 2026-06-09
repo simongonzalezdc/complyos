@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from typer.testing import CliRunner
 
@@ -93,3 +94,53 @@ class TestMCPCommand:
         result = runner.invoke(app, ["mcp"])
         assert result.exit_code == 0
         assert called
+
+
+class TestSyncCommand:
+    def test_sync_success(self, monkeypatch, tmp_path):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                from complyos.models.domain import User
+                return [
+                    User(
+                        id="u1",
+                        employee_id="E001",
+                        email="a@example.com",
+                        first_name="A",
+                        last_name="A",
+                        department="Eng",
+                        region="US",
+                        hire_date=date(2023, 1, 1),
+                        employment_status="active",
+                    )
+                ]
+
+            async def get_courses(self):
+                from complyos.models.domain import Course
+                return [Course(id="c1", code="SEC-101", title="Security")]
+
+            async def get_enrollments(self):
+                return []
+
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+        db_path = str(tmp_path / "sync.db")
+        result = runner.invoke(app, ["sync", "--db", db_path])
+        assert result.exit_code == 0
+        assert "Synced 1 users, 1 courses, 0 enrollments" in result.output
+
+    def test_sync_auth_failure(self, monkeypatch):
+        class BadConnector:
+            name = "bad"
+
+            async def authenticate(self):
+                return False
+
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: BadConnector())
+        result = runner.invoke(app, ["sync", "--db", ":memory:"])
+        assert result.exit_code == 1
+        assert "authentication failed" in result.output

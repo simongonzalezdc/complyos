@@ -10,11 +10,13 @@ from rich.console import Console
 from rich.table import Table
 
 from complyos.api.mcp_server import (
+    _get_connector,
     audit_compliance_gaps,
     check_connector_health,
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.core.repository import LocalRepository
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 console = Console()
@@ -143,6 +145,40 @@ def health():
 
     if "error" in result:
         console.print(f"[red]Error:[/red] {result['error']}")
+
+
+@app.command()
+def sync(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+):
+    """Sync LMS data into local SQLite cache."""
+    connector = _get_connector()
+    repo = LocalRepository(db_path)
+
+    async def _sync():
+        healthy = await connector.authenticate()
+        if not healthy:
+            console.print("[red]Connector authentication failed[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[bold]Syncing from {connector.name}...[/bold]")
+
+        users = await connector.get_users()
+        courses = await connector.get_courses()
+        enrollments = await connector.get_enrollments()
+
+        repo.clear_all()
+        repo.sync_users(users)
+        repo.sync_courses(courses)
+        repo.sync_enrollments(enrollments)
+
+        return len(users), len(courses), len(enrollments)
+
+    user_count, course_count, enrollment_count = asyncio.run(_sync())
+    console.print(
+        f"[green]Synced {user_count} users, {course_count} courses, "
+        f"{enrollment_count} enrollments[/green]"
+    )
 
 
 @app.command()
