@@ -94,13 +94,13 @@ class ComplianceAuditor:
                 if missing:
                     days_overdue = None
                     for course in missing:
-                        key = (user.id, course.id)
+                        enroll_key = (user.id, course.id)
                         if (
-                            key in enrollment_map
-                            and enrollment_map[key].due_date
-                            and enrollment_map[key].due_date < date.today()
+                            enroll_key in enrollment_map
+                            and enrollment_map[enroll_key].due_date
+                            and enrollment_map[enroll_key].due_date < date.today()
                         ):
-                            days_overdue = (date.today() - enrollment_map[key].due_date).days
+                            days_overdue = (date.today() - enrollment_map[enroll_key].due_date).days
 
                     severity = self._calculate_severity(missing, days_overdue)
                     gaps.append(

@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from complyos.connectors.base import LMSConnector
-from complyos.models.domain import ComplianceGap, RemediationAction
+from complyos.models.domain import ComplianceGap, Course, RemediationAction, User
+from complyos.notification.sender import NotificationSender
 
 
 class RemediationEngine:
     """Process compliance gaps and apply remediation actions."""
 
-    def __init__(self, connector: LMSConnector) -> None:
+    def __init__(
+        self,
+        connector: LMSConnector,
+        notifier: NotificationSender | None = None,
+    ) -> None:
         self.connector = connector
+        self.notifier = notifier
 
     async def remediate_gaps(
         self,
@@ -35,20 +41,22 @@ class RemediationEngine:
 
         for gap in gaps:
             for course in gap.missing_courses:
-                # Determine actions based on severity
                 if gap.severity == "critical":
                     if auto_remind:
-                        actions.append(await self._send_reminder(gap.user.id, course.id))
+                        actions.append(
+                            await self._send_reminder(gap.user, course, gap)
+                        )
                     if notify_manager and gap.user.manager_id:
                         actions.append(
                             await self._notify_manager(
-                                gap.user.manager_id, gap.user.id, course.id
+                                gap.user.manager_id, gap.user, course, gap
                             )
                         )
                 elif gap.severity == "high" and auto_remind:
-                    actions.append(await self._send_reminder(gap.user.id, course.id))
+                    actions.append(
+                        await self._send_reminder(gap.user, course, gap)
+                    )
                 elif gap.severity == "medium":
-                    # Log for tracking but don't auto-act
                     actions.append(
                         RemediationAction(
                             action_type="log",
@@ -57,44 +65,66 @@ class RemediationEngine:
                             status="logged",
                         )
                     )
-                # low severity: no action
 
                 if auto_enroll:
                     actions.append(await self._auto_enroll(gap.user.id, course.id))
 
         return actions
 
-    async def _send_reminder(self, user_id: str, course_id: str) -> RemediationAction:
+    async def _send_reminder(
+        self, user: User, course: Course, gap: ComplianceGap | None = None
+    ) -> RemediationAction:
         """Send a reminder notification to a user."""
         try:
-            success = await self.connector.trigger_reminder(user_id, course_id)
-            return RemediationAction(
-                action_type="reminder",
-                user_id=user_id,
-                course_id=course_id,
-                status="sent" if success else "failed",
-                error_message=None if success else "Connector returned failure",
-            )
+            success = await self.connector.trigger_reminder(user.id, course.id)
         except Exception as e:
             return RemediationAction(
                 action_type="reminder",
-                user_id=user_id,
-                course_id=course_id,
+                user_id=user.id,
+                course_id=course.id,
                 status="failed",
                 error_message=str(e),
             )
 
-    async def _notify_manager(
-        self, manager_id: str, user_id: str, course_id: str
-    ) -> RemediationAction:
-        """Notify a manager about a critical gap.
+        # Also send email if a notifier is configured
+        if self.notifier and self.notifier.enabled:
+            await self.notifier.send_reminder(user, course, gap)
 
-        This is a placeholder — real implementation would use email/Slack.
-        """
+        return RemediationAction(
+            action_type="reminder",
+            user_id=user.id,
+            course_id=course.id,
+            status="sent" if success else "failed",
+            error_message=None if success else "Connector returned failure",
+        )
+
+    async def _notify_manager(
+        self,
+        manager_id: str,
+        user: User,
+        course: Course,
+        gap: ComplianceGap | None = None,
+    ) -> RemediationAction:
+        """Notify a manager about a critical gap."""
+        if self.notifier and self.notifier.enabled:
+            # We don't have the manager's email in the gap model,
+            # so we approximate it from the connector or use a placeholder.
+            manager_email = f"{manager_id}@example.com"
+            result = await self.notifier.send_manager_notification(
+                manager_email, user, course, gap
+            )
+            return RemediationAction(
+                action_type="notify_manager",
+                user_id=user.id,
+                course_id=course.id,
+                status="sent" if result.get("sent") else "failed",
+                error_message=result.get("error"),
+            )
+
         return RemediationAction(
             action_type="notify_manager",
-            user_id=user_id,
-            course_id=course_id,
+            user_id=user.id,
+            course_id=course.id,
             status="sent",
         )
 

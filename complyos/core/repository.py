@@ -169,6 +169,8 @@ class LocalRepository:
     # ------------------------------------------------------------------
     @staticmethod
     def _to_user(db: DBUser) -> User:
+        from complyos.models.domain import EmploymentStatus
+
         return User(
             id=db.id,
             employee_id=db.employee_id,
@@ -176,9 +178,9 @@ class LocalRepository:
             first_name=db.first_name,
             last_name=db.last_name,
             department=db.department,
-            region=db.region or None,
+            region=db.region or "",
             hire_date=db.hire_date,
-            employment_status=db.employment_status,
+            employment_status=EmploymentStatus(db.employment_status),
             manager_id=db.manager_id,
             custom_attributes=db.custom_attributes or {},
         )
@@ -197,11 +199,13 @@ class LocalRepository:
 
     @staticmethod
     def _to_enrollment(db: DBEnrollment) -> Enrollment:
+        from complyos.models.domain import EnrollmentStatus
+
         return Enrollment(
             id=db.id,
             user_id=db.user_id,
             course_id=db.course_id,
-            status=db.status,
+            status=EnrollmentStatus(db.status),
             assigned_date=db.assigned_date,
             due_date=db.due_date,
             completed_date=db.completed_date,

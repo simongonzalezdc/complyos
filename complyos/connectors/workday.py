@@ -29,9 +29,9 @@ class WorkdayConnector(LMSConnector):
         username: str | None = None,
         password: str | None = None,
     ):
-        self.base_url = (base_url or os.getenv("WORKDAY_BASE_URL", "")).rstrip("/")
-        self.username = username or os.getenv("WORKDAY_USERNAME", "")
-        self.password = password or os.getenv("WORKDAY_PASSWORD", "")
+        self.base_url = (base_url or os.getenv("WORKDAY_BASE_URL") or "").rstrip("/")
+        self.username = username or os.getenv("WORKDAY_USERNAME") or ""
+        self.password = password or os.getenv("WORKDAY_PASSWORD") or ""
         self._client: httpx.AsyncClient | None = None
 
     @property

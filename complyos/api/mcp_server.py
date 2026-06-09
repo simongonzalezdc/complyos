@@ -16,6 +16,7 @@ from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
+from complyos.notification.sender import NotificationSender
 
 mcp = FastMCP("complyos")
 
@@ -28,6 +29,25 @@ def _get_connector() -> LMSConnector:
     if os.getenv("WORKDAY_BASE_URL"):
         return WorkdayConnector()
     return MockConnector()
+
+
+def _get_notifier() -> NotificationSender | None:
+    """Build a NotificationSender from environment or return None."""
+    host = os.getenv("COMPLYOS_SMTP_HOST")
+    port = int(os.getenv("COMPLYOS_SMTP_PORT", "587"))
+    username = os.getenv("COMPLYOS_SMTP_USERNAME")
+    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
+    from_addr = os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com")
+
+    if host and username and password:
+        return NotificationSender(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            from_address=from_addr,
+        )
+    return None
 
 
 def _get_auditor() -> ComplianceAuditor:
@@ -224,7 +244,8 @@ async def remediate_compliance_gaps(
     gaps, ledger = await auditor.audit_gaps(department=department, region=region)
 
     connector = _get_connector()
-    engine = RemediationEngine(connector)
+    notifier = _get_notifier()
+    engine = RemediationEngine(connector, notifier=notifier)
     actions = await engine.remediate_gaps(
         gaps,
         auto_remind=auto_remind,
@@ -273,6 +294,28 @@ async def export_audit_report_html(
         "total_users": report.total_users_audited,
         "evidence_hash": report.evidence_hash,
     }
+
+
+@mcp.tool()
+async def send_notification(
+    to_address: str,
+    subject: str,
+    body: str,
+) -> dict[str, Any]:
+    """Send a custom email notification.
+
+    Args:
+        to_address: Recipient email address
+        subject: Email subject line
+        body: Plain-text email body
+
+    Returns:
+        Dict with 'sent' boolean and optional 'error' string.
+    """
+    notifier = _get_notifier()
+    if notifier is None:
+        return {"sent": False, "error": "SMTP not configured"}
+    return await notifier.send_email(to_address, subject, body)
 
 
 def main() -> None:

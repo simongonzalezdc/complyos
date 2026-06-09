@@ -21,9 +21,31 @@ from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
+from complyos.notification.sender import NotificationSender
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 console = Console()
+
+
+def _get_notifier() -> NotificationSender | None:
+    """Build a NotificationSender from environment or return None."""
+    import os
+
+    host = os.getenv("COMPLYOS_SMTP_HOST")
+    port = int(os.getenv("COMPLYOS_SMTP_PORT", "587"))
+    username = os.getenv("COMPLYOS_SMTP_USERNAME")
+    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
+    from_addr = os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com")
+
+    if host and username and password:
+        return NotificationSender(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            from_address=from_addr,
+        )
+    return None
 
 
 @app.command()
@@ -266,7 +288,8 @@ def remediate(
         gaps, ledger = await auditor.audit_gaps(department=department, region=region)
 
         connector = _get_connector()
-        engine = RemediationEngine(connector)
+        notifier = _get_notifier()
+        engine = RemediationEngine(connector, notifier=notifier)
         actions = await engine.remediate_gaps(
             gaps,
             auto_remind=auto_remind,
@@ -314,6 +337,39 @@ def export(
     report = asyncio.run(_export())
     path = export_html(report, output)
     console.print(f"[green]Report exported to {path}[/green]")
+
+
+@app.command()
+def notify_test(
+    to: str = typer.Argument(..., help="Recipient email address"),
+):
+    """Send a test notification to verify SMTP configuration."""
+    notifier = _get_notifier()
+    if notifier is None:
+        console.print(
+            "[yellow]SMTP not configured. Set COMPLYOS_SMTP_HOST, "
+            "COMPLYOS_SMTP_USERNAME, and COMPLYOS_SMTP_PASSWORD.[/yellow]"
+        )
+        raise typer.Exit(1)
+
+    async def _send():
+        return await notifier.send_email(
+            to_address=to,
+            subject="ComplyOS Test Notification",
+            body=(
+                "Hi there,\n\n"
+                "This is a test message from ComplyOS.\n"
+                "Your SMTP configuration is working correctly.\n\n"
+                "— ComplyOS"
+            ),
+        )
+
+    result = asyncio.run(_send())
+    if result["sent"]:
+        console.print(f"[green]Test email sent to {to}[/green]")
+    else:
+        console.print(f"[red]Failed to send email: {result.get('error')}[/red]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
