@@ -95,6 +95,15 @@ class AuditReport(BaseModel):
     details: list[ComplianceGap] = Field(default_factory=list)
 
 
+class RemediationAction(BaseModel):
+    action_type: str  # reminder, enroll, escalate, notify_manager
+    user_id: str
+    course_id: str
+    triggered_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+    status: str = "pending"  # pending, sent, failed
+    error_message: str | None = None
+
+
 class EvidenceLedgerEntry(BaseModel):
     timestamp: datetime
     query_type: str
