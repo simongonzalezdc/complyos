@@ -1,0 +1,27 @@
+# ComplyOS — LLM Context
+
+ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compliance training gaps across enterprise LMS platforms.
+
+## Architecture
+- Python/FastAPI backend with FastMCP for AI agent integration
+- SQLite local-first data store
+- Connector pattern for LMS platforms (Workday, SAP SuccessFactors, Cornerstone)
+- Evidence ledger for audit trails
+- CLI and MCP server interfaces
+
+## Key Files
+- `complyos/core/auditor.py` — Gap auditing engine
+- `complyos/connectors/` — LMS connectors
+- `complyos/api/mcp_server.py` — MCP tool definitions
+- `complyos/cli.py` — CLI entry point
+
+## MCP Tools
+- `audit_compliance_gaps(department?, region?)` — Find missing training
+- `get_user_compliance_status(user_id)` — Single user status
+- `generate_audit_report(department?, region?)` — Structured report
+- `check_connector_health()` — LMS connection status
+
+## Running Tests
+```bash
+pytest tests/ -v --cov=complyos --cov-branch
+```
