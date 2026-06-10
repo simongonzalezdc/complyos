@@ -327,6 +327,43 @@ async def export_audit_report_html(
 
 
 @mcp.tool()
+async def export_compliance_dashboard(
+    output_path: str = "dashboard.html",
+    department: str | None = None,
+    region: str | None = None,
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Generate a self-contained HTML compliance dashboard.
+
+    Combines the current audit with snapshot history into a static file:
+    summary cards, severity breakdown, department bars, gap-count trend,
+    and a filterable gaps table. Read-only — does not record a snapshot.
+
+    Args:
+        output_path: Where to write the HTML file
+        department: Filter by department
+        region: Filter by region
+        db_path: SQLite database holding audit snapshot history
+
+    Returns:
+        Path to the generated dashboard and summary stats.
+    """
+    from complyos.core.dashboard import generate_dashboard
+
+    auditor = _get_auditor()
+    report = await auditor.generate_report(department=department, region=region)
+    history = LocalRepository(db_path).list_audit_snapshots(scope=report.scope)
+    path = generate_dashboard(report, history=history, output_path=output_path)
+    return {
+        "dashboard_path": path,
+        "scope": report.scope,
+        "gaps_found": report.gaps_found,
+        "history_points": len(history),
+        "evidence_hash": report.evidence_hash,
+    }
+
+
+@mcp.tool()
 async def send_notification(
     to_address: str,
     subject: str,

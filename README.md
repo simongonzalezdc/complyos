@@ -74,6 +74,9 @@ complyos status u1
 # What changed since the last audit? (new gaps, resolved gaps, trend)
 complyos digest
 
+# Generate a self-contained HTML dashboard (summary, trend, filterable table)
+complyos dashboard --open
+
 # Sync LMS data to local SQLite
 complyos sync
 
@@ -174,7 +177,8 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
-- [ ] Phase 3 — Remediation workflows, Web UI, Slack/Teams notifications
+- [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
+- [ ] Phase 4 — PostgreSQL backend, Slack/Teams notifications, scheduled runs
 
 ---
 

@@ -406,6 +406,34 @@ def export(
 
 
 @app.command()
+def dashboard(
+    output: str = typer.Argument("dashboard.html", help="Output HTML file path"),
+    department: str | None = typer.Option(None, "--department", "-d"),
+    region: str | None = typer.Option(None, "--region", "-r"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    open_browser: bool = typer.Option(False, "--open", help="Open in default browser"),
+):
+    """Generate a self-contained HTML compliance dashboard."""
+    from complyos.api.mcp_server import _get_auditor
+    from complyos.core.dashboard import generate_dashboard
+
+    async def _build():
+        auditor = _get_auditor()
+        return await auditor.generate_report(department=department, region=region)
+
+    report = asyncio.run(_build())
+    history = LocalRepository(db_path).list_audit_snapshots(scope=report.scope)
+    path = generate_dashboard(report, history=history, output_path=output)
+    console.print(f"[green]Dashboard written to {path}[/green]")
+
+    if open_browser:
+        import os
+        import webbrowser
+
+        webbrowser.open(f"file://{os.path.abspath(path)}")
+
+
+@app.command()
 def notify_test(
     to: str = typer.Argument(..., help="Recipient email address"),
 ):
