@@ -71,6 +71,9 @@ complyos report --department Engineering --json
 # Check a single user's status
 complyos status u1
 
+# What changed since the last audit? (new gaps, resolved gaps, trend)
+complyos digest
+
 # Sync LMS data to local SQLite
 complyos sync
 

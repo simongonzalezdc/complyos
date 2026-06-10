@@ -151,6 +151,33 @@ async def generate_audit_report(
 
 
 @mcp.tool()
+async def generate_compliance_digest(
+    department: str | None = None,
+    region: str | None = None,
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Generate a what-changed compliance digest vs the previous audit run.
+
+    Runs a fresh audit, diffs it against the most recent snapshot for the
+    same scope, and records the run so the next digest has a baseline.
+
+    Args:
+        department: Filter by department
+        region: Filter by region
+        db_path: SQLite database holding audit snapshot history
+
+    Returns:
+        New gaps, resolved gaps, trend (baseline/improving/worsening/flat),
+        severity breakdown, and evidence hash.
+    """
+    from complyos.core.digest import DigestEngine
+
+    engine = DigestEngine(_get_auditor(), LocalRepository(db_path))
+    digest = await engine.generate(department=department, region=region)
+    return digest.model_dump(mode="json")
+
+
+@mcp.tool()
 async def check_connector_health() -> dict[str, Any]:
     """Check the health of the LMS connector.
 
