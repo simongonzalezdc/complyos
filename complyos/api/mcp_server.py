@@ -8,6 +8,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
@@ -26,6 +27,8 @@ _auditor: ComplianceAuditor | None = None
 
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector based on environment."""
+    if os.getenv("COMPLYOS_CSV_DIR"):
+        return CSVConnector()
     if os.getenv("WORKDAY_BASE_URL"):
         return WorkdayConnector()
     return MockConnector()
@@ -145,6 +148,33 @@ async def generate_audit_report(
         "top_missing_courses": report.top_missing_courses,
         "evidence_hash": report.evidence_hash,
     }
+
+
+@mcp.tool()
+async def generate_compliance_digest(
+    department: str | None = None,
+    region: str | None = None,
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Generate a what-changed compliance digest vs the previous audit run.
+
+    Runs a fresh audit, diffs it against the most recent snapshot for the
+    same scope, and records the run so the next digest has a baseline.
+
+    Args:
+        department: Filter by department
+        region: Filter by region
+        db_path: SQLite database holding audit snapshot history
+
+    Returns:
+        New gaps, resolved gaps, trend (baseline/improving/worsening/flat),
+        severity breakdown, and evidence hash.
+    """
+    from complyos.core.digest import DigestEngine
+
+    engine = DigestEngine(_get_auditor(), LocalRepository(db_path))
+    digest = await engine.generate(department=department, region=region)
+    return digest.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -292,6 +322,43 @@ async def export_audit_report_html(
         "output_path": path,
         "gaps_found": report.gaps_found,
         "total_users": report.total_users_audited,
+        "evidence_hash": report.evidence_hash,
+    }
+
+
+@mcp.tool()
+async def export_compliance_dashboard(
+    output_path: str = "dashboard.html",
+    department: str | None = None,
+    region: str | None = None,
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Generate a self-contained HTML compliance dashboard.
+
+    Combines the current audit with snapshot history into a static file:
+    summary cards, severity breakdown, department bars, gap-count trend,
+    and a filterable gaps table. Read-only — does not record a snapshot.
+
+    Args:
+        output_path: Where to write the HTML file
+        department: Filter by department
+        region: Filter by region
+        db_path: SQLite database holding audit snapshot history
+
+    Returns:
+        Path to the generated dashboard and summary stats.
+    """
+    from complyos.core.dashboard import generate_dashboard
+
+    auditor = _get_auditor()
+    report = await auditor.generate_report(department=department, region=region)
+    history = LocalRepository(db_path).list_audit_snapshots(scope=report.scope)
+    path = generate_dashboard(report, history=history, output_path=output_path)
+    return {
+        "dashboard_path": path,
+        "scope": report.scope,
+        "gaps_found": report.gaps_found,
+        "history_points": len(history),
         "evidence_hash": report.evidence_hash,
     }
 

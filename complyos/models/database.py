@@ -67,6 +67,20 @@ class DBEnrollment(Base):
     course: Mapped[DBCourse] = relationship(back_populates="enrollments")
 
 
+class DBAuditSnapshot(Base):
+    """Point-in-time record of an audit run, used for digest diffing."""
+
+    __tablename__ = "audit_snapshots"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    gaps_found: Mapped[int] = mapped_column(Integer, nullable=False)
+    gaps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    gaps_by_severity: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    evidence_hash: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class DBEvidenceLedger(Base):
     __tablename__ = "evidence_ledger"
 

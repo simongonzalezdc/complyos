@@ -1,0 +1,4 @@
+id,user_id,course_id,status,assigned_date,due_date,completed_date,completion_percentage
+e1,u1,c1,completed,2025-03-01,2025-04-01,2025-03-20,100
+e2,u2,c1,in_progress,2025-05-01,2025-07-01,,45
+e3,u4,c1,not_started,2025-04-25,2025-05-30,,0

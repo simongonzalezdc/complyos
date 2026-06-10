@@ -1,0 +1,4 @@
+id,code,title,mandatory,category
+c1,RESPECT-101,Respectful Environment,true,Compliance
+c2,SECURITY-101,Information Security Basics,true,Compliance
+c3,LEAD-201,Leadership Fundamentals,false,Development

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from complyos.models.database import (
+    DBAuditSnapshot,
     DBCourse,
     DBEnrollment,
     DBEvidenceLedger,
@@ -155,6 +160,67 @@ class LocalRepository:
         for enrollment in enrollments:
             self.save_enrollment(enrollment)
         return len(enrollments)
+
+    # ------------------------------------------------------------------
+    # Audit snapshots
+    # ------------------------------------------------------------------
+    def save_audit_snapshot(
+        self,
+        *,
+        scope: str,
+        generated_at: datetime,
+        gaps_found: int,
+        gaps: list[dict[str, Any]],
+        gaps_by_severity: dict[str, int],
+        evidence_hash: str,
+    ) -> str:
+        with self._session() as session:
+            snapshot = DBAuditSnapshot(
+                id=str(uuid.uuid4()),
+                generated_at=generated_at,
+                scope=scope,
+                gaps_found=gaps_found,
+                gaps=gaps,
+                gaps_by_severity=gaps_by_severity,
+                evidence_hash=evidence_hash,
+            )
+            session.add(snapshot)
+            session.commit()
+            return snapshot.id
+
+    def get_latest_audit_snapshot(self, scope: str) -> dict[str, Any] | None:
+        with self._session() as session:
+            snapshot = (
+                session.query(DBAuditSnapshot)
+                .where(DBAuditSnapshot.scope == scope)
+                .order_by(DBAuditSnapshot.generated_at.desc())
+                .first()
+            )
+            if snapshot is None:
+                return None
+            return self._to_snapshot_dict(snapshot)
+
+    def list_audit_snapshots(
+        self, scope: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBAuditSnapshot)
+            if scope:
+                query = query.where(DBAuditSnapshot.scope == scope)
+            query = query.order_by(DBAuditSnapshot.generated_at.desc()).limit(limit)
+            return [self._to_snapshot_dict(s) for s in query.all()]
+
+    @staticmethod
+    def _to_snapshot_dict(snapshot: DBAuditSnapshot) -> dict[str, Any]:
+        return {
+            "id": snapshot.id,
+            "generated_at": snapshot.generated_at,
+            "scope": snapshot.scope,
+            "gaps_found": snapshot.gaps_found,
+            "gaps": snapshot.gaps or [],
+            "gaps_by_severity": snapshot.gaps_by_severity or {},
+            "evidence_hash": snapshot.evidence_hash,
+        }
 
     def clear_all(self) -> None:
         with self._session() as session:

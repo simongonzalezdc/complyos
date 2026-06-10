@@ -71,6 +71,12 @@ complyos report --department Engineering --json
 # Check a single user's status
 complyos status u1
 
+# What changed since the last audit? (new gaps, resolved gaps, trend)
+complyos digest
+
+# Generate a self-contained HTML dashboard (summary, trend, filterable table)
+complyos dashboard --open
+
 # Sync LMS data to local SQLite
 complyos sync
 
@@ -99,10 +105,27 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 
 | Platform | Status | Auth |
 |----------|--------|------|
+| CSV export (any LMS) | ✅ Supported | None |
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
 | Mock (seed data) | ✅ Built-in | None |
 | SAP SuccessFactors | 🚧 Planned | OAuth 2.0 |
 | Cornerstone OnDemand | 🚧 Planned | API Key |
+
+### CSV Configuration
+
+No API access needed — point ComplyOS at a directory containing your LMS
+export as `users.csv`, `courses.csv`, and `enrollments.csv`:
+
+```bash
+export COMPLYOS_CSV_DIR=./examples/csv   # try it with the bundled sample data
+complyos audit
+```
+
+Common column-name variants are recognized automatically (`User ID`,
+`Email Address`, `Learner ID`, `Completion Status`, `Deadline`, ...), so
+exports from Canvas, Cornerstone, Moodle, Docebo, and similar systems work
+without reformatting. The CSV source is read-only: audits and reports work
+fully, but reminder remediation requires an API-backed connector.
 
 ### Workday Configuration
 
@@ -154,7 +177,8 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
-- [ ] Phase 3 — Remediation workflows, Web UI, Slack/Teams notifications
+- [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
+- [ ] Phase 4 — PostgreSQL backend, Slack/Teams notifications, scheduled runs
 
 ---
 
