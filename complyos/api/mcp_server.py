@@ -8,6 +8,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
@@ -26,6 +27,8 @@ _auditor: ComplianceAuditor | None = None
 
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector based on environment."""
+    if os.getenv("COMPLYOS_CSV_DIR"):
+        return CSVConnector()
     if os.getenv("WORKDAY_BASE_URL"):
         return WorkdayConnector()
     return MockConnector()

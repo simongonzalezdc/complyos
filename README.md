@@ -99,10 +99,27 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 
 | Platform | Status | Auth |
 |----------|--------|------|
+| CSV export (any LMS) | ✅ Supported | None |
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
 | Mock (seed data) | ✅ Built-in | None |
 | SAP SuccessFactors | 🚧 Planned | OAuth 2.0 |
 | Cornerstone OnDemand | 🚧 Planned | API Key |
+
+### CSV Configuration
+
+No API access needed — point ComplyOS at a directory containing your LMS
+export as `users.csv`, `courses.csv`, and `enrollments.csv`:
+
+```bash
+export COMPLYOS_CSV_DIR=./examples/csv   # try it with the bundled sample data
+complyos audit
+```
+
+Common column-name variants are recognized automatically (`User ID`,
+`Email Address`, `Learner ID`, `Completion Status`, `Deadline`, ...), so
+exports from Canvas, Cornerstone, Moodle, Docebo, and similar systems work
+without reformatting. The CSV source is read-only: audits and reports work
+fully, but reminder remediation requires an API-backed connector.
 
 ### Workday Configuration
 
