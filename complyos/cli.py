@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -237,6 +238,26 @@ def health():
 
     if "error" in result:
         console.print(f"[red]Error:[/red] {result['error']}")
+
+
+@app.command()
+def init(
+    profile: str = typer.Option("workforce", "--profile", help="Profile: workforce or campus"),
+    output: str = typer.Option("complyos.yaml", "--output", help="Config file to write"),
+):
+    """Initialize a starter ComplyOS config file."""
+    from complyos.profiles import get_profile, render_profile_config
+
+    try:
+        definition = get_profile(profile)
+        config = render_profile_config(profile)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    path = Path(output)
+    path.write_text(config)
+    console.print(f"[green]Initialized {definition.display_name} config at {path}[/green]")
 
 
 @app.command()
