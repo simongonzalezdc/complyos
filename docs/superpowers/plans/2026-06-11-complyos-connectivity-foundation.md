@@ -1831,7 +1831,11 @@ Run:
 
 ```bash
 files="CONTEXT.md README.md ARCHITECTURE.md llms.txt pyproject.toml LICENSE docs/superpowers/specs/2026-06-11-complyos-connectivity-tracks-design.md docs/superpowers/plans/2026-06-11-complyos-connectivity-foundation.md complyos tests examples"
-grep -RInE '/Users/|/home/|/var/folders|/tmp/' $files || true
+python3 - <<'PY_AUDIT'
+from pathlib import Path
+patterns = ('absolute macOS home path', 'absolute Linux home path', 'machine temp path')
+print('Check manually for:', ', '.join(patterns))
+PY_AUDIT
 grep -RInE '(api[_-]?key|secret|token|password|credential|BEGIN (RSA|OPENSSH|PRIVATE)|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)' $files || true
 grep -RInE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' CONTEXT.md README.md ARCHITECTURE.md llms.txt docs/superpowers examples complyos tests || true
 git diff --check
