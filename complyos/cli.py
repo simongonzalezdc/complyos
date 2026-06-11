@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import typer
+import yaml
 from rich.console import Console
 from rich.table import Table
 
@@ -24,6 +26,7 @@ from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender
+from complyos.notification.webhooks import WebhookNotifier
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 console = Console()
@@ -48,6 +51,15 @@ def _get_notifier() -> NotificationSender | None:
             from_address=from_addr,
         )
     return None
+
+
+def _get_webhook_notifier() -> WebhookNotifier | None:
+    """Build a webhook notifier from environment or return None."""
+    slack_url = os.getenv("COMPLYOS_SLACK_WEBHOOK_URL")
+    teams_url = os.getenv("COMPLYOS_TEAMS_WEBHOOK_URL")
+    if not slack_url and not teams_url:
+        return None
+    return WebhookNotifier(slack_webhook_url=slack_url, teams_webhook_url=teams_url)
 
 
 @app.command()
@@ -347,6 +359,99 @@ def sync(
     )
 
 
+@app.command("run-schedule")
+def run_schedule(
+    config_path: str = typer.Option(
+        "complyos.yaml",
+        "--config",
+        help="Config file with schedule.jobs",
+    ),
+    db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
+    force: bool = typer.Option(False, "--force", help="Run jobs even when last_run_at is not due"),
+):
+    """Run due scheduled audit jobs once."""
+    from complyos.api.mcp_server import _get_auditor
+    from complyos.core.scheduler import load_scheduled_jobs, run_scheduled_audit_once
+
+    path = Path(config_path)
+    if not path.exists():
+        console.print(f"[red]Config not found: {path}[/red]")
+        raise typer.Exit(1)
+
+    config_data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    jobs = load_scheduled_jobs(config_data)
+    if not jobs:
+        console.print("[yellow]No scheduled audit jobs configured[/yellow]")
+        return
+
+    repo = LocalRepository(db_path or ComplyOSConfig.load(config_path).database_path())
+    auditor = _get_auditor()
+    notifier = _get_webhook_notifier()
+
+    async def _run():
+        results = []
+        for job in jobs:
+            if force or job.is_due():
+                results.append(
+                    await run_scheduled_audit_once(
+                        job,
+                        auditor=auditor,
+                        repository=repo,
+                        notifier=notifier,
+                    )
+                )
+        return results
+
+    results = asyncio.run(_run())
+    if not results:
+        console.print("[yellow]No scheduled audit jobs were due[/yellow]")
+        return
+
+    table = Table(title="Scheduled Audit Runs")
+    table.add_column("Job")
+    table.add_column("Scope")
+    table.add_column("Gaps")
+    table.add_column("Snapshot")
+    for result in results:
+        table.add_row(
+            result.job_name,
+            result.scope,
+            str(result.gaps_found),
+            result.snapshot_id,
+        )
+    console.print(table)
+
+
+@app.command("release-check")
+def release_check(
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Check whether the repository has operator-release artifacts."""
+    from complyos.core.release import build_release_checklist
+
+    checks = build_release_checklist(Path.cwd())
+    ready = all(item["ok"] for item in checks)
+    if json_output:
+        console.print(json.dumps({"ready": ready, "checks": checks}, indent=2))
+        if not ready:
+            raise typer.Exit(1)
+        return
+
+    table = Table(title="Release Readiness")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Message")
+    for item in checks:
+        table.add_row(
+            item["label"],
+            "[green]ok[/green]" if item["ok"] else "[red]missing[/red]",
+            item["message"],
+        )
+    console.print(table)
+    if not ready:
+        raise typer.Exit(1)
+
+
 @app.command()
 def mcp():
     """Run the MCP server."""
@@ -505,6 +610,29 @@ def dashboard(
         import webbrowser
 
         webbrowser.open(f"file://{os.path.abspath(path)}")
+
+
+@app.command("serve-dashboard")
+def serve_dashboard(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print bind address without starting server",
+    ),
+):
+    """Serve the live compliance dashboard API."""
+    if dry_run:
+        console.print(f"[green]Dashboard dry run:[/green] would serve on {host}:{port}")
+        return
+
+    import uvicorn
+
+    from complyos.api.mcp_server import _get_auditor
+    from complyos.web.dashboard import create_dashboard_app
+
+    uvicorn.run(create_dashboard_app(auditor=_get_auditor()), host=host, port=port)
 
 
 @app.command()

@@ -40,6 +40,13 @@ def test_csv_is_supported_for_both_tracks():
     assert csv.supports_learning_records is True
 
 
+def test_phase_five_workforce_connectors_are_supported():
+    items = _by_name(profile="workforce")
+
+    assert items["cornerstone"].status == "supported"
+    assert items["successfactors"].status == "supported"
+
+
 def test_matrix_rejects_unknown_profile():
     import pytest
 

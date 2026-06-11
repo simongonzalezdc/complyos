@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 from typing import Any
 
@@ -114,7 +115,19 @@ class DBEvidenceLedger(Base):
     output_summary: Mapped[str] = mapped_column(String, nullable=False)
 
 
+def resolve_database_url(database: str | None = None) -> str:
+    """Resolve a SQLAlchemy database URL from env, URL, or SQLite path."""
+    env_url = os.getenv("COMPLYOS_DATABASE_URL")
+    if env_url:
+        return env_url
+
+    value = database or "complyos.db"
+    if "://" in value:
+        return value
+    return f"sqlite:///{value}"
+
+
 def init_db(db_path: str = "complyos.db") -> sessionmaker:
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(resolve_database_url(db_path))
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)

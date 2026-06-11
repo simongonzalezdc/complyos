@@ -23,8 +23,8 @@ from complyos.models.domain import Course, Enrollment, LearningRecord, LearningR
 class LocalRepository:
     """CRUD operations backed by local SQLite via SQLAlchemy."""
 
-    def __init__(self, db_path: str = "complyos.db") -> None:
-        self._sessionmaker = init_db(db_path)
+    def __init__(self, db_path: str = "complyos.db", database_url: str | None = None) -> None:
+        self._sessionmaker = init_db(database_url or db_path)
 
     def _session(self) -> Session:
         return self._sessionmaker()

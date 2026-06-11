@@ -33,8 +33,8 @@ Enterprise compliance tracking is a disaster of CSV exports, stale dashboards, a
                            ┌──────────────────────────────┼──────────────┐
                            │                              │              │
                     ┌──────▼──────┐            ┌──────────▼─────┐  ┌────▼─────┐
-                    │ CSV / Mock  │            │   Workday      │  │  SAP/CSOD│
-                    │ Connectors  │            │   Connector    │  │ (future) │
+                    │ CSV / Mock  │            │   Workday      │  │ SAP/CSOD │
+                    │ Connectors  │            │   Connector    │  │Connectors│
                     └─────────────┘            └────────────────┘  └──────────┘
 ```
 
@@ -85,6 +85,15 @@ complyos digest
 # Generate a self-contained HTML dashboard (summary, trend, filterable table)
 complyos dashboard --open
 
+# Serve the live dashboard API locally
+complyos serve-dashboard --host 127.0.0.1 --port 8000
+
+# Run configured scheduled audits once from cron/systemd/Actions
+complyos run-schedule --config complyos.yaml
+
+# Check release-readiness artifacts
+complyos release-check --json
+
 # Export a self-contained HTML audit report
 complyos export --output report.html
 
@@ -121,9 +130,9 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 |----------|--------|------|
 | CSV export (any LMS) | ✅ Supported | None |
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
+| SAP SuccessFactors | ✅ Supported | OAuth 2.0 |
+| Cornerstone OnDemand | ✅ Supported | OAuth 2.0 |
 | Mock (seed data) | ✅ Built-in | None |
-| SAP SuccessFactors | Future scale-out | OAuth 2.0 |
-| Cornerstone OnDemand | Future scale-out | OAuth 2.0 |
 
 ### CSV Configuration
 
@@ -212,8 +221,8 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
-- [ ] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
-- [ ] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
+- [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 
 ---
 

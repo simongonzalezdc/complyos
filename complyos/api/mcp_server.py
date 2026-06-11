@@ -9,8 +9,10 @@ from fastmcp import FastMCP
 
 from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.cornerstone import CornerstoneConnector
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
+from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.auditor import ComplianceAuditor
 from complyos.core.remediation import RemediationEngine
@@ -36,6 +38,28 @@ def _workday_from_config(config: ComplyOSConfig) -> WorkdayConnector:
     )
 
 
+def _successfactors_from_config(config: ComplyOSConfig) -> SuccessFactorsConnector:
+    connector_config = config.connector.get("successfactors", {})
+    return SuccessFactorsConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        company_id=resolve_env_placeholder(connector_config.get("company_id")),
+        user_id=resolve_env_placeholder(connector_config.get("user_id")),
+        token_url=resolve_env_placeholder(connector_config.get("token_url")),
+    )
+
+
+def _cornerstone_from_config(config: ComplyOSConfig) -> CornerstoneConnector:
+    connector_config = config.connector.get("cornerstone", {})
+    return CornerstoneConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        token_url=resolve_env_placeholder(connector_config.get("token_url")),
+    )
+
+
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector from env first, then config."""
     if os.getenv("COMPLYOS_CSV_DIR"):
@@ -50,6 +74,10 @@ def _get_connector() -> LMSConnector:
         return CSVConnector(connector_config.get("csv_dir"))
     if connector_type == "workday":
         return _workday_from_config(config)
+    if connector_type == "successfactors":
+        return _successfactors_from_config(config)
+    if connector_type == "cornerstone":
+        return _cornerstone_from_config(config)
     return MockConnector()
 
 
