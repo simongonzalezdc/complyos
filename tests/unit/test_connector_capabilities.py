@@ -1,0 +1,40 @@
+"""Tests for connector capability metadata."""
+
+from __future__ import annotations
+
+from complyos.connectors.capabilities import list_connector_capabilities
+
+
+def _by_name(profile: str | None = None):
+    return {item.name: item for item in list_connector_capabilities(profile=profile)}
+
+
+def test_matrix_contains_key_workforce_connectors():
+    names = set(_by_name(profile="workforce"))
+
+    assert {"csv", "workday", "cornerstone", "successfactors", "docebo", "absorb"} <= names
+
+
+def test_matrix_contains_key_campus_connectors():
+    names = set(_by_name(profile="campus"))
+
+    assert {"csv", "canvas", "brightspace", "blackboard", "moodle"} <= names
+
+
+def test_canvas_capabilities_include_learning_records_and_due_dates():
+    canvas = _by_name(profile="campus")["canvas"]
+
+    assert canvas.profile == "campus"
+    assert canvas.supports_learning_records is True
+    assert canvas.supports_due_dates is True
+    assert canvas.status == "planned"
+
+
+def test_csv_is_supported_for_both_tracks():
+    csv = _by_name()["csv"]
+
+    assert csv.profile == "both"
+    assert csv.status == "supported"
+    assert csv.supports_users is True
+    assert csv.supports_courses is True
+    assert csv.supports_learning_records is True

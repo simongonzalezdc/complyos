@@ -269,6 +269,42 @@ def init(
 
 
 @app.command()
+def connectors(
+    profile: str = typer.Option("all", "--profile", help="Filter: all, workforce, or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Show the connector capability matrix."""
+    from complyos.connectors.capabilities import list_connector_capabilities
+
+    items = list_connector_capabilities(profile=profile)
+
+    if json_output:
+        console.print(json.dumps([item.to_dict() for item in items], indent=2))
+        return
+
+    table = Table(title="ComplyOS Connector Matrix")
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Profile")
+    table.add_column("Status")
+    table.add_column("Auth")
+    table.add_column("Records")
+    table.add_column("Due Dates")
+    table.add_column("Expiry")
+
+    for item in items:
+        table.add_row(
+            item.name,
+            item.profile,
+            item.status,
+            item.auth,
+            "yes" if item.supports_learning_records else "no",
+            "yes" if item.supports_due_dates else "no",
+            "yes" if item.supports_expiry else "no",
+        )
+    console.print(table)
+
+
+@app.command()
 def sync(
     db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
 ):
