@@ -114,6 +114,32 @@ class TestConnectorSelection:
         connector = _get_connector()
         assert isinstance(connector, WorkdayConnector)
 
+    def test_get_connector_selects_workday_from_config_with_env_placeholders(
+        self, monkeypatch, tmp_path
+    ):
+        (tmp_path / "complyos.yaml").write_text(
+            "connector:\n"
+            "  type: workday\n"
+            "  workday:\n"
+            "    base_url: ${WD_TEST_BASE_URL}\n"
+            "    username: config_user\n"
+            "    password: ${WD_TEST_PASSWORD}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+        monkeypatch.delenv("WORKDAY_USERNAME", raising=False)
+        monkeypatch.delenv("WORKDAY_PASSWORD", raising=False)
+        monkeypatch.setenv("WD_TEST_BASE_URL", "https://wd.example.test/tenant")
+        monkeypatch.setenv("WD_TEST_PASSWORD", "config_secret")
+
+        connector = _get_connector()
+
+        assert isinstance(connector, WorkdayConnector)
+        assert connector.base_url == "https://wd.example.test/tenant"
+        assert connector.username == "config_user"
+        assert connector.password == "config_secret"
+
 
 class TestRulesMCPTools:
     async def test_validate_assignment_rule(self, monkeypatch, tmp_path):

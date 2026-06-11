@@ -59,7 +59,7 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
         supports_due_dates=True,
         supports_exemptions=False,
         supports_scores=True,
-        supports_expiry=True,
+        supports_expiry=False,
         docs_url="https://community.workday.com/api",
     ),
     ConnectorCapability(

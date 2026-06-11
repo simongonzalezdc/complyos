@@ -51,3 +51,11 @@ def test_matrix_normalizes_profile_whitespace_and_case():
     names = set(_by_name(profile=" Workforce "))
 
     assert "cornerstone" in names
+
+
+def test_workday_supported_but_expiry_not_advertised_until_parsed():
+    workday = _by_name(profile="workforce")["workday"]
+
+    assert workday.status == "supported"
+    # WorkdayConnector does not parse recertification/expiry fields yet.
+    assert workday.supports_expiry is False
