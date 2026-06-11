@@ -9,10 +9,13 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 - Evidence ledger for audit trails
 - CLI and MCP server interfaces
 - HTML audit report and dashboard export
+- `LearningRecord` is the cross-LMS connector contract for transcripts, enrollments, assignments, submissions, completions, exemptions, and recertifications; `Enrollment` remains the current audit-engine compatibility model
 
 ## Key Files
 - `complyos/core/auditor.py` — Gap auditing engine
 - `complyos/connectors/` — LMS connectors
+- `complyos/profiles.py` — Workforce and Campus profile definitions plus starter config rendering
+- `complyos/connectors/capabilities.py` — Connector capability matrix for supported and planned LMS sources
 - `complyos/api/mcp_server.py` — MCP tool definitions
 - `complyos/cli.py` — CLI entry point
 

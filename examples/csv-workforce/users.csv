@@ -1,0 +1,3 @@
+id,employee_id,email,first_name,last_name,department,region,hire_date,employment_status,manager_id,job_title
+u1,E001,alice@example.com,Alice,Nguyen,Engineering,US,2024-01-15,active,m1,Software Engineer
+u2,E002,bob@example.com,Bob,Patel,Finance,US,2023-06-01,active,m2,Financial Analyst

@@ -44,6 +44,7 @@ The core domain is intentionally small and focused:
 
 - **User** — An employee with department, region, manager, and employment status
 - **Course** — A training course with mandatory flag and category
+- **LearningRecord** — A normalized cross-LMS source record for assignment, completion, exemption, score, due date, and expiry data
 - **Enrollment** — A user's relationship to a course (status, due date, completion %)
 - **ComplianceGap** — A user missing a required course, with severity and overdue days
 - **AssignmentRule** — A rule that targets users and assigns courses with deadlines

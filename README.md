@@ -59,6 +59,14 @@ pip install -e ".[dev]"
 ### CLI Usage
 
 ```bash
+# Initialize profile-specific starter configs
+complyos init --profile workforce
+complyos init --profile campus --output campus.yaml
+
+# Inspect profile-specific connector capability matrices
+complyos connectors --profile workforce
+complyos connectors --profile campus --json
+
 # Run a compliance audit
 complyos audit
 
@@ -165,7 +173,23 @@ uv run mypy complyos --ignore-missing-imports
 
 ## Domain Model
 
+ComplyOS normalizes Workforce and Campus source data into one shared audit
+model. The cross-LMS connector contract normalizes transcripts, enrollments,
+assignments, submissions, completions, exemptions, and recertifications into
+`LearningRecord`. The existing `Enrollment` model remains for compatibility with
+the current audit engine.
+
 ```python
+LearningRecord(
+    id="lr1",
+    user_id="u1",
+    course_id="c1",
+    source_system="cornerstone",
+    source_record_id="csod-transcript-1",
+    status="completed",
+    expires_at="2026-01-20",
+)
+
 ComplianceGap(
     user=User(id="u1", department="Engineering", ...),
     missing_courses=[Course(code="SEC-101", mandatory=True)],
