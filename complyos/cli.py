@@ -264,6 +264,7 @@ def init(
         )
         raise typer.Exit(1)
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(config)
     console.print(f"[green]Initialized {definition.display_name} config at {path}[/green]")
 

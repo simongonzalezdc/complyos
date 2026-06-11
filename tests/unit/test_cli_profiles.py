@@ -35,6 +35,19 @@ def test_init_campus_profile_writes_config(tmp_path):
     assert "learner_term: student" in content
 
 
+def test_init_campus_profile_creates_nested_output_parent(tmp_path):
+    output = tmp_path / "nested" / "profiles" / "campus.yaml"
+
+    result = runner.invoke(app, ["init", "--profile", "campus", "--output", str(output)])
+
+    assert result.exit_code == 0
+    assert "Initialized ComplyOS Campus" in result.output
+    assert output.exists()
+    content = output.read_text()
+    assert "profile: campus" in content
+    assert "learner_term: student" in content
+
+
 def test_init_unknown_profile_exits_one_without_writing_output(tmp_path):
     output = tmp_path / "unknown.yaml"
 
