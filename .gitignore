@@ -29,3 +29,7 @@ ENV/
 .ruff_cache/
 *.log
 .omc/
+
+# Local agent/runtime workspaces
+.worktrees/
+.omx/
