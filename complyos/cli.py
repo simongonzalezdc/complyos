@@ -327,18 +327,20 @@ def sync(
         users = await connector.get_users()
         courses = await connector.get_courses()
         enrollments = await connector.get_enrollments()
+        learning_records = await connector.get_learning_records()
 
         repo.clear_all()
         repo.sync_users(users)
         repo.sync_courses(courses)
         repo.sync_enrollments(enrollments)
+        repo.sync_learning_records(learning_records)
 
-        return len(users), len(courses), len(enrollments)
+        return len(users), len(courses), len(enrollments), len(learning_records)
 
-    user_count, course_count, enrollment_count = asyncio.run(_sync())
+    user_count, course_count, enrollment_count, learning_record_count = asyncio.run(_sync())
     console.print(
         f"[green]Synced {user_count} users, {course_count} courses, "
-        f"{enrollment_count} enrollments[/green]"
+        f"{enrollment_count} enrollments, {learning_record_count} learning records[/green]"
     )
 
 

@@ -206,11 +206,67 @@ class TestSyncCommand:
             async def get_enrollments(self):
                 return []
 
+            async def get_learning_records(self):
+                return []
+
         monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
         db_path = str(tmp_path / "sync.db")
         result = runner.invoke(app, ["sync", "--db", db_path])
         assert result.exit_code == 0
-        assert "Synced 1 users, 1 courses, 0 enrollments" in result.output
+        assert "Synced 1 users, 1 courses, 0 enrollments, 0 learning records" in result.output
+
+    def test_sync_persists_learning_records_when_connector_supports_them(
+        self, monkeypatch, tmp_path
+    ):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                from complyos.models.domain import User
+
+                return [
+                    User(
+                        id="u1",
+                        employee_id="E001",
+                        email="a@example.com",
+                        first_name="A",
+                        last_name="A",
+                        department="Eng",
+                        region="US",
+                        hire_date=date(2023, 1, 1),
+                        employment_status="active",
+                    )
+                ]
+
+            async def get_courses(self):
+                from complyos.models.domain import Course
+
+                return [Course(id="c1", code="SEC-101", title="Security")]
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                from complyos.models.domain import LearningRecord, LearningRecordStatus
+
+                return [
+                    LearningRecord(
+                        id="lr1",
+                        user_id="u1",
+                        course_id="c1",
+                        source_system="fake",
+                        status=LearningRecordStatus.COMPLETED,
+                    )
+                ]
+
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+        db_path = str(tmp_path / "sync.db")
+        result = runner.invoke(app, ["sync", "--db", db_path])
+        assert result.exit_code == 0
+        assert "1 learning records" in result.output
 
     def test_sync_auth_failure(self, monkeypatch):
         class BadConnector:
