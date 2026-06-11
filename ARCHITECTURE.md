@@ -106,6 +106,10 @@ Connectors implement `LMSConnector` (ABC) with async methods:
 
 **CSV Connector** reads `users.csv`, `courses.csv`, and `enrollments.csv` exports from a local directory and normalizes common LMS column names. It is read-only, so audits, reports, digests, and dashboards work without LMS API access, while reminder remediation still requires an API-backed connector.
 
+**SuccessFactors Connector** uses OAuth 2.0 bearer tokens and normalizes SAP SuccessFactors Learning OData user, item, and learning-history payloads into the shared ComplyOS domain model.
+
+**Cornerstone Connector** uses OAuth 2.0 client credentials and normalizes Cornerstone Learning users, learning objects, and transcript records into the shared ComplyOS domain model.
+
 **Mock Connector** provides deterministic seed data for testing without external dependencies.
 
 ## Testing Strategy
@@ -137,14 +141,14 @@ This satisfies regulator requirements for audit trails without requiring blockch
 
 ## Operations and Scalability Notes
 
-The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/MCP audit paths, and Slack/Teams notifications consume remediation output rather than introducing a separate workflow engine.
+The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/MCP audit paths, and Slack/Teams notifications consume audit output rather than introducing a separate workflow engine.
 
-PostgreSQL and a live web dashboard are scale-out work, not prerequisites for the first operator-ready release. The repository and domain model boundaries are already shaped so that storage and UI can change later without rewriting the auditor.
+PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 
 The current SQLite-backed architecture handles ~10K users comfortably. For larger deployments:
 
-1. Replace `LocalRepository` with a PostgreSQL-backed implementation
-2. Add pagination to connector methods
+1. Add connector pagination beyond the first normalized response page
+2. Add webhook/event support for near-real-time updates
 3. Cache enrollment maps in Redis for sub-second audits
 4. Run audits as background jobs with Celery/ARQ
 
@@ -155,5 +159,5 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 - [x] Phase 1 — Core auditing, MCP server, CLI, Workday connector
 - [x] Phase 2 — SQLite cache, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
-- [ ] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
-- [ ] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
+- [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector

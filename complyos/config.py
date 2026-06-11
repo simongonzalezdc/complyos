@@ -83,6 +83,18 @@ def generate_config(
                 "username": "${WORKDAY_USERNAME}",
                 "password": "${WORKDAY_PASSWORD}",
             },
+            "successfactors": {
+                "base_url": "${SUCCESSFACTORS_BASE_URL}",
+                "client_id": "${SUCCESSFACTORS_CLIENT_ID}",
+                "client_secret": "${SUCCESSFACTORS_CLIENT_SECRET}",
+                "company_id": "${SUCCESSFACTORS_COMPANY_ID}",
+                "user_id": "${SUCCESSFACTORS_USER_ID}",
+            },
+            "cornerstone": {
+                "base_url": "${CORNERSTONE_BASE_URL}",
+                "client_id": "${CORNERSTONE_CLIENT_ID}",
+                "client_secret": "${CORNERSTONE_CLIENT_SECRET}",
+            },
         },
         "database": {"path": db_path},
         "defaults": {

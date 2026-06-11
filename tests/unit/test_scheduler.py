@@ -113,7 +113,12 @@ async def test_run_scheduled_audit_once_saves_snapshot_and_notifies() -> None:
     auditor = FakeAuditor()
     repository = FakeRepository()
     notifier = FakeNotifier()
-    job = ScheduledAuditJob(name="daily-security", interval_hours=24, department="Security", region="US")
+    job = ScheduledAuditJob(
+        name="daily-security",
+        interval_hours=24,
+        department="Security",
+        region="US",
+    )
 
     result = await run_scheduled_audit_once(
         job,

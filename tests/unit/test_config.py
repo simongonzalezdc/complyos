@@ -28,6 +28,8 @@ class TestComplyOSConfig:
         assert "workday" in text
         assert "test.db" in text
         assert "WORKDAY_BASE_URL" in text
+        assert "SUCCESSFACTORS_BASE_URL" in text
+        assert "CORNERSTONE_BASE_URL" in text
         assert "SLACK_WEBHOOK_URL" in text
         assert "TEAMS_WEBHOOK_URL" in text
         assert "schedule:" in text

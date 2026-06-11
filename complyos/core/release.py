@@ -33,7 +33,12 @@ def build_release_checklist(root: Path | str = ".") -> list[ReleaseCheck]:
         ("readme", "README", "README.md", "Roadmap"),
         ("architecture", "Architecture", "ARCHITECTURE.md", "Roadmap"),
         ("landing_page", "Landing page", "docs/index.html", "ComplyOS"),
-        ("release_checklist", "Release checklist", "docs/release-checklist.md", "Release checklist"),
+        (
+            "release_checklist",
+            "Release checklist",
+            "docs/release-checklist.md",
+            "Release checklist",
+        ),
     ]
 
     for check_id, label, relative_path, required_text in required_files:

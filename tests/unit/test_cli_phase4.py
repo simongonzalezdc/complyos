@@ -42,3 +42,14 @@ schedule:
     assert result.exit_code == 0
     assert "daily-all" in result.output
     assert "snapshot" in result.output.lower()
+
+
+def test_serve_dashboard_dry_run_reports_bind_address() -> None:
+    result = runner.invoke(
+        app,
+        ["serve-dashboard", "--host", "127.0.0.1", "--port", "8765", "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "127.0.0.1:8765" in result.output
+    assert "dry run" in result.output.lower()

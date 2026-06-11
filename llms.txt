@@ -4,11 +4,11 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 
 ## Architecture
 - Python backend with FastMCP for AI agent integration
-- SQLite local-first data store
-- Connector pattern for LMS data sources (CSV exports, Mock seed data, Workday; SAP SuccessFactors and Cornerstone are future scale-out connectors)
+- SQLite local-first data store with PostgreSQL-ready SQLAlchemy URLs
+- Connector pattern for LMS data sources (CSV exports, Mock seed data, Workday, SAP SuccessFactors, Cornerstone)
 - Evidence ledger for audit trails
 - CLI and MCP server interfaces
-- HTML audit report and dashboard export
+- HTML audit report, dashboard export, and live dashboard API
 - `LearningRecord` is the cross-LMS connector contract for transcripts, enrollments, assignments, submissions, completions, exemptions, and recertifications; `Enrollment` remains the current audit-engine compatibility model
 
 ## Key Files
@@ -36,8 +36,8 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 - Phase 1 complete — Core auditor, MCP server, CLI, Workday connector, tests
 - Phase 2 complete — SQLite persistence, assignment rules engine, sync command
 - Phase 3 complete — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
-- Phase 4 next — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
-- Phase 5 future — PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
+- Phase 4 complete — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- Phase 5 complete — PostgreSQL backend, live dashboard API, SAP SuccessFactors connector, Cornerstone connector
 
 ## Running Tests
 ```bash

@@ -361,7 +361,11 @@ def sync(
 
 @app.command("run-schedule")
 def run_schedule(
-    config_path: str = typer.Option("complyos.yaml", "--config", help="Config file with schedule.jobs"),
+    config_path: str = typer.Option(
+        "complyos.yaml",
+        "--config",
+        help="Config file with schedule.jobs",
+    ),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
     force: bool = typer.Option(False, "--force", help="Run jobs even when last_run_at is not due"),
 ):
@@ -606,6 +610,29 @@ def dashboard(
         import webbrowser
 
         webbrowser.open(f"file://{os.path.abspath(path)}")
+
+
+@app.command("serve-dashboard")
+def serve_dashboard(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print bind address without starting server",
+    ),
+):
+    """Serve the live compliance dashboard API."""
+    if dry_run:
+        console.print(f"[green]Dashboard dry run:[/green] would serve on {host}:{port}")
+        return
+
+    import uvicorn
+
+    from complyos.api.mcp_server import _get_auditor
+    from complyos.web.dashboard import create_dashboard_app
+
+    uvicorn.run(create_dashboard_app(auditor=_get_auditor()), host=host, port=port)
 
 
 @app.command()
