@@ -3,11 +3,12 @@
 ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compliance training gaps across enterprise LMS platforms.
 
 ## Architecture
-- Python/FastAPI backend with FastMCP for AI agent integration
+- Python backend with FastMCP for AI agent integration
 - SQLite local-first data store
-- Connector pattern for LMS platforms (Workday, SAP SuccessFactors, Cornerstone)
+- Connector pattern for LMS data sources (CSV exports, Mock seed data, Workday; SAP SuccessFactors and Cornerstone are future scale-out connectors)
 - Evidence ledger for audit trails
 - CLI and MCP server interfaces
+- HTML audit report and dashboard export
 
 ## Key Files
 - `complyos/core/auditor.py` — Gap auditing engine
@@ -19,9 +20,24 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 - `audit_compliance_gaps(department?, region?)` — Find missing training
 - `get_user_compliance_status(user_id)` — Single user status
 - `generate_audit_report(department?, region?)` — Structured report
+- `generate_compliance_digest(department?, region?)` — Diff current gaps against the previous snapshot
 - `check_connector_health()` — LMS connection status
+- `validate_assignment_rule(rule)` — Validate targeting and course references before deployment
+- `preview_assignment_rule(rule)` — Preview affected users and assignments
+- `remediate_compliance_gaps(dry_run?)` — Plan or send reminders/manager notifications for gaps
+- `export_audit_report_html(output_path?, department?, region?)` — Write a self-contained HTML audit report
+- `export_compliance_dashboard(output_path?, department?, region?)` — Write a self-contained HTML dashboard
+- `send_notification(...)` — Send a test or operational email notification
+
+## Roadmap
+- Phase 1 complete — Core auditor, MCP server, CLI, Workday connector, tests
+- Phase 2 complete — SQLite persistence, assignment rules engine, sync command
+- Phase 3 complete — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
+- Phase 4 next — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- Phase 5 future — PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 
 ## Running Tests
 ```bash
-pytest tests/ -v --cov=complyos --cov-branch
+uv run pytest -q
+uv run pytest --cov=complyos --cov-report=term-missing
 ```

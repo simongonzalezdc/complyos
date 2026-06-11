@@ -32,8 +32,8 @@ ComplyOS is a layered compliance auditing system that bridges enterprise LMS pla
 ┌─────────┼───────────────────────────────────────────────────┐
 │         │   Connector Layer                                   │
 │  ┌──────┴──────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Mock      │  │   Workday   │  │   SAP / CSOD        │  │
-│  │ Connector   │  │  Connector  │  │   (planned)         │  │
+│  │ CSV / Mock  │  │   Workday   │  │   SAP / CSOD        │  │
+│  │ Connectors  │  │  Connector  │  │   (future)          │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -102,23 +102,26 @@ Connectors implement `LMSConnector` (ABC) with async methods:
 
 **Workday Connector** uses `httpx.AsyncClient` with basic auth. Data normalization handles Workday's nested JSON structure (e.g., `supervisoryOrganization.descriptor` → `department`).
 
+**CSV Connector** reads `users.csv`, `courses.csv`, and `enrollments.csv` exports from a local directory and normalizes common LMS column names. It is read-only, so audits, reports, digests, and dashboards work without LMS API access, while reminder remediation still requires an API-backed connector.
+
 **Mock Connector** provides deterministic seed data for testing without external dependencies.
 
 ## Testing Strategy
 
 | Layer | Strategy | Coverage |
 |-------|----------|----------|
-| Domain models | Property-based validation | 100% |
-| Connectors | `respx` for HTTP mocking | 96% |
+| Domain models | Pydantic validation tests | 100% |
+| Connectors | `respx` for HTTP mocking plus CSV fixture tests | 88–98% |
 | Auditor | Unit tests with MockConnector | 98% |
-| Repository | SQLite in-memory (`tmp_path`) | 96% |
+| Repository | SQLite in-memory (`tmp_path`) | 97% |
 | Rules engine | Unit tests with seeded repository | 99% |
-| Remediation | Unit tests with MockConnector | 92% |
+| Remediation | Unit tests with MockConnector | 95% |
 | Report exporter | File-based assertions | 100% |
-| MCP server | Direct tool invocation | 96% |
-| CLI | `CliRunner` with stdout capture | 93% |
+| Dashboard | File-based assertions for generated HTML | 100% |
+| MCP server | Direct tool invocation | 85% |
+| CLI | `CliRunner` with stdout capture | 76% |
 
-**Total: 119 tests, 96% line coverage**
+**Current local baseline: 171 passing tests, 92% line coverage**
 
 ## Evidence Ledger
 
@@ -130,7 +133,11 @@ Every audit produces an `EvidenceLedgerEntry` with:
 
 This satisfies regulator requirements for audit trails without requiring blockchain or external services.
 
-## Scalability Notes
+## Operations and Scalability Notes
+
+The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/MCP audit paths, and Slack/Teams notifications consume remediation output rather than introducing a separate workflow engine.
+
+PostgreSQL and a live web dashboard are scale-out work, not prerequisites for the first operator-ready release. The repository and domain model boundaries are already shaped so that storage and UI can change later without rewriting the auditor.
 
 The current SQLite-backed architecture handles ~10K users comfortably. For larger deployments:
 
@@ -145,5 +152,6 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 
 - [x] Phase 1 — Core auditing, MCP server, CLI, Workday connector
 - [x] Phase 2 — SQLite cache, assignment rules engine, sync command
-- [x] Phase 3 — Remediation workflows, HTML report export
-- [ ] Phase 4 — PostgreSQL backend, web dashboard, Slack notifications
+- [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
+- [ ] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [ ] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector

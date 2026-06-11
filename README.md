@@ -3,7 +3,7 @@
 [![CI](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml/badge.svg)](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-orange.svg)](LICENSE)
 
 **L&D Compliance & Learning Operations MCP Server**
 
@@ -33,8 +33,8 @@ Enterprise compliance tracking is a disaster of CSV exports, stale dashboards, a
                            ┌──────────────────────────────┼──────────────┐
                            │                              │              │
                     ┌──────▼──────┐            ┌──────────▼─────┐  ┌────▼─────┐
-                    │   Mock      │            │   Workday      │  │  SAP/CSOD│
-                    │ Connector   │            │   Connector    │  │ (planned)│
+                    │ CSV / Mock  │            │   Workday      │  │  SAP/CSOD│
+                    │ Connectors  │            │   Connector    │  │ (future) │
                     └─────────────┘            └────────────────┘  └──────────┘
 ```
 
@@ -77,6 +77,9 @@ complyos digest
 # Generate a self-contained HTML dashboard (summary, trend, filterable table)
 complyos dashboard --open
 
+# Export a self-contained HTML audit report
+complyos export --output report.html
+
 # Sync LMS data to local SQLite
 complyos sync
 
@@ -88,6 +91,9 @@ complyos preview-rule rule.json
 
 # Check connector health
 complyos health
+
+# Send reminders / manager notifications for current gaps
+complyos remediate --dry-run
 ```
 
 ### MCP Server
@@ -108,8 +114,8 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 | CSV export (any LMS) | ✅ Supported | None |
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
 | Mock (seed data) | ✅ Built-in | None |
-| SAP SuccessFactors | 🚧 Planned | OAuth 2.0 |
-| Cornerstone OnDemand | 🚧 Planned | API Key |
+| SAP SuccessFactors | Future scale-out | OAuth 2.0 |
+| Cornerstone OnDemand | Future scale-out | API Key |
 
 ### CSV Configuration
 
@@ -163,9 +169,9 @@ uv run mypy complyos --ignore-missing-imports
 ComplianceGap(
     user=User(id="u1", department="Engineering", ...),
     missing_courses=[Course(code="SEC-101", mandatory=True)],
-    severity=ComplianceGapSeverity.HIGH,  # critical | high | medium | low
+    severity="high",  # critical | high | medium | low
     days_overdue=14,
-    remediation_action=RemediationAction(...),
+    rule_name="Mandatory Compliance Training",
 )
 ```
 
@@ -178,10 +184,22 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
-- [ ] Phase 4 — PostgreSQL backend, Slack/Teams notifications, scheduled runs
+- [ ] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [ ] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 
 ---
 
 ## License
 
-Apache-2.0
+ComplyOS uses **Business Source License 1.1**, SPDX identifier `BUSL-1.1`.
+Avoid the shorthand "BSL" here: `BSL-1.0` usually means the unrelated Boost
+Software License.
+
+This is a source-available license. The source code is visible and may be
+copied, modified, redistributed, and used for non-production purposes.
+Production use requires a commercial license unless a future Additional Use
+Grant says otherwise.
+
+On 2030-06-11, or the fourth anniversary of the first public distribution of
+a specific version under this license, whichever comes first, that version
+converts to **Apache License 2.0**.
