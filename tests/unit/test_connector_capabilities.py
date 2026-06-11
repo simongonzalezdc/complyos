@@ -38,3 +38,16 @@ def test_csv_is_supported_for_both_tracks():
     assert csv.supports_users is True
     assert csv.supports_courses is True
     assert csv.supports_learning_records is True
+
+
+def test_matrix_rejects_unknown_profile():
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown connector profile 'unknown'"):
+        list_connector_capabilities(profile="unknown")
+
+
+def test_matrix_normalizes_profile_whitespace_and_case():
+    names = set(_by_name(profile=" Workforce "))
+
+    assert "cornerstone" in names

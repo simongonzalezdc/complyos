@@ -28,3 +28,10 @@ def test_connectors_campus_json_filters_out_workforce_connectors():
     names = {item["name"] for item in data}
     assert {"canvas", "brightspace"} <= names
     assert "cornerstone" not in names
+
+
+def test_connectors_unknown_profile_exits_one_with_error():
+    result = runner.invoke(app, ["connectors", "--profile", "unknown"])
+
+    assert result.exit_code == 1
+    assert "Unknown connector profile" in result.output

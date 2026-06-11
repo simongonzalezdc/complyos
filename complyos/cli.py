@@ -276,7 +276,11 @@ def connectors(
     """Show the connector capability matrix."""
     from complyos.connectors.capabilities import list_connector_capabilities
 
-    items = list_connector_capabilities(profile=profile)
+    try:
+        items = list_connector_capabilities(profile=profile)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
     if json_output:
         console.print(json.dumps([item.to_dict() for item in items], indent=2))

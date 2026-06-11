@@ -288,10 +288,15 @@ _CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
 )
 
+_VALID_PROFILES = ("all", "workforce", "campus")
+
 
 def list_connector_capabilities(profile: str | None = None) -> list[ConnectorCapability]:
     """List connector capabilities, optionally filtered by profile."""
-    normalized = "all" if profile is None else profile.lower()
+    normalized = "all" if profile is None else profile.strip().lower()
+    if normalized not in _VALID_PROFILES:
+        valid = ", ".join(_VALID_PROFILES)
+        raise ValueError(f"Unknown connector profile '{profile}'. Valid profiles: {valid}")
     if normalized == "all":
         return list(_CAPABILITIES)
     return [item for item in _CAPABILITIES if item.profile in {normalized, "both"}]
