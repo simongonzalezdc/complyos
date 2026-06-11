@@ -13,10 +13,11 @@ from complyos.models.database import (
     DBCourse,
     DBEnrollment,
     DBEvidenceLedger,
+    DBLearningRecord,
     DBUser,
     init_db,
 )
-from complyos.models.domain import Course, Enrollment, User
+from complyos.models.domain import Course, Enrollment, LearningRecord, LearningRecordStatus, User
 
 
 class LocalRepository:
@@ -144,6 +145,53 @@ class LocalRepository:
             return [self._to_enrollment(e) for e in query.all()]
 
     # ------------------------------------------------------------------
+    # Learning records
+    # ------------------------------------------------------------------
+    def save_learning_record(self, record: LearningRecord) -> None:
+        with self._session() as session:
+            db_record = session.get(DBLearningRecord, record.id)
+            if db_record is None:
+                db_record = DBLearningRecord(id=record.id)
+                session.add(db_record)
+
+            db_record.user_id = record.user_id
+            db_record.course_id = record.course_id
+            db_record.source_system = record.source_system
+            db_record.source_record_id = record.source_record_id
+            db_record.status = record.status.value
+            db_record.assigned_date = record.assigned_date
+            db_record.due_date = record.due_date
+            db_record.completed_date = record.completed_date
+            db_record.completion_percentage = record.completion_percentage
+            db_record.score = record.score
+            db_record.exempt = record.exempt
+            db_record.expires_at = record.expires_at
+            db_record.raw_source_hash = record.raw_source_hash
+            db_record.source_payload = record.source_payload
+            session.commit()
+
+    def list_learning_records(
+        self,
+        *,
+        user_id: str | None = None,
+        course_id: str | None = None,
+        status: str | LearningRecordStatus | None = None,
+        source_system: str | None = None,
+    ) -> list[LearningRecord]:
+        with self._session() as session:
+            query = session.query(DBLearningRecord)
+            if user_id:
+                query = query.where(DBLearningRecord.user_id == user_id)
+            if course_id:
+                query = query.where(DBLearningRecord.course_id == course_id)
+            if status:
+                status_value = status.value if isinstance(status, LearningRecordStatus) else status
+                query = query.where(DBLearningRecord.status == status_value)
+            if source_system:
+                query = query.where(DBLearningRecord.source_system == source_system)
+            return [self._to_learning_record(r) for r in query.all()]
+
+    # ------------------------------------------------------------------
     # Sync helpers
     # ------------------------------------------------------------------
     def sync_users(self, users: list[User]) -> int:
@@ -160,6 +208,11 @@ class LocalRepository:
         for enrollment in enrollments:
             self.save_enrollment(enrollment)
         return len(enrollments)
+
+    def sync_learning_records(self, records: list[LearningRecord]) -> int:
+        for record in records:
+            self.save_learning_record(record)
+        return len(records)
 
     # ------------------------------------------------------------------
     # Audit snapshots
@@ -225,6 +278,7 @@ class LocalRepository:
     def clear_all(self) -> None:
         with self._session() as session:
             session.query(DBEnrollment).delete()
+            session.query(DBLearningRecord).delete()
             session.query(DBCourse).delete()
             session.query(DBUser).delete()
             session.query(DBEvidenceLedger).delete()
@@ -277,4 +331,24 @@ class LocalRepository:
             completed_date=db.completed_date,
             completion_percentage=db.completion_percentage,
             score=db.score,
+        )
+
+    @staticmethod
+    def _to_learning_record(db: DBLearningRecord) -> LearningRecord:
+        return LearningRecord(
+            id=db.id,
+            user_id=db.user_id,
+            course_id=db.course_id,
+            source_system=db.source_system,
+            source_record_id=db.source_record_id,
+            status=LearningRecordStatus(db.status),
+            assigned_date=db.assigned_date,
+            due_date=db.due_date,
+            completed_date=db.completed_date,
+            completion_percentage=db.completion_percentage,
+            score=db.score,
+            exempt=db.exempt,
+            expires_at=db.expires_at,
+            raw_source_hash=db.raw_source_hash,
+            source_payload=db.source_payload or {},
         )

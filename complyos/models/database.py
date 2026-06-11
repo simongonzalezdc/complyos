@@ -67,6 +67,26 @@ class DBEnrollment(Base):
     course: Mapped[DBCourse] = relationship(back_populates="enrollments")
 
 
+class DBLearningRecord(Base):
+    __tablename__ = "learning_records"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    source_record_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    assigned_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    completed_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completion_percentage: Mapped[float] = mapped_column(Float, default=0.0)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exempt: Mapped[bool] = mapped_column(default=False)
+    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    raw_source_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class DBAuditSnapshot(Base):
     """Point-in-time record of an audit run, used for digest diffing."""
 

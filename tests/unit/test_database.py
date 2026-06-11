@@ -8,6 +8,7 @@ from complyos.models.database import (
     DBCourse,
     DBEnrollment,
     DBEvidenceLedger,
+    DBLearningRecord,
     DBUser,
     init_db,
 )
@@ -182,6 +183,59 @@ class TestDBEnrollment:
         session.commit()
 
         assert session.query(DBEnrollment).filter_by(id="e1").first() is None
+        session.close()
+
+
+class TestDBLearningRecord:
+    def test_create_and_retrieve_learning_record(self, tmp_path):
+        sessionmaker = init_db(str(tmp_path / "test.db"))
+        session = sessionmaker()
+
+        user = DBUser(
+            id="u1",
+            employee_id="E001",
+            email="alice@example.com",
+            first_name="Alice",
+            last_name="Smith",
+            department="Engineering",
+            region="US",
+            hire_date=date(2023, 1, 15),
+        )
+        course = DBCourse(
+            id="c1",
+            code="SEC-101",
+            title="Information Security Basics",
+            mandatory=True,
+        )
+        session.add_all([user, course])
+        session.commit()
+
+        record = DBLearningRecord(
+            id="lr1",
+            user_id="u1",
+            course_id="c1",
+            source_system="workday",
+            source_record_id="wd-123",
+            status="completed",
+            assigned_date=datetime(2024, 1, 1, 9, 0, 0),
+            due_date=date(2024, 2, 1),
+            completed_date=datetime(2024, 1, 15, 16, 30, 0),
+            completion_percentage=100.0,
+            score=92.5,
+            exempt=False,
+            expires_at=date(2025, 1, 15),
+            raw_source_hash="sha256:abc123",
+            source_payload={"provider": "workday", "version": 3},
+        )
+        session.add(record)
+        session.commit()
+
+        retrieved = session.query(DBLearningRecord).filter_by(id="lr1").first()
+        assert retrieved is not None
+        assert retrieved.source_system == "workday"
+        assert retrieved.source_record_id == "wd-123"
+        assert retrieved.expires_at == date(2025, 1, 15)
+        assert retrieved.source_payload == {"provider": "workday", "version": 3}
         session.close()
 
 
