@@ -268,6 +268,18 @@ class TestSyncCommand:
         assert result.exit_code == 0
         assert "1 learning records" in result.output
 
+        from complyos.core.repository import LocalRepository
+        from complyos.models.domain import LearningRecordStatus
+
+        records = LocalRepository(db_path).list_learning_records()
+        assert len(records) == 1
+        record = records[0]
+        assert record.id == "lr1"
+        assert record.user_id == "u1"
+        assert record.course_id == "c1"
+        assert record.source_system == "fake"
+        assert record.status == LearningRecordStatus.COMPLETED
+
     def test_sync_auth_failure(self, monkeypatch):
         class BadConnector:
             name = "bad"
