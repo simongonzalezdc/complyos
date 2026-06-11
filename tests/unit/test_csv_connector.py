@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from complyos.connectors.csv_file import CSVConnector
-from complyos.models.domain import EmploymentStatus, EnrollmentStatus
+from complyos.models.domain import EmploymentStatus, EnrollmentStatus, LearningRecordStatus
 
 CANONICAL_USERS = """id,employee_id,email,first_name,last_name,department,region,hire_date,\
 employment_status
@@ -37,6 +37,22 @@ c1,SEC-101,Security Basics,Yes
 ALIASED_ENROLLMENTS = """Registration ID,Learner ID,Course ID,Completion Status,Deadline,Progress
 e1,u1,c1,Passed,01/01/2025,100%
 """
+
+
+LEARNING_RECORD_USERS = """id,email,hire_date
+u1,student@example.edu,2024-01-15
+"""
+
+LEARNING_RECORD_COURSES = """id,code,title,mandatory
+c1,FERPA-101,FERPA Basics,true
+"""
+
+LEARNING_RECORD_ENROLLMENTS = (
+    "Learning Record ID,Learner ID,Course ID,Completion Status,Assigned Date,Due Date,"
+    "Completed Date,Score,Expires At,Source System,Source Record ID\n"
+    "lr1,u1,c1,Complete,2026-01-01,2026-02-01,2026-01-20,98,2027-01-20,"
+    "canvas,canvas-submission-1\n"
+)
 
 
 def write_csv_dir(tmp_path: Path, users: str, courses: str, enrollments: str) -> Path:
@@ -158,3 +174,43 @@ class TestCSVConnectorRobustness:
             tmp_path, users, CANONICAL_COURSES, CANONICAL_ENROLLMENTS))
         loaded = await conn.get_users()
         assert loaded[0].email == "alice@example.com"
+
+
+class TestCSVLearningRecords:
+    async def test_get_learning_records_reads_extended_columns(self, tmp_path):
+        conn = CSVConnector(write_csv_dir(
+            tmp_path,
+            LEARNING_RECORD_USERS,
+            LEARNING_RECORD_COURSES,
+            LEARNING_RECORD_ENROLLMENTS,
+        ))
+
+        records = await conn.get_learning_records()
+
+        assert len(records) == 1
+        record = records[0]
+        assert record.id == "lr1"
+        assert record.user_id == "u1"
+        assert record.course_id == "c1"
+        assert record.source_system == "canvas"
+        assert record.source_record_id == "canvas-submission-1"
+        assert record.status == LearningRecordStatus.COMPLETED
+        assert record.completed_date is not None
+        assert record.expires_at is not None
+        assert record.expires_at.isoformat() == "2027-01-20"
+        assert record.score == 98.0
+        assert record.raw_source_hash is not None
+        assert record.source_payload["Source System"] == "canvas"
+
+    async def test_get_learning_records_filters_user_and_course(self, tmp_path):
+        conn = CSVConnector(write_csv_dir(
+            tmp_path,
+            LEARNING_RECORD_USERS,
+            LEARNING_RECORD_COURSES,
+            LEARNING_RECORD_ENROLLMENTS,
+        ))
+
+        assert [r.id for r in await conn.get_learning_records(user_ids=["u1"])] == ["lr1"]
+        assert await conn.get_learning_records(user_ids=["missing"]) == []
+        assert [r.id for r in await conn.get_learning_records(course_ids=["c1"])] == ["lr1"]
+        assert await conn.get_learning_records(course_ids=["missing"]) == []

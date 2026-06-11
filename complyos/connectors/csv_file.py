@@ -9,13 +9,23 @@ supported because a CSV export has no write-back channel.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import os
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from complyos.connectors.base import LMSConnector
-from complyos.models.domain import Course, EmploymentStatus, Enrollment, EnrollmentStatus, User
+from complyos.models.domain import (
+    Course,
+    EmploymentStatus,
+    Enrollment,
+    EnrollmentStatus,
+    LearningRecord,
+    LearningRecordStatus,
+    User,
+)
 
 USERS_FILE = "users.csv"
 COURSES_FILE = "courses.csv"
@@ -48,15 +58,19 @@ COURSE_ALIASES: dict[str, list[str]] = {
 }
 
 ENROLLMENT_ALIASES: dict[str, list[str]] = {
-    "id": ["id", "enrollmentid", "registrationid"],
-    "user_id": ["userid", "user", "learnerid"],
-    "course_id": ["courseid", "course"],
+    "id": ["id", "enrollmentid", "registrationid", "learningrecordid", "transcriptid"],
+    "user_id": ["userid", "user", "learnerid", "studentid"],
+    "course_id": ["courseid", "course", "learningitemid"],
     "status": ["status", "enrollmentstatus", "completionstatus"],
     "assigned_date": ["assigneddate", "enrolldate", "enrollmentdate", "registrationdate"],
     "due_date": ["duedate", "deadline", "targetdate"],
     "completed_date": ["completeddate", "completiondate", "finisheddate"],
     "completion_percentage": ["completionpercentage", "progress", "percentcomplete"],
     "score": ["score", "grade", "finalscore"],
+    "expires_at": ["expiresat", "expirationdate", "expirydate", "recertificationdate"],
+    "source_system": ["sourcesystem", "system", "platform", "lms"],
+    "source_record_id": ["sourcerecordid", "externalid", "transcriptitemid"],
+    "exempt": ["exempt", "waived", "exception"],
 }
 
 DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]
@@ -139,6 +153,21 @@ def _parse_float(value: str | None) -> float | None:
         return None
 
 
+def _hash_row(row: dict[str, str]) -> str:
+    payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _to_learning_status(status: EnrollmentStatus) -> LearningRecordStatus:
+    return {
+        EnrollmentStatus.NOT_STARTED: LearningRecordStatus.NOT_STARTED,
+        EnrollmentStatus.IN_PROGRESS: LearningRecordStatus.IN_PROGRESS,
+        EnrollmentStatus.COMPLETED: LearningRecordStatus.COMPLETED,
+        EnrollmentStatus.OVERDUE: LearningRecordStatus.OVERDUE,
+        EnrollmentStatus.EXEMPT: LearningRecordStatus.EXEMPT,
+    }[status]
+
+
 class CSVConnector(LMSConnector):
     """Connector that reads LMS data from CSV exports in a directory.
 
@@ -154,6 +183,7 @@ class CSVConnector(LMSConnector):
         self._users: list[User] | None = None
         self._courses: list[Course] | None = None
         self._enrollments: list[Enrollment] | None = None
+        self._learning_records: list[LearningRecord] | None = None
         self.skipped_rows: dict[str, int] = {USERS_FILE: 0, COURSES_FILE: 0, ENROLLMENTS_FILE: 0}
 
     async def authenticate(self) -> bool:
@@ -246,6 +276,41 @@ class CSVConnector(LMSConnector):
                 )
         return self._enrollments
 
+    def _load_learning_records(self) -> list[LearningRecord]:
+        if self._learning_records is None:
+            self._learning_records = []
+            for i, row in enumerate(self._read_rows(ENROLLMENTS_FILE)):
+                mapped = _remap_row(row, ENROLLMENT_ALIASES)
+                if "user_id" not in mapped or "course_id" not in mapped:
+                    self.skipped_rows[ENROLLMENTS_FILE] += 1
+                    continue
+                raw_status = mapped.get("status", "not_started").lower().replace(" ", "_")
+                enrollment_status = STATUS_SYNONYMS.get(raw_status, EnrollmentStatus.NOT_STARTED)
+                record_id = mapped.get("id", f"csv-{i}")
+                source_system = mapped.get("source_system", self.name)
+                explicit_exempt = mapped.get("exempt", "").lower() in TRUTHY
+                self._learning_records.append(
+                    LearningRecord(
+                        id=record_id,
+                        user_id=mapped["user_id"],
+                        course_id=mapped["course_id"],
+                        source_system=source_system,
+                        source_record_id=mapped.get("source_record_id"),
+                        status=_to_learning_status(enrollment_status),
+                        assigned_date=_parse_datetime(mapped.get("assigned_date")),
+                        due_date=_parse_date(mapped.get("due_date")),
+                        completed_date=_parse_datetime(mapped.get("completed_date")),
+                        completion_percentage=_parse_float(mapped.get("completion_percentage"))
+                        or 0.0,
+                        score=_parse_float(mapped.get("score")),
+                        exempt=explicit_exempt or enrollment_status == EnrollmentStatus.EXEMPT,
+                        expires_at=_parse_date(mapped.get("expires_at")),
+                        raw_source_hash=_hash_row(row),
+                        source_payload=dict(row),
+                    )
+                )
+        return self._learning_records
+
     async def get_users(self, filters: dict[str, Any] | None = None) -> list[User]:
         result = self._load_users()
         if filters:
@@ -274,6 +339,16 @@ class CSVConnector(LMSConnector):
             result = [e for e in result if e.user_id in user_ids]
         if course_ids:
             result = [e for e in result if e.course_id in course_ids]
+        return result
+
+    async def get_learning_records(
+        self, user_ids: list[str] | None = None, course_ids: list[str] | None = None
+    ) -> list[LearningRecord]:
+        result = self._load_learning_records()
+        if user_ids:
+            result = [r for r in result if r.user_id in user_ids]
+        if course_ids:
+            result = [r for r in result if r.course_id in course_ids]
         return result
 
     async def trigger_reminder(self, user_id: str, course_id: str) -> bool:

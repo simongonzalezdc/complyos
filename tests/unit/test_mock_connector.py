@@ -60,3 +60,14 @@ class TestMockConnector:
     async def test_trigger_reminder(self):
         conn = MockConnector()
         assert await conn.trigger_reminder("u1", "c1") is True
+
+
+async def test_default_get_learning_records_maps_enrollments():
+    conn = MockConnector()
+
+    records = await conn.get_learning_records()
+    enrollments = await conn.get_enrollments()
+
+    assert records
+    assert all(record.source_system == "mock" for record in records)
+    assert [record.id for record in records] == [enrollment.id for enrollment in enrollments]
