@@ -28,6 +28,10 @@ class TestComplyOSConfig:
         assert "workday" in text
         assert "test.db" in text
         assert "WORKDAY_BASE_URL" in text
+        assert "SLACK_WEBHOOK_URL" in text
+        assert "TEAMS_WEBHOOK_URL" in text
+        assert "schedule:" in text
+        assert "interval_hours: 24" in text
 
     def test_load_from_default_paths(self, tmp_path, monkeypatch):
         config_file = tmp_path / "complyos.yaml"

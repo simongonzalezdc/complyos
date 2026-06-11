@@ -97,6 +97,19 @@ def generate_config(
             "smtp_password": "${SMTP_PASSWORD}",
             "from_address": "complyos@example.com",
             "use_tls": True,
+            "slack_webhook_url": "${SLACK_WEBHOOK_URL}",
+            "teams_webhook_url": "${TEAMS_WEBHOOK_URL}",
+        },
+        "schedule": {
+            "jobs": [
+                {
+                    "name": "daily-all",
+                    "interval_hours": 24,
+                    "department": None,
+                    "region": None,
+                    "dashboard_path": "reports/complyos-dashboard.html",
+                }
+            ],
         },
     }
     return yaml.dump(config, default_flow_style=False, sort_keys=False)
