@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_ENV_PLACEHOLDER_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 DEFAULT_CONFIG_PATHS = [
     "complyos.yaml",
@@ -50,6 +53,21 @@ class ComplyOSConfig:
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
+
+    def database_path(self, default: str = "complyos.db") -> str:
+        """Return the configured SQLite database path or a fallback."""
+        path = self.database.get("path")
+        return str(path) if path else default
+
+
+def resolve_env_placeholder(value: Any) -> Any:
+    """Resolve a ${VAR} config placeholder while leaving ordinary values intact."""
+    if not isinstance(value, str):
+        return value
+    match = _ENV_PLACEHOLDER_RE.match(value.strip())
+    if match:
+        return os.getenv(match.group(1))
+    return value
 
 
 def generate_config(

@@ -41,3 +41,7 @@ def test_render_profile_config_contains_campus_defaults():
     assert "connector:" in config
     assert "type: csv" in config
     assert "learner_term: student" in config
+
+
+def test_get_profile_normalizes_whitespace_and_case():
+    assert get_profile(" Workforce ").name == "workforce"

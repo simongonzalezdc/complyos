@@ -113,12 +113,21 @@ class LearningRecord(BaseModel):
     raw_source_hash: str | None = None
     source_payload: dict[str, Any] = Field(default_factory=dict)
 
+    def is_expired(self, as_of: date | None = None) -> bool:
+        """Return whether this record's completion has expired as of a date."""
+        if self.exempt or self.expires_at is None:
+            return False
+        return self.expires_at < (as_of or date.today())
+
     @property
     def is_compliant(self) -> bool:
-        return self.exempt or self.status in {
-            LearningRecordStatus.COMPLETED,
-            LearningRecordStatus.EXEMPT,
-        }
+        return self.exempt or (
+            not self.is_expired()
+            and self.status in {
+                LearningRecordStatus.COMPLETED,
+                LearningRecordStatus.EXEMPT,
+            }
+        )
 
     @classmethod
     def from_enrollment(
@@ -145,12 +154,15 @@ class LearningRecord(BaseModel):
             raw_source_hash=raw_source_hash,
         )
 
-    def to_enrollment(self) -> Enrollment:
+    def to_enrollment(self, as_of: date | None = None) -> Enrollment:
+        status = _LEARNING_TO_ENROLLMENT_STATUS[self.status]
+        if self.is_expired(as_of):
+            status = EnrollmentStatus.OVERDUE
         return Enrollment(
             id=self.id,
             user_id=self.user_id,
             course_id=self.course_id,
-            status=_LEARNING_TO_ENROLLMENT_STATUS[self.status],
+            status=status,
             assigned_date=self.assigned_date,
             due_date=self.due_date,
             completed_date=self.completed_date,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
 from complyos.core.auditor import ComplianceAuditor
 from complyos.models.domain import AssignmentRule
@@ -140,3 +141,26 @@ class TestSeverityCalculation:
         from complyos.models.domain import Course
         course = Course(id="c1", code="REQ-101", title="Required", mandatory=True)
         assert auditor._calculate_severity([course], 3) == "low"
+
+
+class TestCSVExpiryAudit:
+    async def test_csv_completed_but_expired_mandatory_course_is_gap(self, tmp_path):
+        (tmp_path / "users.csv").write_text(
+            "id,email,first_name,last_name,department,region,hire_date,employment_status\n"
+            "u1,alice@example.com,Alice,Smith,Engineering,US,2024-01-01,active\n"
+        )
+        (tmp_path / "courses.csv").write_text(
+            "id,code,title,mandatory\n"
+            "c1,SEC-101,Security Basics,true\n"
+        )
+        (tmp_path / "enrollments.csv").write_text(
+            "id,user_id,course_id,status,completed_date,expires_at,completion_percentage\n"
+            "e1,u1,c1,completed,1999-01-01,2000-01-01,100\n"
+        )
+
+        auditor = ComplianceAuditor(CSVConnector(tmp_path))
+        gaps, _ledger = await auditor.audit_gaps()
+
+        assert len(gaps) == 1
+        assert gaps[0].user.id == "u1"
+        assert [course.id for course in gaps[0].missing_courses] == ["c1"]

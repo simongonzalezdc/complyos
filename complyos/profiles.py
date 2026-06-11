@@ -81,7 +81,7 @@ _PROFILE_DEFINITIONS = {
 
 def get_profile(profile: str | ComplyOSProfile) -> ProfileDefinition:
     """Return the profile definition for a supported profile name."""
-    profile_name = str(profile)
+    profile_name = str(profile).strip().lower()
     try:
         return _PROFILE_DEFINITIONS[profile_name]
     except KeyError as exc:

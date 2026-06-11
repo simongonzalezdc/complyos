@@ -7,6 +7,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
@@ -23,15 +24,42 @@ mcp = FastMCP("complyos")
 
 # Global auditor instance (initialized on first use)
 _auditor: ComplianceAuditor | None = None
+_auditor_signature: tuple[Any, ...] | None = None
+
+
+def _workday_from_config(config: ComplyOSConfig) -> WorkdayConnector:
+    workday_config = config.connector.get("workday", {})
+    return WorkdayConnector(
+        base_url=resolve_env_placeholder(workday_config.get("base_url")),
+        username=resolve_env_placeholder(workday_config.get("username")),
+        password=resolve_env_placeholder(workday_config.get("password")),
+    )
 
 
 def _get_connector() -> LMSConnector:
-    """Get the appropriate LMS connector based on environment."""
+    """Get the appropriate LMS connector from env first, then config."""
     if os.getenv("COMPLYOS_CSV_DIR"):
         return CSVConnector()
     if os.getenv("WORKDAY_BASE_URL"):
         return WorkdayConnector()
+
+    config = ComplyOSConfig.load()
+    connector_config = config.connector
+    connector_type = str(connector_config.get("type", "")).strip().lower()
+    if connector_type == "csv":
+        return CSVConnector(connector_config.get("csv_dir"))
+    if connector_type == "workday":
+        return _workday_from_config(config)
     return MockConnector()
+
+
+def _connector_signature(connector: LMSConnector) -> tuple[Any, ...]:
+    return (
+        connector.name,
+        str(getattr(connector, "data_dir", "")),
+        getattr(connector, "base_url", ""),
+        getattr(connector, "username", ""),
+    )
 
 
 def _get_notifier() -> NotificationSender | None:
@@ -54,9 +82,12 @@ def _get_notifier() -> NotificationSender | None:
 
 
 def _get_auditor() -> ComplianceAuditor:
-    global _auditor
-    if _auditor is None:
-        _auditor = ComplianceAuditor(_get_connector())
+    global _auditor, _auditor_signature
+    connector = _get_connector()
+    signature = _connector_signature(connector)
+    if _auditor is None or _auditor_signature != signature:
+        _auditor = ComplianceAuditor(connector)
+        _auditor_signature = signature
     return _auditor
 
 

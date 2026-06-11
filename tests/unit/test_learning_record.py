@@ -102,3 +102,35 @@ def test_learning_record_to_enrollment_is_backward_compatible():
     assert enrollment.completed_date == datetime(2026, 1, 20, 8, 0)
     assert enrollment.completion_percentage == 100
     assert enrollment.score == 91.0
+
+
+def test_completed_learning_record_with_past_expiry_is_non_compliant_and_overdue():
+    record = LearningRecord(
+        id="lr-expired",
+        user_id="u1",
+        course_id="c1",
+        source_system="csv",
+        status=LearningRecordStatus.COMPLETED,
+        completed_date=datetime(1999, 1, 1, 12, 0),
+        expires_at=date(2000, 1, 1),
+    )
+
+    assert record.is_expired(as_of=date(2000, 1, 2)) is True
+    assert record.is_compliant is False
+    assert record.to_enrollment(as_of=date(2000, 1, 2)).status == EnrollmentStatus.OVERDUE
+
+
+def test_exempt_learning_record_with_past_expiry_remains_compliant_and_exempt():
+    record = LearningRecord(
+        id="lr-exempt",
+        user_id="u1",
+        course_id="c1",
+        source_system="csv",
+        status=LearningRecordStatus.EXEMPT,
+        exempt=True,
+        expires_at=date(2000, 1, 1),
+    )
+
+    assert record.is_expired(as_of=date(2000, 1, 2)) is False
+    assert record.is_compliant is True
+    assert record.to_enrollment(as_of=date(2000, 1, 2)).status == EnrollmentStatus.EXEMPT

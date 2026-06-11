@@ -280,6 +280,67 @@ class TestSyncCommand:
         assert record.source_system == "fake"
         assert record.status == LearningRecordStatus.COMPLETED
 
+
+    def test_sync_uses_configured_db_when_db_omitted(self, monkeypatch, tmp_path):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                return []
+
+            async def get_courses(self):
+                return []
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                return []
+
+        configured_db = tmp_path / "configured.db"
+        (tmp_path / "complyos.yaml").write_text(f"database:\n  path: {configured_db}\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+
+        result = runner.invoke(app, ["sync"])
+
+        assert result.exit_code == 0
+        assert configured_db.exists()
+
+    def test_sync_explicit_db_overrides_config(self, monkeypatch, tmp_path):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                return []
+
+            async def get_courses(self):
+                return []
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                return []
+
+        configured_db = tmp_path / "configured.db"
+        explicit_db = tmp_path / "explicit.db"
+        (tmp_path / "complyos.yaml").write_text(f"database:\n  path: {configured_db}\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+
+        result = runner.invoke(app, ["sync", "--db", str(explicit_db)])
+
+        assert result.exit_code == 0
+        assert explicit_db.exists()
+        assert not configured_db.exists()
+
     def test_sync_auth_failure(self, monkeypatch):
         class BadConnector:
             name = "bad"

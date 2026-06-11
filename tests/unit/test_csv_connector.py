@@ -237,3 +237,32 @@ class TestCSVLearningRecords:
             "unexpected-note",
             "unexpected-source",
         ]
+
+
+class TestCSVExpiryHandling:
+    async def test_get_enrollments_marks_completed_past_expiry_overdue(self, tmp_path):
+        enrollments = (
+            "id,user_id,course_id,status,completed_date,expires_at,completion_percentage\n"
+            "e-expired,u1,c1,completed,1999-01-01,2000-01-01,100\n"
+        )
+        conn = CSVConnector(write_csv_dir(
+            tmp_path, CANONICAL_USERS, CANONICAL_COURSES, enrollments
+        ))
+
+        loaded = await conn.get_enrollments()
+
+        assert loaded[0].status == EnrollmentStatus.OVERDUE
+
+    async def test_get_learning_records_marks_completed_past_expiry_expired(self, tmp_path):
+        enrollments = (
+            "id,user_id,course_id,status,completed_date,expires_at,completion_percentage\n"
+            "lr-expired,u1,c1,completed,1999-01-01,2000-01-01,100\n"
+        )
+        conn = CSVConnector(write_csv_dir(
+            tmp_path, CANONICAL_USERS, CANONICAL_COURSES, enrollments
+        ))
+
+        loaded = await conn.get_learning_records()
+
+        assert loaded[0].status == LearningRecordStatus.EXPIRED
+        assert loaded[0].is_compliant is False

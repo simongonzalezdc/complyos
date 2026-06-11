@@ -171,12 +171,41 @@ def _hash_row(row: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _to_learning_status(status: EnrollmentStatus) -> LearningRecordStatus:
+def _is_expired(expires_at: date | None, as_of: date | None = None) -> bool:
+    return expires_at is not None and expires_at < (as_of or date.today())
+
+
+def _normalize_status_for_expiry(
+    status: EnrollmentStatus,
+    expires_at: date | None,
+    *,
+    exempt: bool = False,
+    as_of: date | None = None,
+) -> EnrollmentStatus:
+    if exempt or status == EnrollmentStatus.EXEMPT:
+        return EnrollmentStatus.EXEMPT
+    if status == EnrollmentStatus.COMPLETED and _is_expired(expires_at, as_of):
+        return EnrollmentStatus.OVERDUE
+    return status
+
+
+def _to_learning_status(
+    status: EnrollmentStatus,
+    expires_at: date | None = None,
+    *,
+    exempt: bool = False,
+    as_of: date | None = None,
+) -> LearningRecordStatus:
+    status = _normalize_status_for_expiry(status, expires_at, exempt=exempt, as_of=as_of)
     return {
         EnrollmentStatus.NOT_STARTED: LearningRecordStatus.NOT_STARTED,
         EnrollmentStatus.IN_PROGRESS: LearningRecordStatus.IN_PROGRESS,
         EnrollmentStatus.COMPLETED: LearningRecordStatus.COMPLETED,
-        EnrollmentStatus.OVERDUE: LearningRecordStatus.OVERDUE,
+        EnrollmentStatus.OVERDUE: (
+            LearningRecordStatus.EXPIRED
+            if _is_expired(expires_at, as_of) and not exempt
+            else LearningRecordStatus.OVERDUE
+        ),
         EnrollmentStatus.EXEMPT: LearningRecordStatus.EXEMPT,
     }[status]
 
@@ -273,6 +302,11 @@ class CSVConnector(LMSConnector):
                     continue
                 raw_status = mapped.get("status", "not_started").lower().replace(" ", "_")
                 status = STATUS_SYNONYMS.get(raw_status, EnrollmentStatus.NOT_STARTED)
+                expires_at = _parse_date(mapped.get("expires_at"))
+                explicit_exempt = mapped.get("exempt", "").lower() in TRUTHY
+                status = _normalize_status_for_expiry(
+                    status, expires_at, exempt=explicit_exempt
+                )
                 self._enrollments.append(
                     Enrollment(
                         id=mapped.get("id", f"csv-{i}"),
@@ -303,6 +337,7 @@ class CSVConnector(LMSConnector):
                 record_id = mapped.get("id", f"csv-{i}")
                 source_system = mapped.get("source_system", self.name)
                 explicit_exempt = mapped.get("exempt", "").lower() in TRUTHY
+                expires_at = _parse_date(mapped.get("expires_at"))
                 self._learning_records.append(
                     LearningRecord(
                         id=record_id,
@@ -310,7 +345,9 @@ class CSVConnector(LMSConnector):
                         course_id=mapped["course_id"],
                         source_system=source_system,
                         source_record_id=mapped.get("source_record_id"),
-                        status=_to_learning_status(enrollment_status),
+                        status=_to_learning_status(
+                            enrollment_status, expires_at, exempt=explicit_exempt
+                        ),
                         assigned_date=_parse_datetime(mapped.get("assigned_date")),
                         due_date=_parse_date(mapped.get("due_date")),
                         completed_date=_parse_datetime(mapped.get("completed_date")),
@@ -318,7 +355,7 @@ class CSVConnector(LMSConnector):
                         or 0.0,
                         score=_parse_float(mapped.get("score")),
                         exempt=explicit_exempt or enrollment_status == EnrollmentStatus.EXEMPT,
-                        expires_at=_parse_date(mapped.get("expires_at")),
+                        expires_at=expires_at,
                         raw_source_hash=_hash_row(source_payload),
                         source_payload=source_payload,
                     )

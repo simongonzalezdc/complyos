@@ -11,6 +11,7 @@ from complyos.api.mcp_server import (
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.workday import WorkdayConnector
 
 
@@ -67,9 +68,44 @@ class TestMCPTools:
 
 
 class TestConnectorSelection:
-    def test_get_connector_defaults_to_mock(self):
+    def test_get_connector_defaults_to_mock(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
         connector = _get_connector()
         assert connector.name == "mock"
+
+    def test_get_connector_selects_csv_from_config(self, monkeypatch, tmp_path):
+        csv_dir = tmp_path / "csv"
+        csv_dir.mkdir()
+        (tmp_path / "complyos.yaml").write_text(
+            f"connector:\n  type: csv\n  csv_dir: {csv_dir}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        connector = _get_connector()
+
+        assert isinstance(connector, CSVConnector)
+        assert connector.data_dir == csv_dir
+
+    def test_get_connector_env_csv_overrides_config(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "config-csv"
+        env_dir = tmp_path / "env-csv"
+        config_dir.mkdir()
+        env_dir.mkdir()
+        (tmp_path / "complyos.yaml").write_text(
+            f"connector:\n  type: csv\n  csv_dir: {config_dir}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("COMPLYOS_CSV_DIR", str(env_dir))
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        connector = _get_connector()
+
+        assert isinstance(connector, CSVConnector)
+        assert connector.data_dir == env_dir
 
     def test_get_connector_selects_workday_with_env(self, monkeypatch):
         monkeypatch.setenv("WORKDAY_BASE_URL", "https://wd2-impl-services1.workday.com/test")

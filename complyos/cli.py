@@ -17,6 +17,7 @@ from complyos.api.mcp_server import (
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.config import ComplyOSConfig
 from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
@@ -311,11 +312,12 @@ def connectors(
 
 @app.command()
 def sync(
-    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
 ):
     """Sync LMS data into local SQLite cache."""
+    resolved_db_path = db_path or ComplyOSConfig.load().database_path()
     connector = _get_connector()
-    repo = LocalRepository(db_path)
+    repo = LocalRepository(resolved_db_path)
 
     async def _sync():
         healthy = await connector.authenticate()
