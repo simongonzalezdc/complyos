@@ -214,3 +214,26 @@ class TestCSVLearningRecords:
         assert await conn.get_learning_records(user_ids=["missing"]) == []
         assert [r.id for r in await conn.get_learning_records(course_ids=["c1"])] == ["lr1"]
         assert await conn.get_learning_records(course_ids=["missing"]) == []
+
+    async def test_get_learning_records_preserves_extra_columns_with_string_keys(self, tmp_path):
+        overwide_enrollments = (
+            "Learning Record ID,Learner ID,Course ID,Completion Status\n"
+            "lr1,u1,c1,Complete,unexpected-note,unexpected-source\n"
+        )
+        conn = CSVConnector(write_csv_dir(
+            tmp_path,
+            LEARNING_RECORD_USERS,
+            LEARNING_RECORD_COURSES,
+            overwide_enrollments,
+        ))
+
+        records = await conn.get_learning_records()
+
+        assert len(records) == 1
+        record = records[0]
+        assert record.raw_source_hash is not None
+        assert all(isinstance(key, str) for key in record.source_payload)
+        assert record.source_payload["__extra_columns__"] == [
+            "unexpected-note",
+            "unexpected-source",
+        ]

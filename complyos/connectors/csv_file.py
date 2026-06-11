@@ -153,7 +153,20 @@ def _parse_float(value: str | None) -> float | None:
         return None
 
 
-def _hash_row(row: dict[str, str]) -> str:
+def _sanitize_source_row(row: dict[Any, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    extra_columns: Any = None
+    for key, value in row.items():
+        if key is None:
+            extra_columns = value
+        else:
+            sanitized[str(key)] = value
+    if extra_columns is not None:
+        sanitized["__extra_columns__"] = extra_columns
+    return sanitized
+
+
+def _hash_row(row: dict[str, Any]) -> str:
     payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -280,6 +293,7 @@ class CSVConnector(LMSConnector):
         if self._learning_records is None:
             self._learning_records = []
             for i, row in enumerate(self._read_rows(ENROLLMENTS_FILE)):
+                source_payload = _sanitize_source_row(row)
                 mapped = _remap_row(row, ENROLLMENT_ALIASES)
                 if "user_id" not in mapped or "course_id" not in mapped:
                     self.skipped_rows[ENROLLMENTS_FILE] += 1
@@ -305,8 +319,8 @@ class CSVConnector(LMSConnector):
                         score=_parse_float(mapped.get("score")),
                         exempt=explicit_exempt or enrollment_status == EnrollmentStatus.EXEMPT,
                         expires_at=_parse_date(mapped.get("expires_at")),
-                        raw_source_hash=_hash_row(row),
-                        source_payload=dict(row),
+                        raw_source_hash=_hash_row(source_payload),
+                        source_payload=source_payload,
                     )
                 )
         return self._learning_records
