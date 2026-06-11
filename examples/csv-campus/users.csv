@@ -1,3 +1,3 @@
-id,employee_id,email,first_name,last_name,department,region,hire_date,employment_status
-s1,S001,student1@example.edu,Student,One,Nursing,US,2025-08-15,active
-s2,S002,student2@example.edu,Student,Two,Nursing,US,2025-08-15,active
+id,email,first_name,last_name,department,region,hire_date,employment_status
+s1,student1@example.edu,Student,One,Nursing,US,2025-08-15,active
+s2,student2@example.edu,Student,Two,Nursing,US,2025-08-15,active

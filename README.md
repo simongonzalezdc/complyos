@@ -123,7 +123,7 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
 | Mock (seed data) | ✅ Built-in | None |
 | SAP SuccessFactors | Future scale-out | OAuth 2.0 |
-| Cornerstone OnDemand | Future scale-out | API Key |
+| Cornerstone OnDemand | Future scale-out | OAuth 2.0 |
 
 ### CSV Configuration
 
@@ -133,6 +133,10 @@ export as `users.csv`, `courses.csv`, and `enrollments.csv`:
 ```bash
 export COMPLYOS_CSV_DIR=./examples/csv   # try it with the bundled sample data
 complyos audit
+
+# Try profile-specific sample exports
+COMPLYOS_CSV_DIR=examples/csv-workforce complyos audit
+COMPLYOS_CSV_DIR=examples/csv-campus complyos audit
 ```
 
 Common column-name variants are recognized automatically (`User ID`,

@@ -44,8 +44,8 @@ The core domain is intentionally small and focused:
 
 - **User** — An employee with department, region, manager, and employment status
 - **Course** — A training course with mandatory flag and category
-- **LearningRecord** — A normalized cross-LMS source record for assignment, completion, exemption, score, due date, and expiry data
-- **Enrollment** — A user's relationship to a course (status, due date, completion %)
+- **LearningRecord** — The cross-LMS connector contract: a normalized source record for assignment, completion, exemption, score, due date, and expiry data
+- **Enrollment** — A user's relationship to a course (status, due date, completion %); retained as the current audit-engine compatibility path
 - **ComplianceGap** — A user missing a required course, with severity and overdue days
 - **AssignmentRule** — A rule that targets users and assigns courses with deadlines
 - **RemediationAction** — An action taken to close a gap (reminder, enroll, notify)
@@ -67,18 +67,18 @@ Connector.get_enrollments() ──▶│
                          AuditReport
 ```
 
-The auditor builds an enrollment map (`dict[(user_id, course_id), Enrollment]`) for O(1) gap detection. This scales linearly with users × courses rather than requiring nested loops over enrollments.
+The auditor currently builds an enrollment map (`dict[(user_id, course_id), Enrollment]`) for O(1) gap detection. Connectors should expose richer source data as `LearningRecord`, then keep `Enrollment` available as the compatibility path for the current auditor and reports. This scales linearly with users × courses rather than requiring nested loops over enrollments.
 
 ### Sync Flow
 
 ```
-Connector ──▶ get_users/get_courses/get_enrollments ──▶ LocalRepository
-                                                            │
-                                                            ▼
-                                                        SQLite
+Connector ──▶ get_users/get_courses/get_enrollments/get_learning_records ──▶ LocalRepository
+                                                                         │
+                                                                         ▼
+                                                                     SQLite
 ```
 
-The `sync` CLI command pulls all data from the connector and replaces the local cache. This enables fast offline queries and powers the assignment rules engine.
+The `sync` CLI command pulls users, courses, enrollments, and learning records from the connector and replaces the local cache. `LearningRecord` is the cross-LMS connector contract; `Enrollment` remains the audit compatibility path while the current auditor consumes enrollment-shaped status data. This enables fast offline queries and powers the assignment rules engine.
 
 ### Rules Flow
 
@@ -98,7 +98,8 @@ Connectors implement `LMSConnector` (ABC) with async methods:
 - `authenticate()` — Health check with boolean result
 - `get_users(filters)` — Normalize LMS user fields to `User`
 - `get_courses(filters)` — Normalize LMS course fields to `Course`
-- `get_enrollments(filters)` — Normalize LMS enrollment fields to `Enrollment`
+- `get_enrollments(filters)` — Normalize LMS enrollment fields to `Enrollment` for current audit compatibility
+- `get_learning_records(filters)` — Normalize LMS transcripts, enrollments, assignments, submissions, completions, exemptions, scores, due dates, and expiry data to `LearningRecord`
 - `trigger_reminder(user_id, course_id)` — Send notification
 
 **Workday Connector** uses `httpx.AsyncClient` with basic auth. Data normalization handles Workday's nested JSON structure (e.g., `supervisoryOrganization.descriptor` → `department`).
@@ -122,7 +123,7 @@ Connectors implement `LMSConnector` (ABC) with async methods:
 | MCP server | Direct tool invocation | 85% |
 | CLI | `CliRunner` with stdout capture | 76% |
 
-**Current local baseline: 171 passing tests, 92% line coverage**
+Use the full local test suite as the release baseline when changing connector, repository, or audit behavior; avoid relying on a stale hard-coded test count.
 
 ## Evidence Ledger
 
