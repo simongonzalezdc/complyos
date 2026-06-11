@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import Course, Enrollment, EnrollmentStatus, User
+from complyos.models.domain import (
+    Course,
+    Enrollment,
+    EnrollmentStatus,
+    LearningRecord,
+    LearningRecordStatus,
+    User,
+)
 
 
 class TestUserRepository:
@@ -214,6 +221,98 @@ class TestEnrollmentRepository:
 
         completed = repo.list_enrollments(status="completed")
         assert len(completed) == 1
+
+
+class TestLearningRecordRepository:
+    def test_save_and_list_learning_records(self, tmp_path):
+        repo = LocalRepository(str(tmp_path / "test.db"))
+        repo.save_user(
+            User(
+                id="u1",
+                employee_id="E001",
+                email="a@example.com",
+                first_name="A",
+                last_name="A",
+                department="Engineering",
+                region="US",
+                hire_date=date(2023, 1, 1),
+                employment_status="active",
+            )
+        )
+        repo.save_course(Course(id="c1", code="SEC-101", title="Security"))
+
+        record = LearningRecord(
+            id="lr1",
+            user_id="u1",
+            course_id="c1",
+            source_system="workday",
+            source_record_id="wd-123",
+            status=LearningRecordStatus.COMPLETED,
+            assigned_date=datetime(2024, 1, 1, 9, 0, 0),
+            due_date=date(2024, 2, 1),
+            completed_date=datetime(2024, 1, 15, 16, 30, 0),
+            completion_percentage=100.0,
+            score=92.5,
+            exempt=False,
+            expires_at=date(2025, 1, 15),
+            raw_source_hash="sha256:abc123",
+            source_payload={"provider": "workday", "version": 3},
+        )
+        repo.save_learning_record(record)
+
+        records = repo.list_learning_records(user_id="u1")
+        assert len(records) == 1
+        retrieved = records[0]
+        assert retrieved.id == "lr1"
+        assert retrieved.user_id == "u1"
+        assert retrieved.course_id == "c1"
+        assert retrieved.source_system == "workday"
+        assert retrieved.source_record_id == "wd-123"
+        assert retrieved.status == LearningRecordStatus.COMPLETED
+        assert retrieved.assigned_date == datetime(2024, 1, 1, 9, 0, 0)
+        assert retrieved.due_date == date(2024, 2, 1)
+        assert retrieved.completed_date == datetime(2024, 1, 15, 16, 30, 0)
+        assert retrieved.completion_percentage == 100.0
+        assert retrieved.score == 92.5
+        assert retrieved.exempt is False
+        assert retrieved.expires_at == date(2025, 1, 15)
+        assert retrieved.raw_source_hash == "sha256:abc123"
+        assert retrieved.source_payload == {"provider": "workday", "version": 3}
+
+    def test_sync_learning_records(self, tmp_path):
+        repo = LocalRepository(str(tmp_path / "test.db"))
+        repo.save_user(
+            User(
+                id="u1",
+                employee_id="E001",
+                email="a@example.com",
+                first_name="A",
+                last_name="A",
+                department="Engineering",
+                region="US",
+                hire_date=date(2023, 1, 1),
+                employment_status="active",
+            )
+        )
+        repo.save_course(Course(id="c1", code="SEC-101", title="Security"))
+
+        records = [
+            LearningRecord(
+                id="lr1",
+                user_id="u1",
+                course_id="c1",
+                source_system="canvas",
+                source_record_id="canvas-123",
+                status=LearningRecordStatus.IN_PROGRESS,
+                source_payload={"provider": "canvas"},
+            )
+        ]
+
+        assert repo.sync_learning_records(records) == 1
+
+        synced = repo.list_learning_records(source_system="canvas")
+        assert len(synced) == 1
+        assert synced[0].id == "lr1"
 
 
 class TestSyncHelpers:

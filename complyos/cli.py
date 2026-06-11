@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -16,6 +17,7 @@ from complyos.api.mcp_server import (
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.config import ComplyOSConfig
 from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
@@ -160,6 +162,72 @@ def status(
 
 
 @app.command()
+def digest(
+    department: str | None = typer.Option(None, "--department", "-d"),
+    region: str | None = typer.Option(None, "--region", "-r"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Show what changed since the last audit: new gaps, resolved gaps, trend."""
+    from complyos.api.mcp_server import generate_compliance_digest
+
+    result = asyncio.run(
+        generate_compliance_digest(department=department, region=region, db_path=db_path)
+    )
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    trend_colors = {"improving": "green", "worsening": "red", "flat": "yellow", "baseline": "cyan"}
+    trend_color = trend_colors.get(result["trend"], "white")
+
+    console.print(f"[bold]Scope:[/bold] {result['scope']}")
+    console.print(f"[bold]Current gaps:[/bold] {result['current_gaps']}")
+    if result["previous_gaps"] is not None:
+        console.print(
+            f"[bold]Previous gaps:[/bold] {result['previous_gaps']} "
+            f"(as of {result['previous_generated_at']})"
+        )
+    console.print(f"[bold]Trend:[/bold] [{trend_color}]{result['trend']}[/{trend_color}]")
+    console.print(f"[bold]Evidence hash:[/bold] {result['evidence_hash']}")
+
+    if result["trend"] == "baseline":
+        console.print(
+            "[cyan]First digest for this scope — baseline recorded. "
+            "Run again after the next sync to see changes.[/cyan]"
+        )
+
+    if result["new_gaps"]:
+        table = Table(title=f"New Gaps ({len(result['new_gaps'])})")
+        table.add_column("User")
+        table.add_column("Department")
+        table.add_column("Course")
+        table.add_column("Severity")
+        for entry in result["new_gaps"]:
+            table.add_row(
+                f"{entry['user_name']} ({entry['user_email']})",
+                entry["department"],
+                entry["course_title"],
+                entry["severity"],
+            )
+        console.print(table)
+
+    if result["resolved_gaps"]:
+        table = Table(title=f"Resolved Gaps ({len(result['resolved_gaps'])})")
+        table.add_column("User")
+        table.add_column("Department")
+        table.add_column("Course")
+        for entry in result["resolved_gaps"]:
+            table.add_row(
+                f"{entry['user_name']} ({entry['user_email']})",
+                entry["department"],
+                entry["course_title"],
+            )
+        console.print(table)
+
+
+@app.command()
 def health():
     """Check LMS connector health."""
     result = asyncio.run(check_connector_health())
@@ -174,12 +242,82 @@ def health():
 
 
 @app.command()
+def init(
+    profile: str = typer.Option("workforce", "--profile", help="Profile: workforce or campus"),
+    output: str = typer.Option("complyos.yaml", "--output", help="Config file to write"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config file"),
+):
+    """Initialize a starter ComplyOS config file."""
+    from complyos.profiles import get_profile, render_profile_config
+
+    try:
+        definition = get_profile(profile)
+        config = render_profile_config(profile)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    path = Path(output)
+    if path.exists() and not force:
+        console.print(
+            f"[red]Config already exists at {path}. Use --force to overwrite.[/red]",
+            soft_wrap=True,
+        )
+        raise typer.Exit(1)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(config)
+    console.print(f"[green]Initialized {definition.display_name} config at {path}[/green]")
+
+
+@app.command()
+def connectors(
+    profile: str = typer.Option("all", "--profile", help="Filter: all, workforce, or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Show the connector capability matrix."""
+    from complyos.connectors.capabilities import list_connector_capabilities
+
+    try:
+        items = list_connector_capabilities(profile=profile)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if json_output:
+        console.print(json.dumps([item.to_dict() for item in items], indent=2))
+        return
+
+    table = Table(title="ComplyOS Connector Matrix")
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Profile")
+    table.add_column("Status")
+    table.add_column("Auth")
+    table.add_column("Records")
+    table.add_column("Due Dates")
+    table.add_column("Expiry")
+
+    for item in items:
+        table.add_row(
+            item.name,
+            item.profile,
+            item.status,
+            item.auth,
+            "yes" if item.supports_learning_records else "no",
+            "yes" if item.supports_due_dates else "no",
+            "yes" if item.supports_expiry else "no",
+        )
+    console.print(table)
+
+
+@app.command()
 def sync(
-    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
 ):
     """Sync LMS data into local SQLite cache."""
+    resolved_db_path = db_path or ComplyOSConfig.load().database_path()
     connector = _get_connector()
-    repo = LocalRepository(db_path)
+    repo = LocalRepository(resolved_db_path)
 
     async def _sync():
         healthy = await connector.authenticate()
@@ -192,18 +330,20 @@ def sync(
         users = await connector.get_users()
         courses = await connector.get_courses()
         enrollments = await connector.get_enrollments()
+        learning_records = await connector.get_learning_records()
 
         repo.clear_all()
         repo.sync_users(users)
         repo.sync_courses(courses)
         repo.sync_enrollments(enrollments)
+        repo.sync_learning_records(learning_records)
 
-        return len(users), len(courses), len(enrollments)
+        return len(users), len(courses), len(enrollments), len(learning_records)
 
-    user_count, course_count, enrollment_count = asyncio.run(_sync())
+    user_count, course_count, enrollment_count, learning_record_count = asyncio.run(_sync())
     console.print(
         f"[green]Synced {user_count} users, {course_count} courses, "
-        f"{enrollment_count} enrollments[/green]"
+        f"{enrollment_count} enrollments, {learning_record_count} learning records[/green]"
     )
 
 
@@ -337,6 +477,34 @@ def export(
     report = asyncio.run(_export())
     path = export_html(report, output)
     console.print(f"[green]Report exported to {path}[/green]")
+
+
+@app.command()
+def dashboard(
+    output: str = typer.Argument("dashboard.html", help="Output HTML file path"),
+    department: str | None = typer.Option(None, "--department", "-d"),
+    region: str | None = typer.Option(None, "--region", "-r"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    open_browser: bool = typer.Option(False, "--open", help="Open in default browser"),
+):
+    """Generate a self-contained HTML compliance dashboard."""
+    from complyos.api.mcp_server import _get_auditor
+    from complyos.core.dashboard import generate_dashboard
+
+    async def _build():
+        auditor = _get_auditor()
+        return await auditor.generate_report(department=department, region=region)
+
+    report = asyncio.run(_build())
+    history = LocalRepository(db_path).list_audit_snapshots(scope=report.scope)
+    path = generate_dashboard(report, history=history, output_path=output)
+    console.print(f"[green]Dashboard written to {path}[/green]")
+
+    if open_browser:
+        import os
+        import webbrowser
+
+        webbrowser.open(f"file://{os.path.abspath(path)}")
 
 
 @app.command()

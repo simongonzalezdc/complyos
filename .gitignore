@@ -28,3 +28,8 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 *.log
+.omc/
+
+# Local agent/runtime workspaces
+.worktrees/
+.omx/

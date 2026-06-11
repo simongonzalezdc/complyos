@@ -1,0 +1,3 @@
+Learning Record ID,learner_id,course_id,status,assigned_date,due_date,completed_date,completion_percentage,source_system,source_record_id
+lr1,s1,c1,complete,2025-08-15,2025-09-15,2025-08-20,100,canvas,canvas-enrollment-1
+lr2,s2,c1,Not Started,2025-08-15,2025-09-15,,0,canvas,canvas-enrollment-2

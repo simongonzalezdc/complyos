@@ -1,0 +1,3 @@
+id,code,title,mandatory,category
+c1,SEC-101,Information Security Basics,true,Compliance
+c2,COC-101,Code of Conduct,true,Compliance

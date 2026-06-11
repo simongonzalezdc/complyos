@@ -35,3 +35,9 @@ class TestComplyOSConfig:
         monkeypatch.chdir(tmp_path)
         config = ComplyOSConfig.load()
         assert config.database["path"] == "custom.db"
+
+
+def test_database_path_uses_config_or_default():
+    config = ComplyOSConfig({"database": {"path": "configured.db"}})
+    assert config.database_path() == "configured.db"
+    assert ComplyOSConfig({}).database_path() == "complyos.db"

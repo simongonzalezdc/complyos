@@ -11,6 +11,7 @@ from complyos.api.mcp_server import (
     generate_audit_report,
     get_user_compliance_status,
 )
+from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.workday import WorkdayConnector
 
 
@@ -67,9 +68,44 @@ class TestMCPTools:
 
 
 class TestConnectorSelection:
-    def test_get_connector_defaults_to_mock(self):
+    def test_get_connector_defaults_to_mock(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
         connector = _get_connector()
         assert connector.name == "mock"
+
+    def test_get_connector_selects_csv_from_config(self, monkeypatch, tmp_path):
+        csv_dir = tmp_path / "csv"
+        csv_dir.mkdir()
+        (tmp_path / "complyos.yaml").write_text(
+            f"connector:\n  type: csv\n  csv_dir: {csv_dir}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        connector = _get_connector()
+
+        assert isinstance(connector, CSVConnector)
+        assert connector.data_dir == csv_dir
+
+    def test_get_connector_env_csv_overrides_config(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "config-csv"
+        env_dir = tmp_path / "env-csv"
+        config_dir.mkdir()
+        env_dir.mkdir()
+        (tmp_path / "complyos.yaml").write_text(
+            f"connector:\n  type: csv\n  csv_dir: {config_dir}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("COMPLYOS_CSV_DIR", str(env_dir))
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        connector = _get_connector()
+
+        assert isinstance(connector, CSVConnector)
+        assert connector.data_dir == env_dir
 
     def test_get_connector_selects_workday_with_env(self, monkeypatch):
         monkeypatch.setenv("WORKDAY_BASE_URL", "https://wd2-impl-services1.workday.com/test")
@@ -77,6 +113,32 @@ class TestConnectorSelection:
         monkeypatch.setenv("WORKDAY_PASSWORD", "test_pass")
         connector = _get_connector()
         assert isinstance(connector, WorkdayConnector)
+
+    def test_get_connector_selects_workday_from_config_with_env_placeholders(
+        self, monkeypatch, tmp_path
+    ):
+        (tmp_path / "complyos.yaml").write_text(
+            "connector:\n"
+            "  type: workday\n"
+            "  workday:\n"
+            "    base_url: ${WD_TEST_BASE_URL}\n"
+            "    username: config_user\n"
+            "    password: ${WD_TEST_PASSWORD}\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+        monkeypatch.delenv("WORKDAY_USERNAME", raising=False)
+        monkeypatch.delenv("WORKDAY_PASSWORD", raising=False)
+        monkeypatch.setenv("WD_TEST_BASE_URL", "https://wd.example.test/tenant")
+        monkeypatch.setenv("WD_TEST_PASSWORD", "config_secret")
+
+        connector = _get_connector()
+
+        assert isinstance(connector, WorkdayConnector)
+        assert connector.base_url == "https://wd.example.test/tenant"
+        assert connector.username == "config_user"
+        assert connector.password == "config_secret"
 
 
 class TestRulesMCPTools:

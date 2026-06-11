@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from complyos.models.domain import Course, Enrollment, User
+from complyos.models.domain import Course, Enrollment, LearningRecord, User
 
 
 class LMSConnector(ABC):
@@ -34,6 +34,20 @@ class LMSConnector(ABC):
     ) -> list[Enrollment]:
         """Fetch enrollments, optionally filtered by user or course."""
         ...
+
+    async def get_learning_records(
+        self, user_ids: list[str] | None = None, course_ids: list[str] | None = None
+    ) -> list[LearningRecord]:
+        """Fetch learning records, defaulting to enrollment-compatible records."""
+        enrollments = await self.get_enrollments(user_ids=user_ids, course_ids=course_ids)
+        return [
+            LearningRecord.from_enrollment(
+                enrollment,
+                source_system=self.name,
+                source_record_id=enrollment.id,
+            )
+            for enrollment in enrollments
+        ]
 
     @abstractmethod
     async def trigger_reminder(self, user_id: str, course_id: str) -> bool:

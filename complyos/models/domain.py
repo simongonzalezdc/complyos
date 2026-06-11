@@ -65,6 +65,112 @@ class Enrollment(BaseModel):
     score: float | None = None
 
 
+class LearningRecordStatus(StrEnum):
+    ASSIGNED = "assigned"
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    OVERDUE = "overdue"
+    EXEMPT = "exempt"
+    EXPIRED = "expired"
+
+
+_LEARNING_TO_ENROLLMENT_STATUS: dict[LearningRecordStatus, EnrollmentStatus] = {
+    LearningRecordStatus.ASSIGNED: EnrollmentStatus.NOT_STARTED,
+    LearningRecordStatus.NOT_STARTED: EnrollmentStatus.NOT_STARTED,
+    LearningRecordStatus.IN_PROGRESS: EnrollmentStatus.IN_PROGRESS,
+    LearningRecordStatus.COMPLETED: EnrollmentStatus.COMPLETED,
+    LearningRecordStatus.OVERDUE: EnrollmentStatus.OVERDUE,
+    LearningRecordStatus.EXEMPT: EnrollmentStatus.EXEMPT,
+    LearningRecordStatus.EXPIRED: EnrollmentStatus.OVERDUE,
+}
+
+_ENROLLMENT_TO_LEARNING_STATUS: dict[EnrollmentStatus, LearningRecordStatus] = {
+    EnrollmentStatus.NOT_STARTED: LearningRecordStatus.NOT_STARTED,
+    EnrollmentStatus.IN_PROGRESS: LearningRecordStatus.IN_PROGRESS,
+    EnrollmentStatus.COMPLETED: LearningRecordStatus.COMPLETED,
+    EnrollmentStatus.OVERDUE: LearningRecordStatus.OVERDUE,
+    EnrollmentStatus.EXEMPT: LearningRecordStatus.EXEMPT,
+}
+
+
+class LearningRecord(BaseModel):
+    """Normalized cross-LMS record of a learner's relationship to a learning item."""
+
+    id: str
+    user_id: str
+    course_id: str
+    source_system: str
+    source_record_id: str | None = None
+    status: LearningRecordStatus = LearningRecordStatus.ASSIGNED
+    assigned_date: datetime | None = None
+    due_date: date | None = None
+    completed_date: datetime | None = None
+    completion_percentage: float = 0.0
+    score: float | None = None
+    exempt: bool = False
+    expires_at: date | None = None
+    raw_source_hash: str | None = None
+    source_payload: dict[str, Any] = Field(default_factory=dict)
+
+    def is_expired(self, as_of: date | None = None) -> bool:
+        """Return whether this record's completion has expired as of a date."""
+        if self.exempt or self.expires_at is None:
+            return False
+        return self.expires_at < (as_of or date.today())
+
+    @property
+    def is_compliant(self) -> bool:
+        return self.exempt or (
+            not self.is_expired()
+            and self.status in {
+                LearningRecordStatus.COMPLETED,
+                LearningRecordStatus.EXEMPT,
+            }
+        )
+
+    @classmethod
+    def from_enrollment(
+        cls,
+        enrollment: Enrollment,
+        *,
+        source_system: str = "legacy",
+        source_record_id: str | None = None,
+        raw_source_hash: str | None = None,
+    ) -> LearningRecord:
+        return cls(
+            id=enrollment.id,
+            user_id=enrollment.user_id,
+            course_id=enrollment.course_id,
+            source_system=source_system,
+            source_record_id=source_record_id,
+            status=_ENROLLMENT_TO_LEARNING_STATUS[enrollment.status],
+            assigned_date=enrollment.assigned_date,
+            due_date=enrollment.due_date,
+            completed_date=enrollment.completed_date,
+            completion_percentage=enrollment.completion_percentage,
+            score=enrollment.score,
+            exempt=enrollment.status == EnrollmentStatus.EXEMPT,
+            raw_source_hash=raw_source_hash,
+        )
+
+    def to_enrollment(self, as_of: date | None = None) -> Enrollment:
+        status = _LEARNING_TO_ENROLLMENT_STATUS[self.status]
+        if self.is_expired(as_of):
+            status = EnrollmentStatus.OVERDUE
+        return Enrollment(
+            id=self.id,
+            user_id=self.user_id,
+            course_id=self.course_id,
+            status=status,
+            assigned_date=self.assigned_date,
+            due_date=self.due_date,
+            completed_date=self.completed_date,
+            completion_percentage=self.completion_percentage,
+            score=self.score,
+        )
+
+
 class AssignmentRule(BaseModel):
     name: str
     description: str | None = None

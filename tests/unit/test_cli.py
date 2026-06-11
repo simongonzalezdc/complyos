@@ -206,11 +206,140 @@ class TestSyncCommand:
             async def get_enrollments(self):
                 return []
 
+            async def get_learning_records(self):
+                return []
+
         monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
         db_path = str(tmp_path / "sync.db")
         result = runner.invoke(app, ["sync", "--db", db_path])
         assert result.exit_code == 0
-        assert "Synced 1 users, 1 courses, 0 enrollments" in result.output
+        assert "Synced 1 users, 1 courses, 0 enrollments, 0 learning records" in result.output
+
+    def test_sync_persists_learning_records_when_connector_supports_them(
+        self, monkeypatch, tmp_path
+    ):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                from complyos.models.domain import User
+
+                return [
+                    User(
+                        id="u1",
+                        employee_id="E001",
+                        email="a@example.com",
+                        first_name="A",
+                        last_name="A",
+                        department="Eng",
+                        region="US",
+                        hire_date=date(2023, 1, 1),
+                        employment_status="active",
+                    )
+                ]
+
+            async def get_courses(self):
+                from complyos.models.domain import Course
+
+                return [Course(id="c1", code="SEC-101", title="Security")]
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                from complyos.models.domain import LearningRecord, LearningRecordStatus
+
+                return [
+                    LearningRecord(
+                        id="lr1",
+                        user_id="u1",
+                        course_id="c1",
+                        source_system="fake",
+                        status=LearningRecordStatus.COMPLETED,
+                    )
+                ]
+
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+        db_path = str(tmp_path / "sync.db")
+        result = runner.invoke(app, ["sync", "--db", db_path])
+        assert result.exit_code == 0
+        assert "1 learning records" in result.output
+
+        from complyos.core.repository import LocalRepository
+        from complyos.models.domain import LearningRecordStatus
+
+        records = LocalRepository(db_path).list_learning_records()
+        assert len(records) == 1
+        record = records[0]
+        assert record.id == "lr1"
+        assert record.user_id == "u1"
+        assert record.course_id == "c1"
+        assert record.source_system == "fake"
+        assert record.status == LearningRecordStatus.COMPLETED
+
+
+    def test_sync_uses_configured_db_when_db_omitted(self, monkeypatch, tmp_path):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                return []
+
+            async def get_courses(self):
+                return []
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                return []
+
+        configured_db = tmp_path / "configured.db"
+        (tmp_path / "complyos.yaml").write_text(f"database:\n  path: {configured_db}\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+
+        result = runner.invoke(app, ["sync"])
+
+        assert result.exit_code == 0
+        assert configured_db.exists()
+
+    def test_sync_explicit_db_overrides_config(self, monkeypatch, tmp_path):
+        class FakeConnector:
+            name = "fake"
+
+            async def authenticate(self):
+                return True
+
+            async def get_users(self):
+                return []
+
+            async def get_courses(self):
+                return []
+
+            async def get_enrollments(self):
+                return []
+
+            async def get_learning_records(self):
+                return []
+
+        configured_db = tmp_path / "configured.db"
+        explicit_db = tmp_path / "explicit.db"
+        (tmp_path / "complyos.yaml").write_text(f"database:\n  path: {configured_db}\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("complyos.cli._get_connector", lambda: FakeConnector())
+
+        result = runner.invoke(app, ["sync", "--db", str(explicit_db)])
+
+        assert result.exit_code == 0
+        assert explicit_db.exists()
+        assert not configured_db.exists()
 
     def test_sync_auth_failure(self, monkeypatch):
         class BadConnector:

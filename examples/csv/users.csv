@@ -1,0 +1,5 @@
+id,employee_id,email,first_name,last_name,department,region,hire_date,employment_status
+u1,E001,alice@example.com,Alice,Smith,Engineering,US,2024-01-15,active
+u2,E002,bob@example.com,Bob,Jones,Engineering,US,2023-06-01,active
+u3,E003,carol@example.com,Carol,Davis,HR,US,2025-04-20,active
+u4,E004,david@example.com,David,Wilson,HR,MX,2025-05-10,active
