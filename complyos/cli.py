@@ -244,6 +244,7 @@ def health():
 def init(
     profile: str = typer.Option("workforce", "--profile", help="Profile: workforce or campus"),
     output: str = typer.Option("complyos.yaml", "--output", help="Config file to write"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config file"),
 ):
     """Initialize a starter ComplyOS config file."""
     from complyos.profiles import get_profile, render_profile_config
@@ -256,6 +257,13 @@ def init(
         raise typer.Exit(1) from exc
 
     path = Path(output)
+    if path.exists() and not force:
+        console.print(
+            f"[red]Config already exists at {path}. Use --force to overwrite.[/red]",
+            soft_wrap=True,
+        )
+        raise typer.Exit(1)
+
     path.write_text(config)
     console.print(f"[green]Initialized {definition.display_name} config at {path}[/green]")
 
