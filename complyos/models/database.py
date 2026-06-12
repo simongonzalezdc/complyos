@@ -16,6 +16,8 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     create_engine,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -116,6 +118,7 @@ class DBEvidenceLedger(Base):
     __tablename__ = "evidence_ledger"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     query_type: Mapped[str] = mapped_column(String, nullable=False)
     query_params: Mapped[str] = mapped_column(String, nullable=False)
@@ -276,6 +279,48 @@ class DBAIProvenance(Base):
     usage_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class DBPrivacyRequest(Base):
+    __tablename__ = "privacy_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    subject_id: Mapped[str] = mapped_column(String, nullable=False)
+    request_type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="OPEN", nullable=False)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
+    opened_by: Mapped[str] = mapped_column(String, nullable=False)
+    closed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    request_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    result_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DBLegalHold(Base):
+    __tablename__ = "legal_holds"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    subject_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="ACTIVE", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    released_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    hold_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DBRetentionPolicy(Base):
+    __tablename__ = "retention_policies"
+
+    tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 def resolve_database_url(database: str | None = None) -> str:
     """Resolve a SQLAlchemy database URL from env, URL, or SQLite path."""
     env_url = os.getenv("COMPLYOS_DATABASE_URL")
@@ -291,6 +336,7 @@ def resolve_database_url(database: str | None = None) -> str:
 def init_db(db_path: str = "complyos.db") -> sessionmaker:
     engine = create_engine(resolve_database_url(db_path))
     Base.metadata.create_all(engine)
+    _ensure_sqlite_schema(engine)
     maker = sessionmaker(bind=engine)
     with maker() as session:
         if session.get(DBTenant, "local-default") is None:
@@ -307,3 +353,23 @@ def init_db(db_path: str = "complyos.db") -> sessionmaker:
             )
             session.commit()
     return maker
+
+
+def _ensure_sqlite_schema(engine: Any) -> None:
+    """Apply tiny backwards-compatible SQLite schema repairs for local stores."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    if "evidence_ledger" not in inspector.get_table_names():
+        return
+    evidence_columns = {
+        column["name"] for column in inspector.get_columns("evidence_ledger")
+    }
+    if "tenant_id" not in evidence_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE evidence_ledger "
+                    "ADD COLUMN tenant_id VARCHAR NOT NULL DEFAULT 'local-default'"
+                )
+            )

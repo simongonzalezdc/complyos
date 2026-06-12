@@ -23,8 +23,11 @@ from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.context import default_local_context
+from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.security_evidence import SecurityEvidenceService
 
 mcp = FastMCP("complyos")
 
@@ -557,17 +560,27 @@ async def decide_import_row(
 
 
 @mcp.tool()
-async def list_evidence_ledger(db_path: str = "complyos.db", limit: int = 50) -> dict[str, Any]:
+async def list_evidence_ledger(
+    db_path: str = "complyos.db",
+    tenant_id: str = "local-default",
+    limit: int = 50,
+) -> dict[str, Any]:
     """Read-only: list evidence ledger entries and hashes.
 
     Args:
         db_path: SQLite database path.
+        tenant_id: Tenant scope for ledger entries.
         limit: Maximum ledger entries to return.
 
     Returns:
         Evidence ledger entries.
     """
-    return {"items": LocalRepository(db_path).list_evidence_ledger(limit=limit)}
+    return {
+        "items": LocalRepository(db_path).list_evidence_ledger(
+            tenant_id=tenant_id,
+            limit=limit,
+        )
+    }
 
 
 @mcp.tool()
@@ -614,6 +627,191 @@ async def approve_ai_proposal(
     return (
         AIProposalService(LocalRepository(db_path))
         .approve(context, proposal_id)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def collect_security_evidence(
+    period: str = "current",
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Collect a readiness-only security/SOC2 evidence packet for auditor review."""
+    context = default_local_context(surface="mcp", track=profile, role="compliance_manager")
+    return (
+        SecurityEvidenceService(LocalRepository(db_path))
+        .collect_packet(context, period=period)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def collect_governance_packet(
+    lane: str = "workforce",
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Collect a readiness-only AI, HR-boundary, and school governance packet."""
+    context = default_local_context(surface="mcp", track=profile, role="compliance_manager")
+    return (
+        GovernancePacketService(LocalRepository(db_path))
+        .collect_packet(context, lane=lane)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def create_privacy_request(
+    subject_id: str,
+    request_type: str,
+    region: str | None = None,
+    notes: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Create a privacy/data-subject request case.
+
+    Args:
+        subject_id: Subject/user identifier.
+        request_type: access, export, correction, deletion, restriction, or objection.
+        region: Optional jurisdiction label.
+        notes: Optional internal notes.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        Privacy request metadata.
+    """
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .create_request(
+            context,
+            subject_id=subject_id,
+            request_type=request_type,
+            region=region,
+            notes=notes,
+        )
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def export_privacy_subject(
+    request_id: str,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Export subject data for a scoped privacy request."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .export_subject(context, request_id)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def approve_privacy_request(
+    request_id: str,
+    approval_note: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Record controller approval before exporting or deleting subject data."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .approve_request(context, request_id, approval_note=approval_note)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def delete_privacy_subject(
+    request_id: str,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Delete subject data unless blocked by an active legal hold."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .delete_subject(context, request_id)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def create_legal_hold(
+    subject_id: str | None,
+    scope: str,
+    reason: str,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Create an active legal hold that blocks deletion workflows."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .create_legal_hold(context, subject_id=subject_id, scope=scope, reason=reason)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def release_legal_hold(
+    hold_id: str,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Release a legal hold."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .release_legal_hold(context, hold_id)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def configure_privacy_retention(
+    raw_import_days: int,
+    evidence_days: int,
+    action_log_days: int,
+    ai_proposal_days: int,
+    privacy_request_days: int = 365,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Configure tenant retention settings for privacy program evidence."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .configure_retention_policy(
+            context,
+            raw_import_days=raw_import_days,
+            evidence_days=evidence_days,
+            action_log_days=action_log_days,
+            ai_proposal_days=ai_proposal_days,
+            privacy_request_days=privacy_request_days,
+        )
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def run_privacy_retention(
+    dry_run: bool = True,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Run retention cleanup for closed privacy program artifacts."""
+    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    return (
+        PrivacyProgramService(LocalRepository(db_path))
+        .run_retention_cleanup(context, dry_run=dry_run)
         .model_dump(mode="json")
     )
 

@@ -361,10 +361,23 @@ class TestSyncHelpers:
             )
         )
         repo.save_course(Course(id="c1", code="SEC-101", title="Security"))
+        repo.save_ai_proposal(
+            {
+                "id": "ai1",
+                "tenant_id": "local-default",
+                "proposal_type": "mapping",
+                "input_hash": "input",
+                "output_hash": "output",
+                "status": "REJECTED",
+                "created_by": "agent",
+                "output": {"field": "value"},
+            }
+        )
         repo.clear_all()
 
         assert repo.get_user("u1") is None
         assert repo.get_course("c1") is None
+        assert repo.get_ai_proposal("ai1") is None
 
 
 class TestEmptyResults:

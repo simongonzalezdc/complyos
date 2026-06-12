@@ -30,14 +30,21 @@ from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.context import ROLE_PERMISSIONS, default_local_context
+from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.security_evidence import SecurityEvidenceService
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 import_app = typer.Typer(name="import", help="Preview, decide, and promote import batches")
 evidence_app = typer.Typer(name="evidence", help="Inspect evidence ledger entries")
 ai_app = typer.Typer(name="ai", help="Proposal-only AI assistance")
 admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
+governance_app = typer.Typer(name="governance", help="AI, HR, and school governance packets")
+privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
+privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
+security_app = typer.Typer(name="security", help="Security evidence and assurance readiness")
 console = Console()
 
 
@@ -809,11 +816,12 @@ def import_decide(
 @evidence_app.command("list")
 def evidence_list(
     db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    tenant_id: str = typer.Option("local-default", "--tenant", help="Tenant ID"),
     limit: int = typer.Option(50, "--limit", help="Maximum rows"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """List evidence ledger entries."""
-    items = LocalRepository(db_path).list_evidence_ledger(limit=limit)
+    items = LocalRepository(db_path).list_evidence_ledger(tenant_id=tenant_id, limit=limit)
     if json_output:
         _print_json({"items": items})
         return
@@ -891,10 +899,237 @@ def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output r
     console.print(table)
 
 
+@security_app.command("evidence")
+def security_evidence(
+    period: str = typer.Option("current", "--period", help="Evidence period label"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Collect a readiness-only security evidence packet."""
+    context = _local_cli_context(track=track, role="compliance_manager")
+    result = SecurityEvidenceService(LocalRepository(db_path)).collect_packet(
+        context,
+        period=period,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Security evidence period:[/bold] {result.period}")
+    console.print(f"[bold]Posture:[/bold] {result.posture}")
+    console.print(f"[bold]Summary:[/bold] {result.summary}")
+
+
+@governance_app.command("packet")
+def governance_packet(
+    lane: str = typer.Option("workforce", "--lane", help="workforce, campus, or combined"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Collect AI, HR-boundary, and school-readiness governance packet."""
+    context = _local_cli_context(track=track, role="compliance_manager")
+    result = GovernancePacketService(LocalRepository(db_path)).collect_packet(
+        context,
+        lane=lane,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Governance lane:[/bold] {result.lane}")
+    console.print(f"[bold]Posture:[/bold] {result.posture}")
+    console.print(f"[bold]Summary:[/bold] {result.summary}")
+
+
+@privacy_app.command("request")
+def privacy_request(
+    subject_id: str = typer.Argument(..., help="Subject/user identifier"),
+    request_type: str = typer.Option("access", "--type", help="access/export/correction/deletion"),
+    region: str | None = typer.Option(None, "--region", help="Region or jurisdiction"),
+    notes: str | None = typer.Option(None, "--notes", help="Internal request notes"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create a privacy/data-subject request case."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).create_request(
+        context,
+        subject_id=subject_id,
+        request_type=request_type,
+        region=region,
+        notes=notes,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Privacy request:[/bold] {result.request_id}")
+    console.print(f"[bold]Subject:[/bold] {result.subject_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+
+
+@privacy_app.command("approve")
+def privacy_approve(
+    request_id: str = typer.Argument(..., help="Privacy request ID"),
+    note: str | None = typer.Option(None, "--note", help="Controller approval note"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Record controller approval before export/delete processing."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).approve_request(
+        context,
+        request_id,
+        approval_note=note,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Privacy request:[/bold] {result.request_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+
+
+@privacy_app.command("export")
+def privacy_export(
+    request_id: str = typer.Argument(..., help="Privacy request ID"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Export subject data for an approved privacy request."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).export_subject(context, request_id)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Privacy request:[/bold] {result.request_id}")
+    console.print(f"[bold]Subject records:[/bold] {result.record_counts}")
+
+
+@privacy_app.command("delete")
+def privacy_delete(
+    request_id: str = typer.Argument(..., help="Privacy request ID"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Delete/anonymize subject records unless blocked by legal hold."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).delete_subject(context, request_id)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Privacy request:[/bold] {result.request_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+    if result.blocked_by_holds:
+        hold_ids = ", ".join(result.blocked_by_holds)
+        console.print(f"[yellow]Blocked by legal holds:[/yellow] {hold_ids}")
+
+
+@privacy_app.command("legal-hold")
+def privacy_legal_hold(
+    subject_id: str = typer.Argument(..., help="Subject/user identifier"),
+    scope: str = typer.Option("subject", "--scope", help="subject, tenant, or system"),
+    reason: str = typer.Option(..., "--reason", help="Reason for legal hold"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create an active legal hold that blocks deletion."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).create_legal_hold(
+        context,
+        subject_id=subject_id,
+        scope=scope,
+        reason=reason,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Legal hold:[/bold] {result.hold_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+
+
+@privacy_app.command("release-hold")
+def privacy_release_hold(
+    hold_id: str = typer.Argument(..., help="Legal hold ID"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Release a legal hold."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).release_legal_hold(context, hold_id)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Legal hold:[/bold] {result.hold_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+
+
+@privacy_retention_app.command("configure")
+def privacy_retention_configure(
+    raw_import_days: int = typer.Option(..., "--raw-import-days"),
+    evidence_days: int = typer.Option(..., "--evidence-days"),
+    action_log_days: int = typer.Option(..., "--action-log-days"),
+    ai_proposal_days: int = typer.Option(..., "--ai-proposal-days"),
+    privacy_request_days: int = typer.Option(365, "--privacy-request-days"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Configure tenant retention settings for privacy program evidence."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).configure_retention_policy(
+        context,
+        raw_import_days=raw_import_days,
+        evidence_days=evidence_days,
+        action_log_days=action_log_days,
+        ai_proposal_days=ai_proposal_days,
+        privacy_request_days=privacy_request_days,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[bold]Tenant:[/bold] {result.tenant_id}")
+    console.print(f"[bold]Policy:[/bold] {result.policy}")
+
+
+@privacy_retention_app.command("run")
+def privacy_retention_run(
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--apply",
+        help="Preview cleanup by default; use --apply to delete eligible closed cases",
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run retention cleanup for closed privacy program artifacts."""
+    context = _local_cli_context(track=track, role="privacy_admin")
+    result = PrivacyProgramService(LocalRepository(db_path)).run_retention_cleanup(
+        context,
+        dry_run=dry_run,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    mode = "dry-run" if result.dry_run else "apply"
+    console.print(f"[bold]Retention run:[/bold] {mode}")
+    console.print(f"[bold]Eligible:[/bold] {result.eligible_counts}")
+    console.print(f"[bold]Deleted:[/bold] {result.deleted_counts}")
+
+
+privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(ai_app, name="ai")
 app.add_typer(admin_app, name="admin")
+app.add_typer(governance_app, name="governance")
+app.add_typer(security_app, name="security")
+app.add_typer(privacy_app, name="privacy")
 
 
 if __name__ == "__main__":
