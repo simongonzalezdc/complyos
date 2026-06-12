@@ -62,6 +62,19 @@ It is an example contract, not a claim that all parsers are implemented.
 | California DIR/DLSE | US state | Official web pages | State employment/labor training relevance placeholder. | Placeholder source; page parser pending. |
 | EUR-Lex webservice / search | EU/global | API/search | EU legal acts, directives, regulations, CELEX identifiers, XML output. | Placeholder source; registration/SOAP support required. |
 
+## Shared Source Intelligence engine
+
+RegWatch v0 now uses the shared [Source Intelligence Engine](./source-intelligence-engine-v0.md)
+with MicroLearn Radar. RegWatch is the compliance/legal policy adapter over the
+same source registry, snapshot, content-hash, signal, proposal, and human-review
+primitives used for microlearning suggestions.
+
+This matters operationally: one official source snapshot can create a RegWatch
+obligation proposal and a MicroLearn draft-module proposal without duplicating
+source capture or losing provenance. The shared engine is implemented/tested;
+live crawling, scheduler jobs, and jurisdiction-specific parsers remain roadmap
+until separately built and verified.
+
 ## Proposal-only workflow
 
 ```text

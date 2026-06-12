@@ -11,8 +11,9 @@ pretending every future module is already production software.
 - **Chosen model:** brand now, integrate later.
 - **Implemented core today:** ComplyOS learning-evidence, readiness, privacy,
   security packet, CLI/API/MCP, CSV fallback, and connector-profile workflows.
-- **Near-term extension:** RegWatch as proposal-only regulatory intelligence
-  with official-source provenance and human approval gates.
+- **Near-term extension:** a shared Source Intelligence engine that powers
+  proposal-only RegWatch signals and MicroLearn Radar suggestions with
+  official/source provenance and human approval gates.
 - **Demo/spec modules:** instructional design, training specialist,
   microlearning, scheduling, rosters, learner support, evaluation, and manager
   briefs.
@@ -43,12 +44,13 @@ Use these labels everywhere the suite is described:
 | Module | Maturity | Primary user | Role in the suite | Required guardrail |
 | --- | --- | --- | --- | --- |
 | **ComplyOS** | Live | HR, L&D, security, campus ops, auditors | Compliance evidence engine: gaps, packets, tenant-scoped audit logs, retention/DSR, readiness controls. | Readiness/control mapping only; no certification or legal-status claim. |
-| **RegWatch** | Contract | Legal/compliance, L&D owners | Monitors official-source regulatory changes and creates proposal-only relevance/training-impact alerts. | No rule mutation without human approval. |
+| **RegWatch** | Contract | Legal/compliance, L&D owners | Monitors official-source regulatory changes through the shared Source Intelligence engine and creates proposal-only relevance/training-impact alerts. | No rule mutation without human approval. |
+| **Source Intelligence** | Live | Product operator, compliance owner, instructional designer | Shared source registry/snapshot/signal/proposal spine for RegWatch and MicroLearn Radar; deterministic adapters are implemented and tested. | No crawler or adapter may publish, assign, notify, or mutate rules without approval. |
 | **Intake** | Synthetic demo | Training coordinator, business requester | Captures requests, missing info, priority, audience, constraints, and routing. | Human owner confirms scope before work starts. |
 | **Scheduling** | Synthetic demo | Training coordinator | Cohorts, sessions, rooms/links, reminders, waitlists, and reschedules. | Human-approved rollout plan before notifications. |
 | **Learner Support** | Synthetic demo | Training specialist, coordinator | Drafts learner follow-up, escalation notes, and missing-completion nudges. | Draft-only messaging until a human sends or approves. |
 | **Rosters** | Synthetic demo | Training coordinator, L&D analyst | Normalizes attendance/enrollment/completion records across LMS, HRIS, and CSV exports. | Quarantine/preview before imports mutate truth. |
-| **MicroLearn Radar** | Roadmap | Instructional designer, training specialist | Finds source-backed topic suggestions and drafts microlearning candidates after approval. | Source quality scoring and SME approval before publication. |
+| **MicroLearn Radar** | Roadmap | Instructional designer, training specialist | Uses the shared Source Intelligence engine to find source-backed topic suggestions and draft microlearning candidates after approval. | Source quality scoring and SME approval before publication. |
 | **NeedsAnalysis** | Synthetic demo | Instructional designer, L&D partner | Determines whether training is the right intervention and captures the performance gap. | Explicit “training may not be the fix” outcome. |
 | **ObjectiveBuilder** | Synthetic demo | Instructional designer | Converts needs into measurable learning objectives and assessment alignment. | SME review before objectives become course requirements. |
 | **StoryboardStudio** | Synthetic demo | Instructional designer | Drafts lesson/module outlines, SME review packets, and microlearning structure. | Draft-only until SME approval. |
@@ -75,6 +77,21 @@ ComplyOS should stay focused on the evidence workflow:
 The suite can call ComplyOS, but ComplyOS should not need speculative suite
 modules to stay useful. This preserves the current product and keeps the suite
 modular for buyers who only need evidence/compliance.
+
+## Source Intelligence placement
+
+RegWatch and MicroLearn Radar are not two separate crawlers. They share one
+source-intelligence spine:
+
+1. registered source or approved upload;
+2. content-hashed snapshot;
+3. adapter scoring;
+4. proposal packet;
+5. human approval gate.
+
+The implemented v0 slice is deterministic and test-covered. It does not include
+live network crawling, scheduled monitoring, source-specific parsers, or
+auto-publication. See [Source Intelligence Engine v0](./source-intelligence-engine-v0.md).
 
 ## RegWatch placement
 
@@ -152,8 +169,10 @@ Full packet:
 ## Near-term build sequence
 
 1. Keep ComplyOS stable as the live module.
-2. Add RegWatch contracts and fixtures with source provenance and approval
+2. Build and test the shared Source Intelligence primitives behind RegWatch
+   and MicroLearn Radar.
+3. Add RegWatch contracts and fixtures with source provenance and approval
    gates.
-3. Build the two synthetic suite demos.
-4. Refresh landing/docs to distinguish live, demo, and roadmap capability.
-5. Let buyer pull decide which demo/spec modules become production runtime.
+4. Build the two synthetic suite demos.
+5. Refresh landing/docs to distinguish live, demo, and roadmap capability.
+6. Let buyer pull decide which demo/spec modules become production runtime.
