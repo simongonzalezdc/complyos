@@ -21,6 +21,10 @@ from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender
+from complyos.services.ai_proposals import AIProposalService
+from complyos.services.context import default_local_context
+from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.readiness import ReadinessService
 
 mcp = FastMCP("complyos")
 
@@ -442,6 +446,176 @@ async def send_notification(
     if notifier is None:
         return {"sent": False, "error": "SMTP not configured"}
     return await notifier.send_email(to_address, subject, body)
+
+
+@mcp.tool()
+async def check_readiness(db_path: str = "complyos.db") -> dict[str, Any]:
+    """Read-only: check enterprise/school readiness controls without making compliance claims.
+
+    Args:
+        db_path: SQLite database path.
+
+    Returns:
+        Readiness posture, control statuses, global watchlist, and forbidden claim language.
+    """
+    context = default_local_context(surface="mcp")
+    return ReadinessService(LocalRepository(db_path)).check(context).model_dump(mode="json")
+
+
+@mcp.tool()
+async def preview_import_batch(
+    csv_text: str,
+    source_system: str = "csv",
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Read-only/proposal-gated: preview and quarantine CSV rows before promotion.
+
+    This does not mutate active learning records. Bad rows fail closed and require
+    explicit decisions before promotion.
+
+    Args:
+        csv_text: CSV content to preview.
+        source_system: Source system label.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        Import batch id, validation counts, issues, and can_promote flag.
+    """
+    context = default_local_context(surface="mcp", track=profile)
+    request = ImportPreviewRequest(
+        source_system=source_system,
+        profile=profile,
+        csv_text=csv_text,
+    )
+    return ImportService(LocalRepository(db_path)).preview(context, request).model_dump(mode="json")
+
+
+@mcp.tool()
+async def promote_import_batch(
+    batch_id: str,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: promote a validated import batch into active learning records.
+
+    Promotion requires service-layer permission and blocks if rows are rejected,
+    pending, or need a decision.
+
+    Args:
+        batch_id: Import batch ID returned by preview_import_batch.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        Promotion status, promoted row count, blocked row count, and evidence id.
+    """
+    context = default_local_context(surface="mcp", track=profile)
+    return (
+        ImportService(LocalRepository(db_path))
+        .promote(context, batch_id)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def decide_import_row(
+    batch_id: str,
+    row_id: str,
+    decision_type: str,
+    reason: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating metadata: record an explicit import-row decision.
+
+    Args:
+        batch_id: Import batch ID returned by preview_import_batch.
+        row_id: Import row ID from the preview result.
+        decision_type: accept, reject, map_field, merge_duplicate, ignore_row,
+            or require_manual_review.
+        reason: Optional human-readable decision reason.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        Decision result and resulting row status.
+    """
+    context = default_local_context(surface="mcp", track=profile)
+    return (
+        ImportService(LocalRepository(db_path))
+        .decide(
+            context,
+            batch_id=batch_id,
+            row_id=row_id,
+            decision_type=decision_type,
+            reason=reason,
+        )
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def list_evidence_ledger(db_path: str = "complyos.db", limit: int = 50) -> dict[str, Any]:
+    """Read-only: list evidence ledger entries and hashes.
+
+    Args:
+        db_path: SQLite database path.
+        limit: Maximum ledger entries to return.
+
+    Returns:
+        Evidence ledger entries.
+    """
+    return {"items": LocalRepository(db_path).list_evidence_ledger(limit=limit)}
+
+
+@mcp.tool()
+async def propose_field_mapping(
+    headers: list[str],
+    target_schema: str = "learning_records",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Proposal-only: suggest CSV/header mappings with stored provenance.
+
+    The proposal cannot promote imports, mark compliance, or mutate records.
+
+    Args:
+        headers: Source CSV headers to map.
+        target_schema: Target schema name.
+        db_path: SQLite database path.
+
+    Returns:
+        Proposal id, suggested mappings, hashes, and provenance.
+    """
+    context = default_local_context(surface="mcp")
+    return AIProposalService(LocalRepository(db_path)).propose_mapping(
+        context,
+        headers=headers,
+        target_schema=target_schema,
+    ).model_dump(mode="json")
+
+
+@mcp.tool()
+async def approve_ai_proposal(
+    proposal_id: str,
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating metadata only: approve an AI proposal record without changing compliance truth.
+
+    Args:
+        proposal_id: Proposal id returned by propose_field_mapping.
+        db_path: SQLite database path.
+
+    Returns:
+        Approved proposal metadata and provenance.
+    """
+    context = default_local_context(surface="mcp")
+    return (
+        AIProposalService(LocalRepository(db_path))
+        .approve(context, proposal_id)
+        .model_dump(mode="json")
+    )
 
 
 def main() -> None:

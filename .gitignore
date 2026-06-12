@@ -33,3 +33,5 @@ ENV/
 # Local agent/runtime workspaces
 .worktrees/
 .omx/
+.codex-audit/
+output/

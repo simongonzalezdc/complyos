@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Annotated
 
 import typer
 import yaml
@@ -27,9 +28,25 @@ from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
+from complyos.services.ai_proposals import AIProposalService
+from complyos.services.context import ROLE_PERMISSIONS, default_local_context
+from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.readiness import ReadinessService
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
+import_app = typer.Typer(name="import", help="Preview, decide, and promote import batches")
+evidence_app = typer.Typer(name="evidence", help="Inspect evidence ledger entries")
+ai_app = typer.Typer(name="ai", help="Proposal-only AI assistance")
+admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
 console = Console()
+
+
+def _local_cli_context(*, track: str = "workforce", role: str = "owner"):
+    return default_local_context(surface="cli", track=track, role=role)
+
+
+def _print_json(data: object) -> None:
+    console.print(json.dumps(data, indent=2, default=str), soft_wrap=True)
 
 
 def _get_notifier() -> NotificationSender | None:
@@ -666,6 +683,218 @@ def notify_test(
     else:
         console.print(f"[red]Failed to send email: {result.get('error')}[/red]")
         raise typer.Exit(1)
+
+
+@app.command()
+def readiness(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run readiness checks without claiming certification/compliance."""
+    context = _local_cli_context(track=track)
+    result = ReadinessService(LocalRepository(db_path)).check(context)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+
+    console.print("[yellow]Local CLI context:[/yellow] local-admin (readiness-only)")
+    console.print(f"[bold]Posture:[/bold] {result.posture}")
+    table = Table(title="Readiness Controls")
+    table.add_column("Control")
+    table.add_column("Area")
+    table.add_column("Status")
+    table.add_column("Artifact")
+    for control in result.controls:
+        table.add_row(control.title, control.area, control.status, control.artifact)
+    console.print(table)
+
+
+@import_app.command("preview")
+def import_preview(
+    path: str = typer.Argument(..., help="CSV file to preview"),
+    source_system: str = typer.Option("csv", "--source-system", help="Source system name"),
+    profile: str = typer.Option("workforce", "--profile", help="workforce or campus"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Preview and quarantine a CSV import; does not mutate active records."""
+    context = _local_cli_context(track=profile)
+    request = ImportPreviewRequest(source_system=source_system, profile=profile, path=path)
+    result = ImportService(LocalRepository(db_path)).preview(context, request)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+
+    console.print("[yellow]Local CLI context:[/yellow] local-admin (import preview)")
+    console.print(f"[bold]Batch:[/bold] {result.batch_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+    console.print(f"[bold]Rows:[/bold] {result.total_rows}")
+    console.print(f"[bold]Can promote:[/bold] {'yes' if result.can_promote else 'no'}")
+    if result.issues:
+        table = Table(title="Import Issues")
+        table.add_column("Code")
+        table.add_column("Severity")
+        table.add_column("Row")
+        table.add_column("Column")
+        table.add_column("Message")
+        for issue in result.issues:
+            table.add_row(
+                issue.code,
+                issue.severity,
+                str(issue.row_number or "—"),
+                issue.column or "—",
+                issue.message,
+            )
+        console.print(table)
+
+
+@import_app.command("promote")
+def import_promote(
+    batch_id: str = typer.Argument(..., help="Import batch ID"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Promote a validated/quarantined import batch into active records."""
+    context = _local_cli_context(track=track)
+    result = ImportService(LocalRepository(db_path)).promote(context, batch_id)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+
+    console.print("[yellow]Local CLI context:[/yellow] local-admin (import promote)")
+    console.print(f"[bold]Batch:[/bold] {result.batch_id}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+    console.print(f"[bold]Promoted rows:[/bold] {result.promoted_rows}")
+    console.print(f"[bold]Blocked rows:[/bold] {result.blocked_rows}")
+    if result.evidence_id:
+        console.print(f"[bold]Evidence id:[/bold] {result.evidence_id}")
+
+
+@import_app.command("decide")
+def import_decide(
+    batch_id: str = typer.Argument(..., help="Import batch ID"),
+    row_id: str = typer.Argument(..., help="Import row ID"),
+    decision_type: str = typer.Option(
+        ...,
+        "--decision",
+        help="accept, reject, map_field, merge_duplicate, ignore_row, require_manual_review",
+    ),
+    reason: str | None = typer.Option(None, "--reason", help="Decision reason"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Record an explicit row decision before promotion."""
+    context = _local_cli_context(track=track)
+    result = ImportService(LocalRepository(db_path)).decide(
+        context,
+        batch_id=batch_id,
+        row_id=row_id,
+        decision_type=decision_type,
+        reason=reason,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+
+    console.print("[yellow]Local CLI context:[/yellow] local-admin (import decision)")
+    console.print(f"[bold]Batch:[/bold] {result.batch_id}")
+    console.print(f"[bold]Row:[/bold] {result.row_id}")
+    console.print(f"[bold]Decision:[/bold] {result.decision_type}")
+    console.print(f"[bold]Row status:[/bold] {result.row_status}")
+
+
+@evidence_app.command("list")
+def evidence_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    limit: int = typer.Option(50, "--limit", help="Maximum rows"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List evidence ledger entries."""
+    items = LocalRepository(db_path).list_evidence_ledger(limit=limit)
+    if json_output:
+        _print_json({"items": items})
+        return
+
+    table = Table(title="Evidence Ledger")
+    table.add_column("Time")
+    table.add_column("Type")
+    table.add_column("Output hash")
+    table.add_column("Summary")
+    for item in items:
+        table.add_row(
+            str(item["timestamp"]),
+            item["query_type"],
+            item["output_hash"][:12],
+            item["output_summary"],
+        )
+    console.print(table)
+
+
+@ai_app.command("propose-mapping")
+def ai_propose_mapping(
+    headers: Annotated[list[str], typer.Argument(..., help="CSV headers to map")],
+    target_schema: str = typer.Option("learning_records", "--target-schema"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create a proposal-only field-mapping suggestion. No records mutate."""
+    context = _local_cli_context(track=track)
+    result = AIProposalService(LocalRepository(db_path)).propose_mapping(
+        context,
+        headers=headers,
+        target_schema=target_schema,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+
+    console.print(f"[bold]Proposal:[/bold] {result.proposal_id}")
+    console.print("[yellow]Proposal-only:[/yellow] no compliance state was changed")
+    for header, mapped in result.output["suggested_mappings"].items():
+        console.print(f"  {header} -> {mapped or 'unmapped'}")
+
+
+@ai_app.command("approve")
+def ai_approve(
+    proposal_id: str = typer.Argument(..., help="AI proposal ID"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Approve an AI proposal record; approval still does not mutate compliance truth."""
+    context = _local_cli_context(track=track)
+    result = AIProposalService(LocalRepository(db_path)).approve(context, proposal_id)
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(f"[green]Approved proposal {result.proposal_id}[/green]")
+    console.print("[yellow]No compliance records were changed by this approval.[/yellow]")
+
+
+@admin_app.command("roles")
+def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output raw JSON")):
+    """Show default roles and permissions."""
+    data = {role: sorted(permissions) for role, permissions in ROLE_PERMISSIONS.items()}
+    if json_output:
+        _print_json(data)
+        return
+
+    table = Table(title="Default Roles")
+    table.add_column("Role")
+    table.add_column("Permissions")
+    for role, permissions in data.items():
+        table.add_row(role, ", ".join(permissions))
+    console.print(table)
+
+
+app.add_typer(import_app, name="import")
+app.add_typer(evidence_app, name="evidence")
+app.add_typer(ai_app, name="ai")
+app.add_typer(admin_app, name="admin")
 
 
 if __name__ == "__main__":
