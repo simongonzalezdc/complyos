@@ -29,6 +29,14 @@ PERM_CONNECTORS_WRITE = "connectors:write"
 PERM_AI_PROPOSE = "ai:propose"
 PERM_AI_APPROVE = "ai:approve"
 PERM_READINESS_READ = "readiness:read"
+PERM_SECURITY_EVIDENCE_READ = "security:evidence:read"
+PERM_GOVERNANCE_READ = "governance:read"
+PERM_PRIVACY_REQUEST = "privacy:request"
+PERM_PRIVACY_APPROVE = "privacy:approve"
+PERM_PRIVACY_EXPORT = "privacy:export"
+PERM_PRIVACY_DELETE = "privacy:delete"
+PERM_PRIVACY_RETENTION_MANAGE = "privacy:retention:manage"
+PERM_LEGAL_HOLD_MANAGE = "legal_hold:manage"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
@@ -50,6 +58,14 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_AI_PROPOSE,
         PERM_AI_APPROVE,
         PERM_READINESS_READ,
+        PERM_SECURITY_EVIDENCE_READ,
+        PERM_GOVERNANCE_READ,
+        PERM_PRIVACY_REQUEST,
+        PERM_PRIVACY_APPROVE,
+        PERM_PRIVACY_EXPORT,
+        PERM_PRIVACY_DELETE,
+        PERM_PRIVACY_RETENTION_MANAGE,
+        PERM_LEGAL_HOLD_MANAGE,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -72,6 +88,23 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_AI_PROPOSE,
             PERM_AI_APPROVE,
             PERM_READINESS_READ,
+            PERM_SECURITY_EVIDENCE_READ,
+            PERM_GOVERNANCE_READ,
+            PERM_PRIVACY_REQUEST,
+            PERM_PRIVACY_APPROVE,
+            PERM_PRIVACY_EXPORT,
+        }
+    ),
+    "privacy_admin": frozenset(
+        {
+            PERM_EVIDENCE_READ,
+            PERM_READINESS_READ,
+            PERM_PRIVACY_REQUEST,
+            PERM_PRIVACY_APPROVE,
+            PERM_PRIVACY_EXPORT,
+            PERM_PRIVACY_DELETE,
+            PERM_PRIVACY_RETENTION_MANAGE,
+            PERM_LEGAL_HOLD_MANAGE,
         }
     ),
     "importer": frozenset({PERM_IMPORT_PREVIEW, PERM_IMPORT_DECIDE, PERM_EVIDENCE_READ}),
@@ -79,7 +112,14 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {PERM_IMPORT_PREVIEW, PERM_IMPORT_DECIDE, PERM_IMPORT_PROMOTE, PERM_EVIDENCE_READ}
     ),
     "reviewer": frozenset(
-        {PERM_AUDIT_READ, PERM_EVIDENCE_READ, PERM_EVIDENCE_EXPORT, PERM_READINESS_READ}
+        {
+            PERM_AUDIT_READ,
+            PERM_EVIDENCE_READ,
+            PERM_EVIDENCE_EXPORT,
+            PERM_READINESS_READ,
+            PERM_SECURITY_EVIDENCE_READ,
+            PERM_GOVERNANCE_READ,
+        }
     ),
     "agent_service_account": frozenset(
         {

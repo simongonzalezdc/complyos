@@ -11,7 +11,7 @@ ComplyOS should present itself as readiness/control-mapping software until couns
 | Family | What ComplyOS must prove | First artifact |
 |---|---|---|
 | Access control | Actor context, roles, permissions, tenant boundary checks | `complyos/services/context.py` |
-| Evidence integrity | Source hashes, transformation steps, output hashes | `evidence_ledger` table and `complyos evidence list` |
+| Evidence integrity | Tenant-scoped source hashes, transformation steps, output hashes | `evidence_ledger` table and `complyos evidence list --tenant` |
 | Import governance | Preview, quarantine, row decisions, blocked promotion | `complyos/services/imports.py` |
 | AI governance | Proposal-only outputs, provenance, human approval | `complyos/services/ai_proposals.py` |
 | Change management | Release checklist, test gates, review evidence | `docs/release-checklist.md` |
@@ -81,6 +81,27 @@ Watchlist references:
 - Japan APPI/PPC legal hub: https://www.ppc.go.jp/en/legal/
 - India DPDP framework: https://www.meity.gov.in/data-protection-framework
 - South Africa POPIA regulator hub: https://inforegulator.org.za/popia/
+
+
+## HR and people-analytics compliance lane
+
+ComplyOS is not primarily an accounting-compliance product. Its procurement risk is HR/L&D, people analytics, privacy, AI governance, and school/student data where applicable. See `docs/hr-people-analytics-compliance-audit.md` for the current gap audit and remediation roadmap.
+
+
+## Phase A privacy artifact index
+
+The first HR/L&D privacy-program artifacts now live in:
+
+- `docs/privacy-data-map.md` — personal-data categories, source systems, processing purposes, retention, and DSR links.
+- `docs/data-retention-deletion-policy.md` — baseline retention schedule, deletion workflow, legal hold, and audit evidence.
+- `docs/data-subject-request-workflow.md` — access/export/correction/deletion workflow and escalation triggers.
+- `docs/subprocessors.md` — subprocessor register and review cadence.
+- `docs/dpa-template.md` — counsel-review template for customer data-processing terms.
+- `docs/breach-response-runbook.md` — breach triage, containment, notification assessment, and post-incident review.
+- `complyos/services/privacy.py` — DSR case creation, controller approval, subject export/delete, retention metadata/cleanup for closed cases/raw imports/rejected AI proposals/evidence/logs, and legal-hold blocking workflows.
+- `docs/security-evidence-control-matrix.md` and `complyos/services/security_evidence.py` — readiness-only security evidence packet for buyer/auditor review.
+- `docs/access-review-procedure.md`, `docs/vulnerability-management-program.md`, `docs/backup-restore-dr-plan.md`, and `docs/incident-tabletop-template.md` — security operations procedures that define the real receipts still needed from production/audit work.
+- `docs/ai-governance-impact-assessment.md`, `docs/school-vendor-privacy-accessibility-packet.md`, `docs/fcra-employment-decision-boundary.md`, and `complyos/services/governance.py` — readiness-only AI, school, accessibility, and employment-boundary packet.
 
 ## Claim guardrail
 

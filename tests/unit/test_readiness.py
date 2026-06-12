@@ -16,4 +16,6 @@ def test_readiness_is_explicitly_readiness_only(tmp_path) -> None:
     assert "readiness-only" in report.posture
     assert report.summary
     assert any(control.id == "gated-import-lifecycle" for control in report.controls)
+    assert any(control.id == "hr-people-analytics-boundary" for control in report.controls)
+    assert any("EEOC" in item for item in report.global_regulation_watchlist)
     assert "SOC 2 certified" in report.forbidden_claims

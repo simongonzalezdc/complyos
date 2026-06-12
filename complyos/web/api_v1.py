@@ -16,8 +16,11 @@ from complyos.services.context import (
     AuthorizationError,
     default_local_context,
 )
+from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.security_evidence import SecurityEvidenceService
 
 
 class ErrorBody(BaseModel):
@@ -39,6 +42,35 @@ class ImportDecisionRequest(BaseModel):
     decision_type: str
     reason: str | None = None
     decision_payload: dict[str, object] = Field(default_factory=dict)
+
+
+class PrivacyRequestBody(BaseModel):
+    subject_id: str
+    request_type: str
+    region: str | None = None
+    notes: str | None = None
+
+
+class PrivacyApprovalBody(BaseModel):
+    note: str | None = None
+
+
+class LegalHoldRequestBody(BaseModel):
+    subject_id: str | None = None
+    scope: str = "subject"
+    reason: str
+
+
+class RetentionPolicyRequestBody(BaseModel):
+    raw_import_days: int
+    evidence_days: int
+    action_log_days: int
+    ai_proposal_days: int
+    privacy_request_days: int = 365
+
+
+class RetentionRunBody(BaseModel):
+    dry_run: bool = True
 
 
 def _http_error(
@@ -185,9 +217,37 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
                 request_id=context.request_id,
             )
         return {
-            "items": repo.list_evidence_ledger(limit=limit),
+            "items": repo.list_evidence_ledger(tenant_id=context.tenant_id, limit=limit),
             "actor_context": context.public_dict(),
         }
+
+    @router.get("/security/evidence")
+    async def collect_security_evidence(
+        period: str = "current",
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return SecurityEvidenceService(repo).collect_packet(
+                context,
+                period=period,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/governance/packet")
+    async def collect_governance_packet(
+        lane: str = "workforce",
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return GovernancePacketService(repo).collect_packet(
+                context,
+                lane=lane,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_governance_lane", exc, context) from exc
 
     @router.post("/ai/proposals/mapping")
     async def propose_mapping(
@@ -216,6 +276,134 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             raise _permission_error(exc, context) from exc
         except (PermissionError, ValueError) as exc:
             raise _bad_request("proposal_approval_failed", exc, context) from exc
+
+    @router.post("/privacy/requests")
+    async def create_privacy_request(
+        request: PrivacyRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).create_request(
+                context,
+                subject_id=request.subject_id,
+                request_type=request.request_type,
+                region=request.region,
+                notes=request.notes,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_privacy_request", exc, context) from exc
+
+    @router.post("/privacy/requests/{request_id}/approve")
+    async def approve_privacy_request(
+        request_id: str,
+        request: PrivacyApprovalBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).approve_request(
+                context,
+                request_id,
+                approval_note=request.note,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("privacy_approval_failed", exc, context) from exc
+
+    @router.post("/privacy/requests/{request_id}/export")
+    async def export_privacy_subject(
+        request_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).export_subject(context, request_id).model_dump(
+                mode="json"
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("privacy_export_failed", exc, context) from exc
+
+    @router.post("/privacy/requests/{request_id}/delete")
+    async def delete_privacy_subject(
+        request_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).delete_subject(context, request_id).model_dump(
+                mode="json"
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("privacy_delete_failed", exc, context) from exc
+
+    @router.post("/privacy/legal-holds")
+    async def create_legal_hold(
+        request: LegalHoldRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).create_legal_hold(
+                context,
+                subject_id=request.subject_id,
+                scope=request.scope,
+                reason=request.reason,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_legal_hold", exc, context) from exc
+
+    @router.post("/privacy/legal-holds/{hold_id}/release")
+    async def release_legal_hold(
+        hold_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).release_legal_hold(context, hold_id).model_dump(
+                mode="json"
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("legal_hold_release_failed", exc, context) from exc
+
+    @router.post("/privacy/retention-policy")
+    async def configure_retention_policy(
+        request: RetentionPolicyRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).configure_retention_policy(
+                context,
+                raw_import_days=request.raw_import_days,
+                evidence_days=request.evidence_days,
+                action_log_days=request.action_log_days,
+                ai_proposal_days=request.ai_proposal_days,
+                privacy_request_days=request.privacy_request_days,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_retention_policy", exc, context) from exc
+
+    @router.post("/privacy/retention-policy/run")
+    async def run_retention_policy(
+        request: RetentionRunBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PrivacyProgramService(repo).run_retention_cleanup(
+                context,
+                dry_run=request.dry_run,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("retention_run_failed", exc, context) from exc
 
     return router
 

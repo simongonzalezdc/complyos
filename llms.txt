@@ -18,6 +18,11 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 - `complyos/connectors/capabilities.py` — Connector capability matrix for supported and planned LMS sources
 - `complyos/api/mcp_server.py` — MCP tool definitions
 - `complyos/cli.py` — CLI entry point
+- `docs/hr-people-analytics-compliance-audit.md` — HR/L&D, people analytics, privacy, AI governance, school-readiness, and FCRA-boundary audit
+- `docs/security-evidence-control-matrix.md` — readiness-only security evidence/control packet map
+- `docs/access-review-procedure.md`, `docs/vulnerability-management-program.md`, `docs/backup-restore-dr-plan.md`, `docs/incident-tabletop-template.md` — security operations procedures for access review, scanning, backup/restore, and tabletop evidence collection
+- `docs/ai-governance-impact-assessment.md`, `docs/school-vendor-privacy-accessibility-packet.md`, `docs/fcra-employment-decision-boundary.md` — governance packet artifacts for AI, schools, accessibility, and decision-boundary review
+- `docs/privacy-data-map.md`, `docs/data-retention-deletion-policy.md`, `docs/data-subject-request-workflow.md`, `docs/subprocessors.md`, `docs/dpa-template.md`, `docs/breach-response-runbook.md` — Phase A privacy/security program artifacts
 
 ## MCP Tools
 - `audit_compliance_gaps(department?, region?)` — Find missing training
@@ -31,6 +36,16 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 - `export_audit_report_html(output_path?, department?, region?)` — Write a self-contained HTML audit report
 - `export_compliance_dashboard(output_path?, department?, region?)` — Write a self-contained HTML dashboard
 - `send_notification(...)` — Send a test or operational email notification
+- `list_evidence_ledger(tenant_id?, limit?)` — Read tenant-scoped evidence hashes and summaries
+- `collect_security_evidence(period?)` — Collect a readiness-only security control/evidence packet
+- `collect_governance_packet(lane?)` — Collect readiness-only AI, school, accessibility, and employment-boundary packet
+- `create_privacy_request(subject_id, request_type, ...)` — Create a tenant-scoped privacy/DSR case pending controller approval
+- `approve_privacy_request(request_id, approval_note?)` — Record controller approval before privacy export/delete processing
+- `export_privacy_subject(request_id)` — Export subject data for an approved scoped privacy request
+- `delete_privacy_subject(request_id)` — Delete subject data only after approval unless blocked by legal hold
+- `create_legal_hold(subject_id?, scope, reason)` / `release_legal_hold(hold_id)` — Manage deletion-blocking legal holds
+- `configure_privacy_retention(...)` — Set tenant retention policy metadata
+- `run_privacy_retention(dry_run?)` — Dry-run or apply cleanup for eligible closed privacy cases, terminal raw import rows/decisions, rejected/expired AI proposals, evidence entries, and action logs
 
 ## Roadmap
 - Phase 1 complete — Core auditor, MCP server, CLI, Workday connector, tests
@@ -50,6 +65,8 @@ uv run pytest --cov=complyos --cov-report=term-missing
 - Use service-backed surfaces only: CLI, MCP, API v1, and web must share the same ComplyOS services.
 - Run readiness before customer-facing or mutating workflows.
 - Preview imports before promotion; never promote rows that are rejected, pending, or need decisions.
+- Create tenant-scoped privacy requests and approval records before export/deletion; legal holds block deletion and tenant-level holds block retention purges.
 - AI is proposal-only with provenance; it cannot mark compliance, promote imports, execute remediation, or change rules.
 - Use evidence hashes in audit/import summaries.
 - Avoid legal/certification claims; use readiness/control-mapping language unless a reviewed artifact authorizes stronger wording.
+- Treat ComplyOS as HR/L&D evidence automation. Do not frame it as accounting compliance, automated employment decisioning, background screening, or bias-free AI.

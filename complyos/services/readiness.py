@@ -72,6 +72,12 @@ class ReadinessService:
                 "WCAG 2.2 AA and ADA public-sector expectations",
                 "GDPR / UK GDPR / LGPD / PIPEDA / APP / PDPA / APPI / PIPA / DPDP / PIPL / POPIA",
                 "EU AI Act and automated-decision transparency considerations",
+                "EEOC / ADA employment-decision and accommodation considerations",
+                "NYC AEDT / Colorado AI Act / similar automated-decision rules",
+                (
+                    "FCRA boundary if reports are used for employment eligibility "
+                    "or background screening"
+                ),
             ],
             forbidden_claims=[
                 "SOC 2 compliant",
@@ -88,6 +94,40 @@ class ReadinessService:
         docs_exist = (self.project_root / "docs").exists()
         security_exists = (self.project_root / "SECURITY.md").exists()
         release_exists = (self.project_root / "docs" / "release-checklist.md").exists()
+        privacy_data_map_exists = (self.project_root / "docs" / "privacy-data-map.md").exists()
+        retention_policy_exists = (
+            self.project_root / "docs" / "data-retention-deletion-policy.md"
+        ).exists()
+        dsr_workflow_exists = (
+            self.project_root / "docs" / "data-subject-request-workflow.md"
+        ).exists()
+        subprocessor_package_exists = (
+            self.project_root / "docs" / "subprocessors.md"
+        ).exists() and (self.project_root / "docs" / "dpa-template.md").exists()
+        breach_runbook_exists = (
+            self.project_root / "docs" / "breach-response-runbook.md"
+        ).exists()
+        ai_impact_assessment_exists = (
+            self.project_root / "docs" / "ai-governance-impact-assessment.md"
+        ).exists()
+        school_vendor_packet_exists = (
+            self.project_root / "docs" / "school-vendor-privacy-accessibility-packet.md"
+        ).exists()
+        fcra_boundary_exists = (
+            self.project_root / "docs" / "fcra-employment-decision-boundary.md"
+        ).exists()
+        access_review_exists = (
+            self.project_root / "docs" / "access-review-procedure.md"
+        ).exists()
+        vulnerability_program_exists = (
+            self.project_root / "docs" / "vulnerability-management-program.md"
+        ).exists()
+        backup_dr_exists = (
+            self.project_root / "docs" / "backup-restore-dr-plan.md"
+        ).exists()
+        tabletop_template_exists = (
+            self.project_root / "docs" / "incident-tabletop-template.md"
+        ).exists()
         return [
             ReadinessControl(
                 id="access-control-service-authz",
@@ -117,7 +157,10 @@ class ReadinessService:
                 status="designed",
                 owner="learning-ops",
                 artifact="complyos/services/imports.py",
-                retention="raw hash plus row decisions retained by tenant policy",
+                retention=(
+                    "raw rows/decisions purged by tenant policy after terminal batch; "
+                    "hashes retained"
+                ),
                 frameworks=["SOC2 Processing Integrity", "Privacy data minimization"],
             ),
             ReadinessControl(
@@ -127,7 +170,10 @@ class ReadinessService:
                 status="designed",
                 owner="product/security",
                 artifact="complyos/services/ai_proposals.py",
-                retention="proposal/provenance retained by tenant policy",
+                retention=(
+                    "rejected/expired proposals purged by tenant policy; "
+                    "approved evidence retained"
+                ),
                 frameworks=["EU AI Act readiness", "OWASP LLM"],
             ),
             ReadinessControl(
@@ -169,5 +215,151 @@ class ReadinessService:
                 artifact="docs/compliance-readiness.md",
                 retention="review quarterly or when entering new region",
                 frameworks=["GDPR", "UK GDPR", "LGPD", "PIPEDA", "APPI", "PIPL", "POPIA"],
+            ),
+            ReadinessControl(
+                id="privacy-data-map",
+                area="privacy",
+                title="Personal-data inventory and processing-purpose map",
+                status="partial" if privacy_data_map_exists else "missing",
+                owner="privacy/legal-review",
+                artifact="docs/privacy-data-map.md",
+                retention="review every release that changes data categories or source systems",
+                frameworks=["GDPR Art. 30 readiness", "CCPA/CPRA inventory", "SOC2 Privacy"],
+            ),
+            ReadinessControl(
+                id="data-retention-deletion",
+                area="privacy",
+                title="Retention schedule and deletion workflow",
+                status="partial" if retention_policy_exists else "missing",
+                owner="privacy/security",
+                artifact="docs/data-retention-deletion-policy.md",
+                retention="review quarterly and per customer contract",
+                frameworks=["GDPR storage limitation", "CCPA/CPRA deletion", "SOC2 Security"],
+            ),
+            ReadinessControl(
+                id="data-subject-request-workflow",
+                area="privacy",
+                title="Data subject access, export, correction, and deletion workflow",
+                status="partial" if dsr_workflow_exists else "missing",
+                owner="privacy/support",
+                artifact="docs/data-subject-request-workflow.md",
+                retention="review before entering new region or school lane",
+                frameworks=["GDPR DSR", "CCPA/CPRA consumer rights", "FERPA request routing"],
+            ),
+            ReadinessControl(
+                id="dpa-subprocessor-package",
+                area="privacy",
+                title="DPA template and subprocessor register",
+                status="partial" if subprocessor_package_exists else "missing",
+                owner="legal/vendor-management",
+                artifact="docs/dpa-template.md; docs/subprocessors.md",
+                retention="review before customer signature and before adding vendors",
+                frameworks=["GDPR Art. 28 readiness", "CCPA/CPRA service provider terms"],
+            ),
+            ReadinessControl(
+                id="breach-response-runbook",
+                area="security",
+                title="Breach response triage, containment, notification, and review runbook",
+                status="partial" if breach_runbook_exists else "missing",
+                owner="security/privacy/legal-review",
+                artifact="docs/breach-response-runbook.md",
+                retention="tabletop every 6-12 months and after incidents",
+                frameworks=["SOC2 Security", "GDPR breach assessment", "state breach laws"],
+            ),
+            ReadinessControl(
+                id="ai-impact-assessment",
+                area="ai-governance",
+                title="AI impact assessment and proposal-only boundary",
+                status="partial" if ai_impact_assessment_exists else "missing",
+                owner="product/security/legal-review",
+                artifact="docs/ai-governance-impact-assessment.md",
+                retention="review before any AI feature or model/provider change",
+                frameworks=["EU AI Act readiness", "NYC AEDT boundary", "Colorado AI Act"],
+            ),
+            ReadinessControl(
+                id="school-vendor-privacy-accessibility",
+                area="education",
+                title="School vendor privacy and accessibility procurement packet",
+                status="partial" if school_vendor_packet_exists else "missing",
+                owner="product/privacy/accessibility/legal-review",
+                artifact="docs/school-vendor-privacy-accessibility-packet.md",
+                retention="review before school pilot or procurement submission",
+                frameworks=["FERPA", "COPPA", "WCAG 2.2 AA", "ADA Title II"],
+            ),
+            ReadinessControl(
+                id="fcra-employment-decision-boundary",
+                area="hr-governance",
+                title="FCRA/background-screening and employment-decision boundary",
+                status="partial" if fcra_boundary_exists else "missing",
+                owner="product/legal-review/sales-enablement",
+                artifact="docs/fcra-employment-decision-boundary.md",
+                retention="review before positioning or people-decision feature changes",
+                frameworks=["FCRA boundary", "EEOC", "ADA"],
+            ),
+            ReadinessControl(
+                id="access-review-procedure",
+                area="security",
+                title="Access review, SSO/MFA, and joiner/mover/leaver procedure",
+                status="partial" if access_review_exists else "missing",
+                owner="security/it",
+                artifact="docs/access-review-procedure.md",
+                retention="quarterly review evidence plus employee lifecycle tickets",
+                frameworks=["SOC2 Security", "NIST AC"],
+            ),
+            ReadinessControl(
+                id="vulnerability-management-program",
+                area="security",
+                title="Dependency scanning, vulnerability triage, and patch SLA",
+                status="partial" if vulnerability_program_exists else "missing",
+                owner="security/engineering",
+                artifact="docs/vulnerability-management-program.md",
+                retention="scan output and remediation evidence per release/month",
+                frameworks=["SOC2 Security", "SSDF", "OWASP"],
+            ),
+            ReadinessControl(
+                id="backup-restore-dr-plan",
+                area="availability",
+                title="Backup, restore-test, RTO/RPO, and disaster recovery plan",
+                status="partial" if backup_dr_exists else "missing",
+                owner="security/infrastructure",
+                artifact="docs/backup-restore-dr-plan.md",
+                retention="backup job evidence and restore test every 6-12 months",
+                frameworks=["SOC2 Availability", "NIST CP"],
+            ),
+            ReadinessControl(
+                id="incident-tabletop-template",
+                area="security",
+                title="Incident tabletop exercise template",
+                status="partial" if tabletop_template_exists else "missing",
+                owner="security/privacy/legal-review",
+                artifact="docs/incident-tabletop-template.md",
+                retention="tabletop evidence every 6-12 months",
+                frameworks=["SOC2 Security", "NIST IR"],
+            ),
+            ReadinessControl(
+                id="hr-people-analytics-boundary",
+                area="hr-governance",
+                title="People-analytics boundary: no automated employment decisions",
+                status=(
+                    "partial"
+                    if (
+                        self.project_root / "docs" / "hr-people-analytics-compliance-audit.md"
+                    ).exists()
+                    else "missing"
+                ),
+                owner="product/legal-review",
+                artifact="docs/hr-people-analytics-compliance-audit.md",
+                retention=(
+                    "review before any feature affects hiring, promotion, discipline, "
+                    "compensation, or opportunity"
+                ),
+                frameworks=[
+                    "EEOC",
+                    "ADA",
+                    "EU AI Act",
+                    "NYC AEDT",
+                    "Colorado AI Act",
+                    "FCRA boundary",
+                ],
             ),
         ]
