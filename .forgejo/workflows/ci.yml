@@ -25,6 +25,9 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages ruff
           python3 -m ruff check .
+      - name: Typecheck
+        run: |
+          python3 -m mypy complyos
       - name: Test
         run: |
           if [ -f pytest.ini ] || [ -f setup.cfg ] || [ -d tests ]; then
