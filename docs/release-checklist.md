@@ -13,7 +13,7 @@ Use this checklist before tagging, pushing, opening a Forgejo PR, or publishing 
 ```bash
 git diff --check
 uv run --extra dev ruff check complyos tests
-uv run --extra dev mypy complyos --ignore-missing-imports
+uv run --extra dev mypy complyos
 uv run --extra dev pytest -q
 uv run --extra dev pytest tests/unit/test_no_false_compliance_claims.py -q
 rm -rf dist && uv build && rm -rf dist

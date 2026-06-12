@@ -25,6 +25,12 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages ruff
           python3 -m ruff check .
+      - name: Typecheck
+        run: |
+          echo "Typecheck started"
+          python3 -m pip show mypy types-PyYAML
+          timeout 120s python3 -m mypy complyos
+          echo "Typecheck complete"
       - name: Test
         run: |
           if [ -f pytest.ini ] || [ -f setup.cfg ] || [ -d tests ]; then

@@ -207,16 +207,16 @@ export WORKDAY_PASSWORD="your-pass"
 
 ```bash
 # Run tests
-uv run pytest -q
+uv run --extra dev pytest -q
 
 # Run with coverage
-uv run pytest --cov=complyos --cov-report=term-missing
+uv run --extra dev pytest --cov=complyos --cov-report=term-missing
 
 # Lint
-uv run ruff check complyos tests
+uv run --extra dev ruff check .
 
 # Type check
-uv run mypy complyos --ignore-missing-imports
+uv run --extra dev mypy complyos
 ```
 
 ---
