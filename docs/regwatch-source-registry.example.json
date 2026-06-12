@@ -1,0 +1,190 @@
+{
+  "registry_version": "0.1.0",
+  "generated_for": "LearningOps Suite RegWatch v0",
+  "last_verified_at": "2026-06-12T00:00:00Z",
+  "sources": [
+    {
+      "source_id": "us-federal-federal-register-api",
+      "source_name": "Federal Register API",
+      "jurisdiction": "US",
+      "jurisdiction_level": "federal",
+      "agency_or_body": "Office of the Federal Register / GPO",
+      "source_type": "api",
+      "primary_url": "https://www.federalregister.gov/developers/documentation/api/v1",
+      "api_or_feed_url": "https://www.federalregister.gov/api/v1/documents.json",
+      "access_model": "public",
+      "parser_status": "candidate",
+      "domain_tags": [
+        "federal-rulemaking",
+        "employment",
+        "privacy",
+        "education",
+        "safety-training"
+      ],
+      "coverage_notes": "Public API for Federal Register documents, agencies, public inspection, and related metadata. The sample endpoint uses documents.json so URL smoke checks resolve; use source citations and official PDFs/govinfo links when legal precision matters.",
+      "known_gaps": [
+        "FederalRegister.gov describes itself as an informational/prototype XML rendition until official status is granted.",
+        "Final legal reliance requires checking the official edition or official PDF/govinfo source.",
+        "Parser not implemented in ComplyOS v0."
+      ],
+      "human_owner_role": "Legal/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief",
+        "rule_change_proposal"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "source_id": "us-federal-ecfr-api",
+      "source_name": "eCFR API",
+      "jurisdiction": "US",
+      "jurisdiction_level": "federal",
+      "agency_or_body": "Office of the Federal Register / GPO",
+      "source_type": "api",
+      "primary_url": "https://www.ecfr.gov/developers/documentation/api/v1",
+      "api_or_feed_url": "https://www.ecfr.gov/api/versioner/v1/titles.json",
+      "access_model": "blocked_or_challenged",
+      "parser_status": "candidate",
+      "domain_tags": [
+        "federal-rules",
+        "current-cfr",
+        "point-in-time"
+      ],
+      "coverage_notes": "Candidate source for current and point-in-time CFR content. The sample endpoint uses versioner/v1/titles.json so URL smoke checks resolve; use with published CFR/govinfo checks when official edition matters.",
+      "known_gaps": [
+        "Automated browser access can be challenged by anti-scraping controls.",
+        "eCFR content is continuously updated but is not the official legal edition.",
+        "Parser not implemented in ComplyOS v0."
+      ],
+      "human_owner_role": "Legal/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief",
+        "rule_change_proposal"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "source_id": "us-federal-regulations-gov-api",
+      "source_name": "Regulations.gov API",
+      "jurisdiction": "US",
+      "jurisdiction_level": "federal",
+      "agency_or_body": "U.S. General Services Administration / eRulemaking",
+      "source_type": "api",
+      "primary_url": "https://open.gsa.gov/api/regulationsgov/",
+      "api_or_feed_url": "https://api.regulations.gov/v4/",
+      "access_model": "api_key",
+      "parser_status": "candidate",
+      "domain_tags": [
+        "rulemaking",
+        "dockets",
+        "comments",
+        "proposed-rules"
+      ],
+      "coverage_notes": "API covers documents, comments, and dockets with documented field limitations and API-key requirements.",
+      "known_gaps": [
+        "API key required for normal use.",
+        "Some comment fields are agency configurable or never public.",
+        "Parser not implemented in ComplyOS v0."
+      ],
+      "human_owner_role": "Legal/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "source_id": "us-federal-osha-laws-regs",
+      "source_name": "OSHA laws and regulations",
+      "jurisdiction": "US",
+      "jurisdiction_level": "federal",
+      "agency_or_body": "Occupational Safety and Health Administration",
+      "source_type": "web_page",
+      "primary_url": "https://www.osha.gov/laws-regs",
+      "api_or_feed_url": null,
+      "access_model": "public",
+      "parser_status": "candidate",
+      "domain_tags": [
+        "safety-training",
+        "workplace-safety",
+        "osha"
+      ],
+      "coverage_notes": "Official OSHA law/regulation entry point for safety-training relevance discovery.",
+      "known_gaps": [
+        "Page-level source, not normalized API contract.",
+        "State OSHA plans and state-specific obligations require separate review.",
+        "Parser not implemented in ComplyOS v0."
+      ],
+      "human_owner_role": "Safety/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief",
+        "microlearn_suggestion"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "source_id": "us-ca-dir-dlse",
+      "source_name": "California DIR/DLSE",
+      "jurisdiction": "US-CA",
+      "jurisdiction_level": "state",
+      "agency_or_body": "California Department of Industrial Relations / Division of Labor Standards Enforcement",
+      "source_type": "web_page",
+      "primary_url": "https://www.dir.ca.gov/dlse/dlse.html",
+      "api_or_feed_url": null,
+      "access_model": "public",
+      "parser_status": "not_started",
+      "domain_tags": [
+        "state-employment",
+        "labor-standards",
+        "california"
+      ],
+      "coverage_notes": "Placeholder for California state labor/employment source discovery where client jurisdictions include California.",
+      "known_gaps": [
+        "No normalized parser implemented.",
+        "Not a complete California regulatory coverage source.",
+        "Needs legal/compliance owner to define exact watched topics."
+      ],
+      "human_owner_role": "Legal/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "source_id": "eu-eur-lex-webservice",
+      "source_name": "EUR-Lex webservice and advanced search",
+      "jurisdiction": "EU",
+      "jurisdiction_level": "regional",
+      "agency_or_body": "Publications Office of the European Union",
+      "source_type": "api",
+      "primary_url": "https://eur-lex.europa.eu/content/help/data-reuse/webservice.html",
+      "api_or_feed_url": "https://eur-lex.europa.eu/EURLexWebService",
+      "access_model": "registered",
+      "parser_status": "not_started",
+      "domain_tags": [
+        "eu-law",
+        "privacy",
+        "employment",
+        "education",
+        "accessibility"
+      ],
+      "coverage_notes": "Registered SOAP webservice and EUR-Lex search can query EU legal content and return XML search results.",
+      "known_gaps": [
+        "Webservice requires registration/subscription.",
+        "SOAP/XML integration not implemented.",
+        "Member-state transposition and local obligations require separate source coverage."
+      ],
+      "human_owner_role": "Legal/compliance reviewer",
+      "allowed_outputs": [
+        "alert_proposal",
+        "training_impact_brief",
+        "rule_change_proposal"
+      ],
+      "last_verified_at": "2026-06-12T00:00:00Z"
+    }
+  ]
+}
