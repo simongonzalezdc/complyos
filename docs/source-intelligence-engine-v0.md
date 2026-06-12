@@ -8,9 +8,12 @@ two half-crawlers, two source registries, or two review queues that disagree.
 ## BLUF
 
 - **Implemented now:** deterministic source models, content-hash snapshots,
-  adapter fan-out, RegWatch proposals, MicroLearn proposals, and focused tests.
-- **Not implemented in v0:** live web crawling, scheduler jobs, paid data feeds,
-  legal interpretation, auto-published training, or automatic rule mutation.
+  adapter fan-out, RegWatch proposals, MicroLearn proposals, public Federal
+  Register/eCFR client contracts, approved text upload processing, a local
+  JSONL review queue, CLI commands, and focused tests.
+- **Not implemented in v0:** scheduled crawling, paid data feeds, legal
+  interpretation, auto-published training, automatic rule mutation, or
+  source-specific parsers for OSHA/state/EU pages.
 - **Operating rule:** source intelligence can propose work; humans approve before
   rules, learner assignments, notifications, or modules change state.
 
@@ -66,6 +69,21 @@ MicroLearn Radar looks for teachable material, not legal status:
 - suggests a five-minute draft module outline with objectives and a
   check-for-understanding prompt;
 - keeps `approval_state="needs_review"`.
+
+## No-paid runtime slice
+
+The repo now includes a no-paid source-monitoring slice:
+
+- `FederalRegisterClient` for public Federal Register API results;
+- `ECFRClient` for public eCFR search results;
+- `SourceMonitor` to fan fetched snapshots into RegWatch and MicroLearn adapters;
+- `SourceReviewStore` to persist review proposals in local JSONL;
+- `source-intel run-upload` for approved local source text when APIs are blocked;
+- CLI commands under `complyos source-intel`.
+
+The live public clients are optional and can be dry-run first. Tests use fake
+transports and fixture sources, so CI does not depend on internet access or paid
+accounts. See [Source Intelligence API Inventory](./source-intelligence-api-inventory.md).
 
 ## CSV/upload fallback
 

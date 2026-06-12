@@ -55,8 +55,8 @@ It is an example contract, not a claim that all parsers are implemented.
 
 | Source | Jurisdiction | Type | Why it matters | v0 status |
 | --- | --- | --- | --- | --- |
-| Federal Register API | US federal | API | Proposed/final rules, notices, agency metadata. | Candidate source; parser pending. |
-| eCFR API | US federal | API | Current CFR text and point-in-time lookup for codified rules. | Candidate source; parser pending; browser may be challenged by anti-automation controls. |
+| Federal Register API | US federal | API | Proposed/final rules, notices, agency metadata. | No-paid client implemented; pagination/filter hardening pending. |
+| eCFR API | US federal | API | Current CFR text and point-in-time lookup for codified rules. | No-paid search client implemented; full-section/diff hardening pending. |
 | Regulations.gov API | US federal | API | Dockets, proposed rules, comments, supporting material. | Candidate source; API key required. |
 | OSHA laws/regulations | US federal safety | Official web pages | Safety-training and workplace compliance source discovery. | Candidate source; page parser pending. |
 | California DIR/DLSE | US state | Official web pages | State employment/labor training relevance placeholder. | Placeholder source; page parser pending. |
@@ -118,7 +118,7 @@ RegWatch requires human approval before:
 
 Every output must show coverage gaps. Examples:
 
-- “Federal Register API checked; eCFR parser not yet implemented.”
+- “Federal Register/eCFR checked; OSHA web parser not yet implemented.”
 - “California source is placeholder-only; no state-level automated parser.”
 - “EUR-Lex requires registered SOAP access; this run used metadata only.”
 - “Source text was collected, but training relevance is low-confidence.”
@@ -129,3 +129,17 @@ RegWatch feeds ComplyOS by proposing reviewed source-backed changes. ComplyOS
 remains the evidence engine. ComplyOS rules should only change through existing
 approval/service workflows, never directly from a RegWatch source check.
 
+
+
+## Current no-paid implementation surface
+
+RegWatch can now use the shared source-intelligence runtime without paid APIs:
+
+- `complyos source-intel sources --json` lists free/public sources and parser gaps.
+- `complyos source-intel run-fixture --json` runs a no-network official-source fixture through RegWatch and MicroLearn adapters.
+- `complyos source-intel run-public --dry-run --json` previews implemented public API calls.
+- `complyos source-intel run-upload <file> --json` processes approved local source text when APIs are blocked.
+- `complyos source-intel review --json` lists or decides local JSONL review proposals.
+
+The implemented clients cover Federal Register and eCFR contracts. OSHA, California,
+state agency pages, Regulations.gov, and EUR-Lex remain parser/API-registration work.

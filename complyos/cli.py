@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -25,9 +25,11 @@ from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
+from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
+from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.context import ROLE_PERMISSIONS, default_local_context
 from complyos.services.governance import GovernancePacketService
@@ -35,11 +37,27 @@ from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
+from complyos.source_intel import (
+    ECFRClient,
+    FederalRegisterClient,
+    SourceDefinition,
+    SourceFetchReport,
+    SourceIntelEngine,
+    SourceMonitor,
+    SourceReviewStore,
+    SourceSnapshot,
+    SourceType,
+    free_public_source_definitions,
+)
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 import_app = typer.Typer(name="import", help="Preview, decide, and promote import batches")
 evidence_app = typer.Typer(name="evidence", help="Inspect evidence ledger entries")
 ai_app = typer.Typer(name="ai", help="Proposal-only AI assistance")
+source_intel_app = typer.Typer(
+    name="source-intel",
+    help="No-paid source monitoring and review queue",
+)
 admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
 governance_app = typer.Typer(name="governance", help="AI, HR, and school governance packets")
 privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
@@ -883,6 +901,293 @@ def ai_approve(
     console.print("[yellow]No compliance records were changed by this approval.[/yellow]")
 
 
+class _FixtureSourceClient:
+    """No-network fixture client for local source-intelligence demos."""
+
+    def fetch(self, source: SourceDefinition, *, query: str) -> SourceFetchReport:
+        snapshot = SourceSnapshot.from_text(
+            source_id=source.id,
+            url=source.url,
+            title="Fixture final rule and microlearning cue",
+            text=(
+                "A final rule says covered employers must train workers. "
+                "Managers can use scenario practice, examples, and a checklist "
+                f"for {query} follow-up."
+            ),
+            metadata={"fixture": True, "query": query},
+        )
+        return SourceFetchReport(source_id=source.id, snapshots=[snapshot], coverage_gaps=[])
+
+
+def _fixture_source() -> SourceDefinition:
+    return SourceDefinition(
+        id="fixture-official-training-source",
+        name="Fixture official training source",
+        url="https://example.gov/fixture-training-rule",
+        source_type=SourceType.OFFICIAL_REGULATOR,
+        authority="official",
+        jurisdictions=["US"],
+        topics=["safety training", "manager feedback"],
+        metadata={"cost": "free", "auth": "none", "fixture": True},
+    )
+
+
+@source_intel_app.command("sources")
+def source_intel_sources(
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List built-in no-paid source definitions and blocked parser gaps."""
+    sources = list(free_public_source_definitions().values())
+    payload = {"sources": [source.model_dump(mode="json") for source in sources]}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="No-paid Source Intelligence Sources")
+    table.add_column("Source")
+    table.add_column("Jurisdiction")
+    table.add_column("Cost")
+    table.add_column("Auth")
+    table.add_column("Status")
+    for source in sources:
+        table.add_row(
+            source.name,
+            ", ".join(source.jurisdictions),
+            str(source.metadata.get("cost", "unknown")),
+            str(source.metadata.get("auth", "unknown")),
+            str(source.metadata.get("status", "unknown")),
+        )
+    console.print(table)
+
+
+@source_intel_app.command("run-fixture")
+def source_intel_run_fixture(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    query: str = typer.Option("training", "--query", help="Source-monitoring query label"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run a no-network fixture through RegWatch and MicroLearn adapters."""
+    source = _fixture_source()
+    monitor = SourceMonitor(
+        sources=[source],
+        clients={source.id: _FixtureSourceClient()},
+        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
+    )
+    run = monitor.run(query=query)
+    SourceReviewStore(store_path).save_many(run.proposals)
+    payload = {
+        "source_count": run.source_count,
+        "snapshot_count": run.snapshot_count,
+        "proposal_count": run.proposal_count,
+        "proposal_ids": [proposal.id for proposal in run.proposals],
+        "coverage_gaps": run.coverage_gaps,
+        "store": store_path,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Sources checked:[/bold] {run.source_count}")
+    console.print(f"[bold]Snapshots:[/bold] {run.snapshot_count}")
+    console.print(f"[bold]Proposals saved:[/bold] {run.proposal_count}")
+    console.print(f"[bold]Store:[/bold] {store_path}")
+
+
+@source_intel_app.command("run-public")
+def source_intel_run_public(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    query: str = typer.Option("training", "--query", help="Search query for public sources"),
+    source_filter: str | None = typer.Option(
+        None,
+        "--source",
+        help="Comma-separated source IDs; defaults to implemented free clients",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show planned free calls only"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run implemented free/public source clients; no paid accounts required."""
+    all_sources = free_public_source_definitions()
+    default_ids = ["federal-register", "ecfr-title-29"]
+    source_ids = (
+        [item.strip() for item in source_filter.split(",") if item.strip()]
+        if source_filter
+        else default_ids
+    )
+    missing = [source_id for source_id in source_ids if source_id not in all_sources]
+    if missing:
+        console.print(f"[red]Unknown source IDs:[/red] {', '.join(missing)}")
+        raise typer.Exit(1)
+
+    payload_base = {
+        "dry_run": dry_run,
+        "query": query,
+        "source_ids": source_ids,
+        "store": store_path,
+    }
+    if dry_run:
+        if json_output:
+            _print_json(payload_base)
+            return
+        console.print("[yellow]Dry run only:[/yellow] no network calls made")
+        console.print(f"[bold]Query:[/bold] {query}")
+        console.print(f"[bold]Sources:[/bold] {', '.join(source_ids)}")
+        console.print(f"[bold]Store:[/bold] {store_path}")
+        return
+
+    selected_sources = [all_sources[source_id] for source_id in source_ids]
+    clients: dict[str, Any] = {
+        "federal-register": FederalRegisterClient(),
+        "ecfr-title-29": ECFRClient(),
+    }
+    monitor = SourceMonitor(
+        sources=selected_sources,
+        clients=clients,
+        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
+    )
+    run = monitor.run(query=query)
+    SourceReviewStore(store_path).save_many(run.proposals)
+    payload = {
+        **payload_base,
+        "source_count": run.source_count,
+        "snapshot_count": run.snapshot_count,
+        "proposal_count": run.proposal_count,
+        "proposal_ids": [proposal.id for proposal in run.proposals],
+        "coverage_gaps": run.coverage_gaps,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Sources checked:[/bold] {run.source_count}")
+    console.print(f"[bold]Snapshots:[/bold] {run.snapshot_count}")
+    console.print(f"[bold]Proposals saved:[/bold] {run.proposal_count}")
+    if run.coverage_gaps:
+        for gap in run.coverage_gaps:
+            console.print(f"[yellow]Coverage gap:[/yellow] {gap}")
+
+
+@source_intel_app.command("run-upload")
+def source_intel_run_upload(
+    path: str = typer.Argument(..., help="Approved source text file to process"),
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    source_id: str = typer.Option("approved-upload", "--source-id", help="Source ID"),
+    source_name: str = typer.Option("Approved upload", "--source-name", help="Source name"),
+    source_url: str | None = typer.Option(None, "--source-url", help="Citation/source URL"),
+    authority: str = typer.Option("internal", "--authority", help="official, trusted, internal"),
+    topic: Annotated[
+        list[str] | None,
+        typer.Option("--topic", help="Repeatable topic tag"),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Process an approved text upload without network/API access."""
+    source_path = Path(path)
+    text = source_path.read_text(encoding="utf-8")
+    source = SourceDefinition(
+        id=source_id,
+        name=source_name,
+        url=source_url or source_path.as_uri(),
+        source_type=SourceType.INTERNAL_UPLOAD,
+        authority=authority,
+        jurisdictions=[],
+        topics=topic or ["approved upload"],
+        metadata={"cost": "free", "auth": "none", "upload_path": source_path.name},
+    )
+    snapshot = SourceSnapshot.from_text(
+        source_id=source.id,
+        url=source.url,
+        title=source_name,
+        text=text,
+        metadata={"upload": True, "filename": source_path.name},
+    )
+    proposals = SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]).evaluate(
+        [source],
+        [snapshot],
+    )
+    SourceReviewStore(store_path).save_many(proposals)
+    payload = {
+        "source_id": source.id,
+        "snapshot_count": 1,
+        "proposal_count": len(proposals),
+        "proposal_ids": [proposal.id for proposal in proposals],
+        "proposal_signal_types": [proposal.signal.signal_type for proposal in proposals],
+        "store": store_path,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Source:[/bold] {source.id}")
+    console.print("[bold]Snapshots:[/bold] 1")
+    console.print(f"[bold]Proposals saved:[/bold] {len(proposals)}")
+    console.print(f"[bold]Store:[/bold] {store_path}")
+
+
+@source_intel_app.command("review")
+def source_intel_review(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    proposal_id: str | None = typer.Option(None, "--proposal-id", help="Proposal ID to decide"),
+    state: str | None = typer.Option(None, "--state", help="New review state"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List or update local source-intelligence review proposals."""
+    store = SourceReviewStore(store_path)
+    if proposal_id or state:
+        if not proposal_id or not state:
+            console.print("[red]Both --proposal-id and --state are required to decide.[/red]")
+            raise typer.Exit(1)
+        try:
+            proposal = store.decide(proposal_id, state=state)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        decision_payload: dict[str, Any] = {"proposal": proposal.model_dump(mode="json")}
+        if json_output:
+            _print_json(decision_payload)
+            return
+        console.print(f"[green]Updated proposal:[/green] {proposal.id}")
+        console.print(f"[bold]State:[/bold] {proposal.approval_state}")
+        return
+
+    proposals = store.list()
+    list_payload: dict[str, Any] = {
+        "proposals": [proposal.model_dump(mode="json") for proposal in proposals]
+    }
+    if json_output:
+        _print_json(list_payload)
+        return
+
+    table = Table(title="Source Intelligence Review Queue")
+    table.add_column("Proposal")
+    table.add_column("Adapter")
+    table.add_column("Signal")
+    table.add_column("State")
+    for proposal in proposals:
+        table.add_row(
+            proposal.id,
+            proposal.adapter_name,
+            proposal.signal.signal_type,
+            proposal.approval_state,
+        )
+    console.print(table)
+
+
 @admin_app.command("roles")
 def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output raw JSON")):
     """Show default roles and permissions."""
@@ -1126,6 +1431,7 @@ privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(ai_app, name="ai")
+app.add_typer(source_intel_app, name="source-intel")
 app.add_typer(admin_app, name="admin")
 app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")
