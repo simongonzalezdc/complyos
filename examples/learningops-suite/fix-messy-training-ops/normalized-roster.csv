@@ -1,0 +1,6 @@
+normalized_record_id,learner_id,email,course_code,canonical_course_title,status,assigned_date,due_date,completed_date,completion_percentage,source_system,source_record_id,exception_status,reviewer_action
+norm-demo-001,demo-u101,learner.one@example.invalid,SAFE-101,Field Safety Basics,complete,2026-01-05,2026-02-05,2026-01-22,100,canvas,canvas-demo-001,none,accept
+norm-demo-002,demo-u102,learner.two@example.invalid,SAFE-101,Field Safety Basics,in_progress,2026-01-05,2026-02-05,,45,canvas,canvas-demo-002,duplicate_conflict,review_required
+norm-demo-003,demo-u103,learner.three@example.invalid,SAFE-101,Field Safety Basics,expired,2025-01-05,2025-02-05,2025-01-20,100,cornerstone,csod-demo-004,stale_completion,assign_refresh
+norm-demo-004,demo-u104,learner.four@example.invalid,HEAT-201,Heat Safety Refresher,not_started,2026-06-12,2026-07-15,,0,csv_fallback,csv-demo-005,new_requirement,assign_after_approval
+

@@ -1,0 +1,5 @@
+learner_id,email,first_name,last_name,audience,department,manager_id,assignment_status,due_date,source_system,source_record_id,human_review_status
+demo-u001,field.supervisor.one@example.invalid,Field,Supervisor One,Supervisor,Port Operations,demo-m001,draft,2026-07-15,csv_fallback,demo-roster-001,pending_approval
+demo-u002,field.employee.two@example.invalid,Field,Employee Two,Employee,Port Operations,demo-m001,draft,2026-07-15,csv_fallback,demo-roster-002,pending_approval
+demo-u003,seasonal.contractor.three@example.invalid,Seasonal,Contractor Three,Contractor,Field Services,demo-m002,draft,2026-07-15,csv_fallback,demo-roster-003,pending_approval
+

@@ -1,0 +1,27 @@
+{
+  "analysis_id": "needs-demo-heat-safety-001",
+  "demo": "training-from-scratch",
+  "synthetic": true,
+  "trigger": "RegWatch safety-training signal",
+  "problem_statement": "Field supervisors need a consistent, reviewable way to explain heat safety expectations before seasonal work begins.",
+  "is_training_the_fix": "yes_with_job_aid",
+  "non_training_actions": [
+    "Confirm policy owner and escalation path.",
+    "Confirm water/rest/shade operational controls are documented.",
+    "Add supervisor checklist to pre-shift briefing."
+  ],
+  "target_audience": [
+    "Field supervisors",
+    "New field employees",
+    "Seasonal contractors"
+  ],
+  "constraints": [
+    "Mobile-friendly",
+    "3-5 minutes",
+    "English-first with future Spanish quick-reference option",
+    "Completion proof may be required for audit packet"
+  ],
+  "approval_required_before_design": true,
+  "reviewer_role": "Safety/compliance owner"
+}
+

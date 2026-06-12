@@ -1,0 +1,7 @@
+Learning Record ID,learner_id,email,course_code,course_title,status,assigned_date,due_date,completed_date,completion_percentage,source_system,source_record_id,manager_id,notes
+lr-demo-001,demo-u101,learner.one@example.invalid,SAFE-101,Field Safety Basics,Complete,2026-01-05,2026-02-05,2026-01-22,100,canvas,canvas-demo-001,demo-m101,clean row
+lr-demo-002,demo-u102,learner.two@example.invalid,SAFE-101,Field Safety Basics,in progress,2026-01-05,2026-02-05,,45,canvas,canvas-demo-002,demo-m101,mixed casing
+lr-demo-003,demo-u102,learner.two@example.invalid,SAFE-101,Field Safety Basics,Not Started,2026-01-05,2026-02-05,,0,manual_upload,,demo-m101,duplicate learner missing source_record_id
+lr-demo-004,demo-u103,learner.three@example.invalid,SAFE-101,Field Safety,complete,2025-01-05,2025-02-05,2025-01-20,100,cornerstone,csod-demo-004,demo-m102,stale completion and conflicting title
+lr-demo-005,demo-u104,learner.four@example.invalid,HEAT-201,Heat Safety Refresher,Not Started,2026-06-12,2026-07-15,,0,csv_fallback,csv-demo-005,demo-m102,new assignment
+
