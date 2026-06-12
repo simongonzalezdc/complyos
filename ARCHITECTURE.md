@@ -2,22 +2,22 @@
 
 ## Overview
 
-ComplyOS is a layered compliance auditing system that bridges enterprise LMS platforms with AI-native interfaces. It follows a **local-first** philosophy: all data is cached in SQLite by default, with optional real-time connector fallbacks.
+ComplyOS is a layered HR/L&D and campus learning-evidence system. It bridges LMS/HRIS records, CSV exports, API automation, MCP agents, and readiness-control packets without turning the product into an automated employment-decision system. It follows a **local-first** philosophy: data is cached in SQLite by default, with PostgreSQL-ready URLs for deployments that need them.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Interface Layer                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   CLI       │  │  MCP Server │  │   Python API        │  │
-│  │  (Typer)    │  │  (FastMCP)  │  │   (async/await)     │  │
+│  │   CLI       │  │  MCP Server │  │   FastAPI / Python  │  │
+│  │  (Typer)    │  │  (FastMCP)  │  │   API v1 + async    │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
 └─────────┼────────────────┼────────────────────┼─────────────┘
           │                │                    │
 ┌─────────┼────────────────┼────────────────────┼─────────────┐
 │         │   Application Layer                 │             │
 │  ┌──────┴──────┐  ┌─────────────┐  ┌─────────┴──────────┐  │
-│  │  Compliance │  │ Assignment  │  │   Remediation      │  │
-│  │  Auditor    │  │ Rule Engine │  │   Engine           │  │
+│  │  Compliance │  │ Privacy /   │  │ Security +         │  │
+│  │  Auditor    │  │ Import Gates│  │ Governance Packets │  │
 │  └──────┬──────┘  └──────┬──────┘  └─────────┬──────────┘  │
 └─────────┼────────────────┼────────────────────┼─────────────┘
           │                │                    │
@@ -32,8 +32,8 @@ ComplyOS is a layered compliance auditing system that bridges enterprise LMS pla
 ┌─────────┼───────────────────────────────────────────────────┐
 │         │   Connector Layer                                   │
 │  ┌──────┴──────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ CSV / Mock  │  │   Workday   │  │   SAP / CSOD        │  │
-│  │ Connectors  │  │  Connector  │  │   (future)          │  │
+│  │ CSV / Mock  │  │   Workday   │  │ SAP SuccessFactors │  │
+│  │ Connectors  │  │  Connector  │  │ + Cornerstone      │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -49,7 +49,12 @@ The core domain is intentionally small and focused:
 - **ComplianceGap** — A user missing a required course, with severity and overdue days
 - **AssignmentRule** — A rule that targets users and assigns courses with deadlines
 - **RemediationAction** — An action taken to close a gap (reminder, enroll, notify)
-- **EvidenceLedgerEntry** — An immutable audit trail with SHA256 hashes
+- **EvidenceLedgerEntry** — A tenant-scoped audit trail with SHA256 hashes
+- **ActionLogEntry** — Actor/action/object/result log for service-backed operations
+- **PrivacyRequest** — Tenant-scoped DSR/privacy workflow case requiring controller approval before export/delete
+- **LegalHold** — Subject or tenant-level hold that blocks deletion and retention cleanup
+- **RetentionPolicy** — Tenant retention metadata for raw imports, evidence, action logs, AI proposals, and closed privacy cases
+- **GovernancePacket / SecurityEvidencePacket** — Readiness-only review packets, not certification artifacts
 
 All domain models are **Pydantic v2** for type safety across API boundaries.
 
@@ -91,6 +96,19 @@ RuleEngine.validate() ──▶ issues list + preview
 
 Rules are validated before deployment to catch unknown courses, empty targets, and zero-match criteria.
 
+### Enterprise Control Flow
+
+```
+CSV/API/MCP input ──▶ preview/quarantine ──▶ human decision ──▶ promote
+                                │                              │
+                                ▼                              ▼
+                         action log                    evidence ledger
+                                │                              │
+                                └────▶ privacy / retention / governance services
+```
+
+Privacy workflows are service-backed on every surface: create request, record controller approval, export/delete subject data, enforce legal holds, configure retention, and dry-run/apply cleanup for eligible closed cases, terminal import payloads, rejected/expired AI proposals, evidence entries, and action logs.
+
 ## Connector Architecture
 
 Connectors implement `LMSConnector` (ABC) with async methods:
@@ -129,19 +147,20 @@ Connectors implement `LMSConnector` (ABC) with async methods:
 
 Use the full local test suite as the release baseline when changing connector, repository, or audit behavior; avoid relying on a stale hard-coded test count.
 
-## Evidence Ledger
+## Evidence and action logs
 
-Every audit produces an `EvidenceLedgerEntry` with:
+Every audit produces a tenant-scoped `EvidenceLedgerEntry` with:
 
-- `raw_data_hash` — SHA256 of the raw connector response
+- `raw_data_hash` — SHA256 of the raw connector response or imported source payload
 - `output_hash` — SHA256 of the processed report
-- `transformation_steps` — Ordered list of operations applied
+- `transformation_steps` — ordered operations applied
+- tenant/source metadata so exported evidence does not bleed across customers
 
-This satisfies regulator requirements for audit trails without requiring blockchain or external services.
+Mutating workflows also write action logs. The combination gives auditors, buyers, and counsel a review trail without pretending the product has achieved legal or certification status.
 
 ## Operations and Scalability Notes
 
-The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/MCP audit paths, and Slack/Teams notifications consume audit output rather than introducing a separate workflow engine.
+The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/API/MCP audit paths, and Slack/Teams notifications consume audit output rather than introducing a separate workflow engine.
 
 PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 
@@ -161,3 +180,4 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
+- [x] Enterprise readiness layer — privacy/DSR services, retention cleanup, tenant-scoped evidence, security evidence packet, governance packet, and API/MCP/CLI parity

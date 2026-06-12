@@ -1,24 +1,26 @@
 # ComplyOS
 
-[![CI](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml/badge.svg)](https://github.com/simongonzalezdc/complyos/actions/workflows/ci.yml)
+[![Source of truth](https://img.shields.io/badge/source-Forgejo-609966.svg)](#source-of-truth)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-orange.svg)](LICENSE)
 
-**L&D Compliance & Learning Operations MCP Server**
+**HR/L&D compliance operations and learning-evidence MCP/API/CLI toolkit**
 
-An AI-native compliance auditing engine for enterprise learning management systems. Built by someone who spent 12 years in L&D ops and got tired of explaining to regulators why the CSV export didn't match the dashboard.
+ComplyOS turns HRIS, LMS, and CSV learning records into tenant-scoped evidence, gap reports, DSR workflows, retention cleanup, and readiness packets for HR, People Ops, L&D, security, and campus teams. It is readiness/control-mapping software, not a certification badge or automated employment-decision system.
 
 ---
 
 ## Why ComplyOS?
 
-Enterprise compliance tracking is a disaster of CSV exports, stale dashboards, and "I thought they completed that" moments. ComplyOS treats compliance as a **first-class engineering problem**:
+Enterprise compliance tracking still runs on CSV exports, stale dashboards, screenshots, and "I thought they completed that" moments. ComplyOS treats learning compliance as an evidence problem:
 
-- **Evidence-backed audits** — Every report includes a SHA256-hashed evidence ledger
-- **Assignment rule validation** — Test targeting rules before they hit 10,000 users
-- **AI-native interface** — Query status via Claude Code, Cursor, or any MCP client
-- **Local-first** — SQLite by default; no SaaS lock-in
+- **Evidence-backed audits** — Reports cite tenant-scoped SHA256 evidence entries and action logs.
+- **Import governance** — Preview/quarantine/promote CSV rows instead of letting bad exports mutate truth.
+- **Privacy workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and dry-run retention cleanup.
+- **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
+- **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, and MCP tools.
+- **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
 
 ---
 
@@ -40,13 +42,17 @@ Enterprise compliance tracking is a disaster of CSV exports, stale dashboards, a
 
 ---
 
+## Source of truth
+
+Forgejo is the source-of-truth remote for ComplyOS. Do not push ComplyOS changes to GitHub unless the repository owner explicitly asks for a mirror or legacy export.
+
 ## Quick Start
 
 ### Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/simongonzalezdc/complyos.git
+# Clone from the Forgejo remote you were granted
+git clone <forgejo-complyos-remote>
 cd complyos
 
 # Install with uv (recommended)
@@ -88,11 +94,22 @@ complyos dashboard --open
 # Serve the live dashboard API locally
 complyos serve-dashboard --host 127.0.0.1 --port 8000
 
-# Run configured scheduled audits once from cron/systemd/Actions
+# Run configured scheduled audits once from cron/systemd/Forgejo Actions
 complyos run-schedule --config complyos.yaml
 
 # Check release-readiness artifacts
 complyos release-check --json
+
+# Collect readiness/control packets for review
+complyos security evidence --period current --json
+complyos governance packet --lane workforce --json
+
+# Operate privacy/DSR and retention workflows through service gates
+complyos privacy request <subject-id> --type access --json
+complyos privacy approve <request-id> --note "controller approved" --json
+complyos privacy export <request-id> --json
+complyos privacy retention configure --raw-import-days 30 --evidence-days 2555 --action-log-days 2555 --ai-proposal-days 180 --privacy-request-days 365 --json
+complyos privacy retention run --dry-run --json
 
 # Export a self-contained HTML audit report
 complyos export --output report.html
@@ -128,10 +145,11 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 
 | Platform | Status | Auth |
 |----------|--------|------|
-| CSV export (any LMS) | ✅ Supported | None |
+| CSV export (any LMS/HRIS) | ✅ Supported | None |
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
-| SAP SuccessFactors | ✅ Supported | OAuth 2.0 |
-| Cornerstone OnDemand | ✅ Supported | OAuth 2.0 |
+| SAP SuccessFactors Learning | ✅ Supported | OAuth 2.0 |
+| Cornerstone OnDemand Learning | ✅ Supported | OAuth 2.0 |
+| Canvas, Moodle, Blackboard, D2L Brightspace | Roadmap / profile targets | Varies |
 | Mock (seed data) | ✅ Built-in | None |
 
 ### CSV Configuration
@@ -212,7 +230,7 @@ ComplianceGap(
 )
 ```
 
-Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-ready audit trails.
+Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes for auditor/counsel review. Action logs record who did what without turning readiness software into a legal-status claim.
 
 ---
 
@@ -223,6 +241,9 @@ Every audit produces an `EvidenceLedgerEntry` with SHA256 hashes for regulator-r
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
+- [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
+
+Remaining work is mostly outside application code: counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
 
 ---
 
