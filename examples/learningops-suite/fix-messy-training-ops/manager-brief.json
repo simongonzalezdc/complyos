@@ -1,0 +1,22 @@
+{
+  "brief_id": "manager-brief-demo-001",
+  "demo": "fix-messy-training-ops",
+  "synthetic": true,
+  "audience": "Demo manager / client sponsor",
+  "status": "draft_only",
+  "headline": "Four normalized learners; three action items; two records require review.",
+  "risk_summary": [
+    "One learner has incomplete Field Safety Basics.",
+    "One learner appears to have an expired completion.",
+    "One new Heat Safety assignment should wait for approval."
+  ],
+  "next_actions": [
+    "Approve normalized roster or send corrections.",
+    "Approve learner follow-up drafts.",
+    "Confirm whether Heat Safety Refresher should be assigned.",
+    "Generate ComplyOS evidence packet after review."
+  ],
+  "evidence_chain": "source export → normalized record → rule/source proposal → draft action → human approval → evidence packet",
+  "coverage_disclosure": "Synthetic demo brief. Not a certification, not an employment decision, and not proof of live tenant integration."
+}
+

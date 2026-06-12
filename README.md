@@ -9,6 +9,25 @@
 
 ComplyOS turns HRIS, LMS, and CSV learning records into tenant-scoped evidence, gap reports, DSR workflows, retention cleanup, and readiness packets for HR, People Ops, L&D, security, and campus teams. It is readiness/control-mapping software, not a certification badge or automated employment-decision system.
 
+ComplyOS is also the **live compliance/evidence module** inside the working-title
+[LearningOps Suite](docs/learningops-suite-v0.md): a modular HR/L&D automation
+suite for intake, rosters, scheduling, regulatory awareness, instructional
+design, training specialist workflows, microlearning, evaluation, and manager
+briefs. The suite uses explicit maturity labels so live capability, contract
+interfaces, synthetic demos, and roadmap modules are not blended.
+
+Regulatory awareness is defined as [RegWatch v0](docs/regwatch-v0.md): official
+source monitoring, source provenance, coverage-gap disclosure, and
+human-approved proposals before any rule, training, or notification changes
+state.
+
+LearningOps demo packets are synthetic and explicitly labeled:
+
+- [Training from scratch](docs/demos/training-from-scratch.md)
+- [Fix messy existing training operations](docs/demos/fix-messy-training-ops.md)
+
+The landing/design direction is captured in [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md).
+
 ---
 
 ## Why ComplyOS?

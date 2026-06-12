@@ -1,0 +1,24 @@
+{
+  "draft_packet_id": "learner-support-demo-001",
+  "demo": "fix-messy-training-ops",
+  "synthetic": true,
+  "send_status": "draft_only",
+  "requires_human_approval": true,
+  "drafts": [
+    {
+      "learner_id": "demo-u102",
+      "channel": "email",
+      "subject": "Draft: finish Field Safety Basics",
+      "body": "Draft only: our records show Field Safety Basics is still in progress. Please confirm completion or finish the module by the reviewed due date.",
+      "reviewer_action": "manager_or_training_coordinator_approval_required"
+    },
+    {
+      "learner_id": "demo-u103",
+      "channel": "email",
+      "subject": "Draft: refresher may be needed",
+      "body": "Draft only: your prior Field Safety Basics completion may be expired. A coordinator will confirm whether a refresher is required.",
+      "reviewer_action": "training_coordinator_approval_required"
+    }
+  ]
+}
+

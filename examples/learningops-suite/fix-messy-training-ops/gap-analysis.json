@@ -1,0 +1,40 @@
+{
+  "analysis_id": "gap-demo-messy-training-ops-001",
+  "demo": "fix-messy-training-ops",
+  "synthetic": true,
+  "source_chain": [
+    "messy-lms-export.csv",
+    "normalized-roster.csv",
+    "RegWatch optional source profile",
+    "ComplyOS readiness rule proposal",
+    "human approval gate",
+    "evidence packet"
+  ],
+  "summary": {
+    "records_imported": 5,
+    "normalized_records": 4,
+    "gaps_found": 3,
+    "exceptions_requiring_review": 2
+  },
+  "gaps": [
+    {
+      "learner_id": "demo-u102",
+      "course_code": "SAFE-101",
+      "gap_type": "incomplete",
+      "recommended_action": "Learner support draft reminder after manager review."
+    },
+    {
+      "learner_id": "demo-u103",
+      "course_code": "SAFE-101",
+      "gap_type": "expired_completion",
+      "recommended_action": "Assign refresher if reviewer confirms rule applies."
+    },
+    {
+      "learner_id": "demo-u104",
+      "course_code": "HEAT-201",
+      "gap_type": "new_assignment_pending",
+      "recommended_action": "Assign only after training-impact approval."
+    }
+  ],
+  "coverage_disclosure": "Synthetic CSV fallback demo. API integrations are optional; this does not claim tenant-specific Workday, SuccessFactors, Cornerstone, or Canvas access."
+}

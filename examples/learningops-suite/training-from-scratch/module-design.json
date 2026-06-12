@@ -1,0 +1,57 @@
+{
+  "module_id": "microlearn-demo-heat-safety-001",
+  "demo": "training-from-scratch",
+  "synthetic": true,
+  "title": "Heat Safety Field Refresher",
+  "duration_minutes": 5,
+  "maturity": "synthetic_demo",
+  "objectives": [
+    "Identify two early warning signs of heat illness.",
+    "Choose the correct escalation path for a heat-related incident.",
+    "Explain where to find the local water/rest/shade checklist."
+  ],
+  "storyboard": [
+    {
+      "screen": 1,
+      "type": "context",
+      "prompt": "Why this refresher exists and what source triggered review."
+    },
+    {
+      "screen": 2,
+      "type": "micro-scenario",
+      "prompt": "A crew member reports dizziness during a hot afternoon shift. What happens next?"
+    },
+    {
+      "screen": 3,
+      "type": "job-aid",
+      "prompt": "Supervisor pre-shift heat safety checklist."
+    },
+    {
+      "screen": 4,
+      "type": "knowledge-check",
+      "prompt": "Select the two actions that must happen before work continues."
+    }
+  ],
+  "assessment": {
+    "passing_score": 80,
+    "items": [
+      {
+        "id": "q1",
+        "type": "scenario",
+        "review_required": true
+      },
+      {
+        "id": "q2",
+        "type": "multiple_choice",
+        "review_required": true
+      }
+    ]
+  },
+  "accessibility_and_localization_notes": [
+    "Plain-language version required.",
+    "Audio is optional; all content must work as text.",
+    "Spanish quick-reference should be reviewed by a human translator before publication."
+  ],
+  "human_approval_gate": "SME and safety/compliance owner approve before publishing or assigning."
+}
+

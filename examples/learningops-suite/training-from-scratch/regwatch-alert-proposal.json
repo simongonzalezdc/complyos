@@ -1,0 +1,45 @@
+{
+  "proposal_id": "regwatch-proposal-demo-heat-safety-001",
+  "demo": "training-from-scratch",
+  "synthetic": true,
+  "source_item_ids": [
+    "source-item-osha-demo-heat-safety-001"
+  ],
+  "watch_profile_id": "profile-demo-workforce-safety-us",
+  "source_provenance": {
+    "source_id": "us-federal-osha-laws-regs",
+    "source_name": "OSHA laws and regulations",
+    "source_url": "https://www.osha.gov/laws-regs",
+    "jurisdiction": "US",
+    "agency_or_body": "Occupational Safety and Health Administration",
+    "citation_or_identifier": "demo-osha-laws-regs-heat-safety-review",
+    "checked_at": "2026-06-12T00:00:00Z",
+    "coverage_gaps": [
+      "Synthetic demo item, not a parser output.",
+      "State OSHA plans and state-specific requirements require separate review.",
+      "Human legal/compliance owner must approve any operational interpretation."
+    ]
+  },
+  "relevance_rationale": "The watch profile includes safety-training and field-operations tags. The source signal may require refreshed training or job aids for heat-related safety procedures.",
+  "confidence": "medium",
+  "training_impact_summary": "Draft only: review whether field teams need a 3-5 minute heat safety refresher, supervisor talking points, and completion evidence.",
+  "suggested_actions": [
+    {
+      "type": "needs_analysis",
+      "status": "draft"
+    },
+    {
+      "type": "microlearning_candidate",
+      "status": "requires_sme_review"
+    },
+    {
+      "type": "complyos_rule_change_proposal",
+      "status": "requires_human_approval"
+    }
+  ],
+  "human_review_status": "triage_needed",
+  "reviewer_role": "Safety/compliance owner",
+  "coverage_disclosure": "Synthetic OSHA-source demo. No rule, training assignment, learner message, or compliance status changes without human approval.",
+  "created_at": "2026-06-12T00:00:00Z",
+  "expires_or_review_by": "2026-06-26T00:00:00Z"
+}
