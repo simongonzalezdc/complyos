@@ -321,6 +321,38 @@ class DBRetentionPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class DBSourceIntelRun(Base):
+    __tablename__ = "source_intel_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    proposal_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage_gaps: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBSourceIntelProposal(Base):
+    __tablename__ = "source_intel_proposals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    run_id: Mapped[str] = mapped_column(String, nullable=False)
+    adapter_name: Mapped[str] = mapped_column(String, nullable=False)
+    signal_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_url: Mapped[str] = mapped_column(String, nullable=False)
+    source_hash: Mapped[str] = mapped_column(String, nullable=False)
+    approval_state: Mapped[str] = mapped_column(String, default="needs_review", nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 def resolve_database_url(database: str | None = None) -> str:
     """Resolve a SQLAlchemy database URL from env, URL, or SQLite path."""
     env_url = os.getenv("COMPLYOS_DATABASE_URL")

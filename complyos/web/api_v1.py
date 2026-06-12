@@ -21,6 +21,7 @@ from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
+from complyos.services.source_intel import SourceIntelService
 
 
 class ErrorBody(BaseModel):
@@ -71,6 +72,10 @@ class RetentionPolicyRequestBody(BaseModel):
 
 class RetentionRunBody(BaseModel):
     dry_run: bool = True
+
+
+class SourceIntelDecisionBody(BaseModel):
+    state: str
 
 
 def _http_error(
@@ -248,6 +253,41 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             raise _permission_error(exc, context) from exc
         except ValueError as exc:
             raise _bad_request("bad_governance_lane", exc, context) from exc
+
+    @router.get("/source-intel/proposals")
+    async def list_source_intel_proposals(
+        state: str | None = None,
+        limit: int = 50,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return {
+                "proposals": SourceIntelService(repo).list_proposals(
+                    context,
+                    state=state,
+                    limit=limit,
+                ),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/source-intel/proposals/{proposal_id}/decision")
+    async def decide_source_intel_proposal(
+        proposal_id: str,
+        request: SourceIntelDecisionBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return SourceIntelService(repo).decide_proposal(
+                context,
+                proposal_id=proposal_id,
+                state=request.state,
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_source_intel_decision", exc, context) from exc
 
     @router.post("/ai/proposals/mapping")
     async def propose_mapping(

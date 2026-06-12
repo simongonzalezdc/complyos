@@ -1,232 +1,151 @@
-"""Public/free source clients for source-intelligence snapshots.
-
-The clients are deliberately transport-injected so tests never require network
-and production callers can decide whether live outbound access is allowed.
-"""
-
 from __future__ import annotations
 
-from typing import Any, Protocol
+import json
+from pathlib import Path
 
-import httpx
-from pydantic import BaseModel, Field
+from typer.testing import CliRunner
 
-from complyos.source_intel.models import SourceDefinition, SourceSnapshot, SourceType
+from complyos.cli import app
 
-
-class HTTPResponse(BaseModel):
-    """Small JSON HTTP response wrapper used by source clients."""
-
-    status_code: int
-    data: dict[str, Any]
+runner = CliRunner()
 
 
-class HTTPTransport(Protocol):
-    """Transport boundary so source clients can run with fake or live HTTP."""
+def test_source_intel_sources_lists_free_and_blocked_sources() -> None:
+    result = runner.invoke(app, ["source-intel", "sources", "--json"])
 
-    def get_json(self, url: str, *, params: dict[str, str]) -> HTTPResponse:
-        """Fetch JSON from a URL."""
-
-
-class HttpxTransport:
-    """Live HTTP transport using the existing httpx dependency."""
-
-    def __init__(self, *, timeout_seconds: float = 20.0) -> None:
-        self.timeout_seconds = timeout_seconds
-
-    def get_json(self, url: str, *, params: dict[str, str]) -> HTTPResponse:
-        response = httpx.get(url, params=params, timeout=self.timeout_seconds)
-        return HTTPResponse(status_code=response.status_code, data=response.json())
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    ids = {item["id"] for item in data["sources"]}
+    assert {"federal-register", "ecfr-title-29", "osha-web"} <= ids
+    federal = next(item for item in data["sources"] if item["id"] == "federal-register")
+    assert federal["metadata"]["cost"] == "free"
+    assert federal["metadata"]["auth"] == "none"
 
 
-class SourceFetchReport(BaseModel):
-    """Result of checking one source through one client."""
+def test_source_intel_run_fixture_writes_review_queue_without_network(tmp_path: Path) -> None:
+    store_path = tmp_path / "reviews.jsonl"
 
-    source_id: str
-    snapshots: list[SourceSnapshot] = Field(default_factory=list)
-    coverage_gaps: list[str] = Field(default_factory=list)
+    result = runner.invoke(
+        app,
+        ["source-intel", "run-fixture", "--store", str(store_path), "--json"],
+    )
 
-
-class FederalRegisterClient:
-    """Fetch candidate documents from the public Federal Register API."""
-
-    endpoint = "https://www.federalregister.gov/api/v1/documents.json"
-
-    def __init__(self, *, transport: HTTPTransport | None = None) -> None:
-        self.transport = transport or HttpxTransport()
-
-    def fetch(self, source: SourceDefinition, *, query: str) -> SourceFetchReport:
-        response = self.transport.get_json(
-            self.endpoint,
-            params={
-                "conditions[term]": query,
-                "conditions[type][]": "RULE",
-                "order": "newest",
-                "per_page": "10",
-            },
-        )
-        if response.status_code >= 400:
-            return SourceFetchReport(
-                source_id=source.id,
-                coverage_gaps=[f"Federal Register API returned HTTP {response.status_code}"],
-            )
-
-        snapshots = []
-        for item in response.data.get("results", []):
-            title = str(item.get("title") or "Untitled Federal Register document")
-            url = str(item.get("html_url") or source.url)
-            abstract = str(item.get("abstract") or "")
-            agencies = item.get("agencies") or []
-            agency_names = [str(agency.get("name")) for agency in agencies if agency.get("name")]
-            text = "\n".join(part for part in [title, abstract, "; ".join(agency_names)] if part)
-            snapshots.append(
-                SourceSnapshot.from_text(
-                    source_id=source.id,
-                    url=url,
-                    title=title,
-                    text=text,
-                    metadata={
-                        "document_number": item.get("document_number"),
-                        "publication_date": item.get("publication_date"),
-                        "agencies": agency_names,
-                        "source_client": "federal_register",
-                    },
-                )
-            )
-
-        coverage_gaps = [] if snapshots else ["no matching Federal Register documents"]
-        return SourceFetchReport(
-            source_id=source.id,
-            snapshots=snapshots,
-            coverage_gaps=coverage_gaps,
-        )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["snapshot_count"] == 1
+    assert data["proposal_count"] == 2
+    assert store_path.exists()
+    stored_lines = store_path.read_text().strip().splitlines()
+    assert len(stored_lines) == 2
 
 
-class ECFRClient:
-    """Fetch candidate sections from the public eCFR search API."""
+def test_source_intel_review_lists_and_decides(tmp_path: Path) -> None:
+    store_path = tmp_path / "reviews.jsonl"
+    seed = runner.invoke(app, ["source-intel", "run-fixture", "--store", str(store_path), "--json"])
+    proposal_id = json.loads(seed.output)["proposal_ids"][0]
 
-    endpoint = "https://www.ecfr.gov/api/search/v1/results"
+    list_result = runner.invoke(
+        app, ["source-intel", "review", "--store", str(store_path), "--json"]
+    )
+    assert list_result.exit_code == 0
+    listed = json.loads(list_result.output)
+    assert listed["proposals"][0]["approval_state"] == "needs_review"
 
-    def __init__(self, *, transport: HTTPTransport | None = None) -> None:
-        self.transport = transport or HttpxTransport()
-
-    def fetch(self, source: SourceDefinition, *, query: str) -> SourceFetchReport:
-        response = self.transport.get_json(
-            self.endpoint,
-            params={
-                "query": query,
-                "title": "29",
-                "per_page": "10",
-                "page": "1",
-            },
-        )
-        if response.status_code >= 400:
-            return SourceFetchReport(
-                source_id=source.id,
-                coverage_gaps=[f"eCFR API returned HTTP {response.status_code}"],
-            )
-
-        snapshots = []
-        for item in response.data.get("results", []):
-            title = str(item.get("title") or item.get("heading") or "Untitled eCFR result")
-            section = str(item.get("section") or "").strip()
-            url = (
-                f"https://www.ecfr.gov/current/title-29/section-{section}"
-                if section
-                else source.url
-            )
-            heading = str(item.get("heading") or "")
-            excerpt = str(item.get("full_text_excerpt") or item.get("text") or "")
-            hierarchy = item.get("hierarchy_headings") or []
-            text = "\n".join(
-                part for part in [title, heading, excerpt, " > ".join(map(str, hierarchy))] if part
-            )
-            snapshots.append(
-                SourceSnapshot.from_text(
-                    source_id=source.id,
-                    url=url,
-                    title=title,
-                    text=text,
-                    metadata={
-                        "part": item.get("part"),
-                        "section": item.get("section"),
-                        "hierarchy_headings": hierarchy,
-                        "source_client": "ecfr",
-                    },
-                )
-            )
-
-        coverage_gaps = [] if snapshots else ["no matching eCFR results"]
-        return SourceFetchReport(
-            source_id=source.id,
-            snapshots=snapshots,
-            coverage_gaps=coverage_gaps,
-        )
+    decide_result = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "review",
+            "--store",
+            str(store_path),
+            "--proposal-id",
+            proposal_id,
+            "--state",
+            "approved_for_brief",
+            "--json",
+        ],
+    )
+    assert decide_result.exit_code == 0
+    decided = json.loads(decide_result.output)
+    assert decided["proposal"]["approval_state"] == "approved_for_brief"
 
 
-def free_public_source_definitions() -> dict[str, SourceDefinition]:
-    """Built-in no-paid source definitions for the first RegWatch slice."""
-    return {
-        "federal-register": SourceDefinition(
-            id="federal-register",
-            name="Federal Register API",
-            url="https://www.federalregister.gov/developers/documentation/api/v1",
-            source_type=SourceType.OFFICIAL_REGULATOR,
-            authority="official",
-            jurisdictions=["US"],
-            topics=["federal rules", "workforce training", "compliance"],
-            metadata={
-                "cost": "free",
-                "auth": "none",
-                "status": "client-implemented",
-                "client": "FederalRegisterClient",
-            },
-        ),
-        "ecfr-title-29": SourceDefinition(
-            id="ecfr-title-29",
-            name="eCFR Title 29 Search API",
-            url="https://www.ecfr.gov/developers/documentation/api/v1",
-            source_type=SourceType.OFFICIAL_REGULATOR,
-            authority="official",
-            jurisdictions=["US"],
-            topics=["labor", "workplace safety", "training requirements"],
-            metadata={
-                "cost": "free",
-                "auth": "none",
-                "status": "client-implemented",
-                "client": "ECFRClient",
-            },
-        ),
-        "osha-web": SourceDefinition(
-            id="osha-web",
-            name="OSHA Laws and Regulations Web Pages",
-            url="https://www.osha.gov/laws-regs",
-            source_type=SourceType.OFFICIAL_REGULATOR,
-            authority="official",
-            jurisdictions=["US"],
-            topics=["workplace safety", "training requirements"],
-            metadata={
-                "cost": "free",
-                "auth": "none",
-                "status": "web-parser-needed",
-                "blocked_reason": "HTML/PDF parser not implemented in this no-paid slice",
-            },
-        ),
-        "california-dir-dlse": SourceDefinition(
-            id="california-dir-dlse",
-            name="California DIR/DLSE Web Pages",
-            url="https://www.dir.ca.gov/dlse/",
-            source_type=SourceType.OFFICIAL_REGULATOR,
-            authority="official",
-            jurisdictions=["US-CA"],
-            topics=["labor", "state employment training"],
-            metadata={
-                "cost": "free",
-                "auth": "none",
-                "status": "web-parser-needed",
-                "blocked_reason": (
-                    "jurisdiction-specific parser not implemented in this no-paid slice"
-                ),
-            },
-        ),
-    }
+def test_source_intel_run_public_dry_run_lists_free_live_clients() -> None:
+    result = runner.invoke(app, ["source-intel", "run-public", "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["dry_run"] is True
+    assert data["query"] == "training"
+    assert data["source_ids"] == ["federal-register", "ecfr-title-29"]
+    assert data["store"] == "source-intel-reviews.jsonl"
+
+
+def test_source_intel_run_upload_processes_approved_text_without_network(tmp_path: Path) -> None:
+    source_file = tmp_path / "approved-guidance.txt"
+    source_file.write_text(
+        "Research shows managers improve feedback with examples, scenario practice, "
+        "and a checklist before one-on-ones.",
+        encoding="utf-8",
+    )
+    store_path = tmp_path / "reviews.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "run-upload",
+            str(source_file),
+            "--store",
+            str(store_path),
+            "--source-id",
+            "approved-feedback-guide",
+            "--source-name",
+            "Approved feedback guide",
+            "--topic",
+            "manager feedback",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["snapshot_count"] == 1
+    assert data["proposal_count"] == 1
+    assert data["proposal_signal_types"] == ["microlearning_opportunity"]
+    assert store_path.exists()
+
+
+def test_source_intel_cli_can_persist_and_review_db_queue(tmp_path: Path) -> None:
+    db_path = tmp_path / "source-intel-cli.db"
+
+    run = runner.invoke(
+        app,
+        ["source-intel", "run-fixture", "--db", str(db_path), "--json"],
+    )
+
+    assert run.exit_code == 0
+    run_data = json.loads(run.output)
+    assert run_data["db_receipt"]["proposal_count"] == 2
+
+    listed = runner.invoke(app, ["source-intel", "review", "--db", str(db_path), "--json"])
+    assert listed.exit_code == 0
+    proposals = json.loads(listed.output)["proposals"]
+    assert len(proposals) == 2
+
+    decided = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "review",
+            "--db",
+            str(db_path),
+            "--proposal-id",
+            proposals[0]["id"],
+            "--state",
+            "approved_for_brief",
+            "--json",
+        ],
+    )
+    assert decided.exit_code == 0
+    assert json.loads(decided.output)["proposal"]["approval_state"] == "approved_for_brief"

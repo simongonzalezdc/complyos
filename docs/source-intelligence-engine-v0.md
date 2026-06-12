@@ -100,6 +100,25 @@ object. A snapshot can come from:
 That means the product can still work when a client says, “We cannot give your
 system network access; here is the export.”
 
+## Production hardening now in place
+
+Source Intelligence now has a production-oriented review spine that does not
+depend on external API credentials:
+
+- database tables for source-intelligence runs and proposals;
+- tenant-scoped repository methods for saving, listing, and deciding proposals;
+- service-layer permissions for `source_intel:read`, `source_intel:run`, and
+  `source_intel:decide`;
+- FastAPI endpoints:
+  - `GET /api/v1/source-intel/proposals`;
+  - `POST /api/v1/source-intel/proposals/{proposal_id}/decision`;
+- CLI DB mode:
+  - `complyos source-intel run-fixture --db complyos.db --json`;
+  - `complyos source-intel review --db complyos.db --json`.
+
+This is separate from external API work. See
+[External API Research List](./external-api-research-list.md).
+
 ## Audit and evidence rules
 
 Every proposal must carry:

@@ -25,10 +25,13 @@ from complyos.models.database import (
     DBLegalHold,
     DBPrivacyRequest,
     DBRetentionPolicy,
+    DBSourceIntelProposal,
+    DBSourceIntelRun,
     DBUser,
     init_db,
 )
 from complyos.models.domain import Course, Enrollment, LearningRecord, LearningRecordStatus, User
+from complyos.source_intel.monitor import SourceMonitorRun
 
 
 class LocalRepository:
@@ -440,6 +443,111 @@ class LocalRepository:
                 .all()
             )
             return [self._to_action_log_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Source intelligence review persistence
+    # ------------------------------------------------------------------
+    def save_source_intel_run(
+        self,
+        *,
+        tenant_id: str,
+        query: str,
+        run: SourceMonitorRun,
+        created_by: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        run_id = str(uuid.uuid4())
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            session.add(
+                DBSourceIntelRun(
+                    id=run_id,
+                    tenant_id=tenant_id,
+                    query=query,
+                    source_count=run.source_count,
+                    snapshot_count=run.snapshot_count,
+                    proposal_count=run.proposal_count,
+                    coverage_gaps=run.coverage_gaps,
+                    created_by=created_by,
+                    created_at=timestamp,
+                )
+            )
+            for proposal in run.proposals:
+                payload = proposal.model_dump(mode="json")
+                session.merge(
+                    DBSourceIntelProposal(
+                        id=proposal.id,
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        adapter_name=proposal.adapter_name,
+                        signal_type=proposal.signal.signal_type,
+                        source_id=proposal.signal.source_id,
+                        source_url=proposal.source_url,
+                        source_hash=proposal.source_hash,
+                        approval_state=proposal.approval_state,
+                        payload=payload,
+                        created_at=timestamp,
+                    )
+                )
+            session.commit()
+        return {
+            "run_id": run_id,
+            "tenant_id": tenant_id,
+            "source_count": run.source_count,
+            "snapshot_count": run.snapshot_count,
+            "proposal_count": run.proposal_count,
+            "coverage_gaps": run.coverage_gaps,
+        }
+
+    def list_source_intel_proposals(
+        self,
+        *,
+        tenant_id: str,
+        state: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelProposal).where(
+                DBSourceIntelProposal.tenant_id == tenant_id
+            )
+            if state:
+                query = query.where(DBSourceIntelProposal.approval_state == state)
+            rows = (
+                query.order_by(DBSourceIntelProposal.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_source_intel_proposal_dict(row) for row in rows]
+
+    def decide_source_intel_proposal(
+        self,
+        *,
+        tenant_id: str,
+        proposal_id: str,
+        state: str,
+        decided_by: str,
+        decided_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            proposal = (
+                session.query(DBSourceIntelProposal)
+                .where(
+                    DBSourceIntelProposal.tenant_id == tenant_id,
+                    DBSourceIntelProposal.id == proposal_id,
+                )
+                .first()
+            )
+            if proposal is None:
+                raise ValueError(f"unknown source-intelligence proposal: {proposal_id}")
+            proposal.approval_state = state
+            proposal.decided_by = decided_by
+            proposal.decided_at = decided_at or datetime.utcnow()
+            payload = dict(proposal.payload or {})
+            payload["approval_state"] = state
+            proposal.payload = payload
+            session.commit()
+            session.refresh(proposal)
+            return self._to_source_intel_proposal_dict(proposal)
 
     @staticmethod
     def _to_snapshot_dict(snapshot: DBAuditSnapshot) -> dict[str, Any]:
@@ -1260,6 +1368,30 @@ class LocalRepository:
             "approved_at": proposal.approved_at,
             "output": proposal.output or {},
             "provenance": provenance.usage_metadata if provenance else {},
+        }
+
+    @staticmethod
+    def _to_source_intel_proposal_dict(db: DBSourceIntelProposal) -> dict[str, Any]:
+        payload = dict(db.payload or {})
+        raw_signal = payload.get("signal")
+        signal: dict[str, Any] = raw_signal if isinstance(raw_signal, dict) else {}
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "run_id": db.run_id,
+            "adapter_name": db.adapter_name,
+            "signal_type": db.signal_type,
+            "source_id": db.source_id,
+            "source_url": db.source_url,
+            "source_hash": db.source_hash,
+            "approval_state": db.approval_state,
+            "decided_by": db.decided_by,
+            "decided_at": db.decided_at,
+            "created_at": db.created_at,
+            "title": signal.get("title"),
+            "summary": signal.get("summary"),
+            "score": signal.get("score"),
+            "payload": payload,
         }
 
     @staticmethod

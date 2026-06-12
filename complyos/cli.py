@@ -37,6 +37,7 @@ from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
+from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
     ECFRClient,
     FederalRegisterClient,
@@ -967,6 +968,7 @@ def source_intel_run_fixture(
         "--store",
         help="Local JSONL review queue path",
     ),
+    db_path: str | None = typer.Option(None, "--db", help="Optional SQLite DB review queue"),
     query: str = typer.Option("training", "--query", help="Source-monitoring query label"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
@@ -979,6 +981,14 @@ def source_intel_run_fixture(
     )
     run = monitor.run(query=query)
     SourceReviewStore(store_path).save_many(run.proposals)
+    db_receipt = None
+    if db_path:
+        context = _local_cli_context(role="compliance_manager")
+        db_receipt = SourceIntelService(LocalRepository(db_path)).record_run(
+            context,
+            query=query,
+            run=run,
+        )
     payload = {
         "source_count": run.source_count,
         "snapshot_count": run.snapshot_count,
@@ -986,6 +996,7 @@ def source_intel_run_fixture(
         "proposal_ids": [proposal.id for proposal in run.proposals],
         "coverage_gaps": run.coverage_gaps,
         "store": store_path,
+        "db_receipt": db_receipt,
     }
     if json_output:
         _print_json(payload)
@@ -1142,27 +1153,69 @@ def source_intel_review(
         "--store",
         help="Local JSONL review queue path",
     ),
+    db_path: str | None = typer.Option(None, "--db", help="Optional SQLite DB review queue"),
     proposal_id: str | None = typer.Option(None, "--proposal-id", help="Proposal ID to decide"),
     state: str | None = typer.Option(None, "--state", help="New review state"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """List or update local source-intelligence review proposals."""
+    if db_path:
+        context = _local_cli_context(role="compliance_manager")
+        service = SourceIntelService(LocalRepository(db_path))
+        if proposal_id or state:
+            if not proposal_id or not state:
+                console.print("[red]Both --proposal-id and --state are required to decide.[/red]")
+                raise typer.Exit(1)
+            try:
+                db_proposal = service.decide_proposal(context, proposal_id=proposal_id, state=state)
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
+            db_decision_payload: dict[str, Any] = {"proposal": db_proposal}
+            if json_output:
+                _print_json(db_decision_payload)
+                return
+            console.print(f"[green]Updated proposal:[/green] {db_proposal['id']}")
+            console.print(f"[bold]State:[/bold] {db_proposal['approval_state']}")
+            return
+
+        db_proposals = service.list_proposals(context)
+        db_list_payload: dict[str, Any] = {"proposals": db_proposals}
+        if json_output:
+            _print_json(db_list_payload)
+            return
+
+        table = Table(title="Source Intelligence DB Review Queue")
+        table.add_column("Proposal")
+        table.add_column("Adapter")
+        table.add_column("Signal")
+        table.add_column("State")
+        for db_row in db_proposals:
+            table.add_row(
+                str(db_row["id"]),
+                str(db_row["adapter_name"]),
+                str(db_row["signal_type"]),
+                str(db_row["approval_state"]),
+            )
+        console.print(table)
+        return
+
     store = SourceReviewStore(store_path)
     if proposal_id or state:
         if not proposal_id or not state:
             console.print("[red]Both --proposal-id and --state are required to decide.[/red]")
             raise typer.Exit(1)
         try:
-            proposal = store.decide(proposal_id, state=state)
+            jsonl_proposal = store.decide(proposal_id, state=state)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
-        decision_payload: dict[str, Any] = {"proposal": proposal.model_dump(mode="json")}
+        decision_payload: dict[str, Any] = {"proposal": jsonl_proposal.model_dump(mode="json")}
         if json_output:
             _print_json(decision_payload)
             return
-        console.print(f"[green]Updated proposal:[/green] {proposal.id}")
-        console.print(f"[bold]State:[/bold] {proposal.approval_state}")
+        console.print(f"[green]Updated proposal:[/green] {jsonl_proposal.id}")
+        console.print(f"[bold]State:[/bold] {jsonl_proposal.approval_state}")
         return
 
     proposals = store.list()
@@ -1178,12 +1231,12 @@ def source_intel_review(
     table.add_column("Adapter")
     table.add_column("Signal")
     table.add_column("State")
-    for proposal in proposals:
+    for jsonl_row in proposals:
         table.add_row(
-            proposal.id,
-            proposal.adapter_name,
-            proposal.signal.signal_type,
-            proposal.approval_state,
+            jsonl_row.id,
+            jsonl_row.adapter_name,
+            jsonl_row.signal.signal_type,
+            jsonl_row.approval_state,
         )
     console.print(table)
 

@@ -35,3 +35,6 @@ ENV/
 .omx/
 .codex-audit/
 output/
+
+# Local source-intelligence review queue
+source-intel-reviews.jsonl

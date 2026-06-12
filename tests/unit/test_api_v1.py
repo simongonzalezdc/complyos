@@ -187,3 +187,79 @@ def test_api_v1_privacy_request_and_retention_flow(monkeypatch, tmp_path) -> Non
     )
     assert hold.status_code == 200
     assert hold.json()["status"] == "ACTIVE"
+
+
+def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-source-intel.db"))
+    from complyos.microlearning import MicrolearningAdapter
+    from complyos.regwatch import RegWatchAdapter
+    from complyos.services.context import default_local_context
+    from complyos.services.source_intel import SourceIntelService
+    from complyos.source_intel import (
+        SourceDefinition,
+        SourceIntelEngine,
+        SourceSnapshot,
+        SourceType,
+    )
+    from complyos.source_intel.monitor import SourceMonitorRun
+
+    source = SourceDefinition(
+        id="official-source",
+        name="Official Source",
+        url="https://example.gov/rule",
+        source_type=SourceType.OFFICIAL_REGULATOR,
+        authority="official",
+        jurisdictions=["US"],
+        topics=["safety training", "manager feedback"],
+    )
+    snapshot = SourceSnapshot.from_text(
+        source_id=source.id,
+        url=source.url,
+        title="Final rule and practice guide",
+        text=(
+            "A final rule says covered employers must train workers. "
+            "Managers can use scenario practice, examples, and a checklist."
+        ),
+    )
+    proposals = SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]).evaluate(
+        [source], [snapshot]
+    )
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+    SourceIntelService(repo).record_run(
+        context,
+        query="training",
+        run=SourceMonitorRun(
+            source_count=1,
+            snapshot_count=1,
+            proposal_count=len(proposals),
+            proposals=proposals,
+            coverage_gaps=[],
+        ),
+    )
+    client = TestClient(create_api_v1_app(repo))
+    headers = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "compliance_manager",
+        "X-Tenant-Id": "tenant-a",
+    }
+
+    listed = client.get("/api/v1/source-intel/proposals", headers=headers)
+    assert listed.status_code == 200
+    assert len(listed.json()["proposals"]) == 2
+    proposal_id = listed.json()["proposals"][0]["id"]
+
+    decided = client.post(
+        f"/api/v1/source-intel/proposals/{proposal_id}/decision",
+        json={"state": "approved_for_brief"},
+        headers=headers,
+    )
+    assert decided.status_code == 200
+    assert decided.json()["approval_state"] == "approved_for_brief"
+
+    denied = client.post(
+        f"/api/v1/source-intel/proposals/{proposal_id}/decision",
+        json={"state": "rejected"},
+        headers={**headers, "X-Actor-Role": "read_only"},
+    )
+    assert denied.status_code == 403
