@@ -4,7 +4,7 @@
 
 ComplyOS is a learning-compliance evidence engine. It ingests learning data from
 CSV exports and LMS connectors, normalizes that data into one shared audit model,
-and produces evidence-backed compliance gaps and audit trails.
+and produces evidence-backed compliance gaps, audit trails, privacy workflows, retention cleanup, and readiness packets.
 
 ComplyOS has two buyer tracks:
 
@@ -15,7 +15,7 @@ ComplyOS has two buyer tracks:
 
 Both tracks use the same audit model. The terms differ by market, but the engine
 still asks the same question: which learners lack valid evidence for required
-learning items?
+learning items? The product should stay in the readiness/control-mapping lane until counsel, customers, and auditors approve stronger claims.
 
 ## Domain Glossary
 
@@ -26,7 +26,12 @@ learning items?
 | **Learning Record** | A normalized cross-LMS source record that says what happened between one learner and one learning item: assignment, enrollment, submission, completion, exemption, score, due date, or expiry. Current code has a `LearningRecord` model for connector normalization. |
 | **Enrollment** | The current audit-engine compatibility model for a learner's relationship to a course. It is intentionally narrower than `LearningRecord`, but remains supported so the existing auditor and reports keep working. |
 | **Compliance Gap** | A missing, incomplete, overdue, expired, or otherwise invalid requirement for a learner. Current code stores gaps as `ComplianceGap`. |
-| **Evidence Ledger** | The immutable audit trail that hashes raw inputs, transformation steps, and audit outputs so reports can be defended later. Current code stores entries as `EvidenceLedgerEntry`. |
+| **Evidence Ledger** | The tenant-scoped audit trail that hashes raw inputs, transformation steps, and audit outputs so reports can be defended later. Current code stores entries as `EvidenceLedgerEntry`. |
+| **Privacy Request** | A tenant-scoped data-subject/privacy case. Export and deletion require recorded customer/controller approval. |
+| **Legal Hold** | A subject or tenant-level hold that blocks deletion and retention cleanup until explicitly released. |
+| **Retention Cleanup** | Dry-run/apply workflow for eligible closed privacy cases, terminal raw import payloads/decisions, rejected/expired AI proposals, evidence entries, and action logs. |
+| **Security Evidence Packet** | A readiness-only packet mapping controls to evidence tasks and current receipts. It is not a SOC 2 report. |
+| **Governance Packet** | A readiness-only AI/school/accessibility/FCRA boundary packet for review. |
 | **Workforce** | The ComplyOS profile for employee learning-compliance operations. Typical source systems include Workday Learning, Cornerstone OnDemand, SAP SuccessFactors Learning, Docebo, Absorb, Litmos, and CSV exports. |
 | **Campus** | The ComplyOS profile for education compliance operations. Typical source systems include Canvas, Brightspace, Blackboard, Moodle, Schoology, Google Classroom, and CSV exports. |
 
@@ -82,3 +87,10 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 - **`Course` is acceptable in current code.** The implementation still uses
   `Course`, but cross-market docs should prefer **Learning Item** because
   Workforce and Campus systems do not always call the required object a course.
+- **Compliance claims must stay scoped.** Use readiness/control mapping,
+  evidence-backed, and auditor/counsel review language. Do not say ComplyOS is
+  SOC 2/GDPR/FERPA/COPPA certified or equivalent unless a reviewed artifact
+  authorizes that exact wording.
+- **AI is proposal-only.** AI can propose mappings and drafts; it cannot mark
+  people compliant, promote imports, send remediation, or make employment or
+  education decisions.
