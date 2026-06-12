@@ -44,3 +44,12 @@ ComplyOS is an L&D Compliance & Learning Operations MCP Server. It audits compli
 uv run pytest -q
 uv run pytest --cov=complyos --cov-report=term-missing
 ```
+
+## Enterprise operation rules
+
+- Use service-backed surfaces only: CLI, MCP, API v1, and web must share the same ComplyOS services.
+- Run readiness before customer-facing or mutating workflows.
+- Preview imports before promotion; never promote rows that are rejected, pending, or need decisions.
+- AI is proposal-only with provenance; it cannot mark compliance, promote imports, execute remediation, or change rules.
+- Use evidence hashes in audit/import summaries.
+- Avoid legal/certification claims; use readiness/control-mapping language unless a reviewed artifact authorizes stronger wording.

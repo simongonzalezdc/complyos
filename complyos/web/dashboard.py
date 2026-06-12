@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from complyos.core.dashboard import generate_dashboard
 from complyos.models.domain import AuditReport
+from complyos.web.api_v1 import build_api_v1_router
 
 
 class AuditReporter(Protocol):
@@ -25,6 +26,7 @@ class AuditReporter(Protocol):
 def create_dashboard_app(*, auditor: AuditReporter) -> FastAPI:
     """Create the live ComplyOS dashboard app."""
     app = FastAPI(title="ComplyOS Dashboard", version="0.1.0")
+    app.include_router(build_api_v1_router())
 
     @app.get("/health")
     async def health() -> dict[str, str]:
