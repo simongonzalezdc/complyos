@@ -50,6 +50,7 @@ with:
 | `--accent-dark` | `#213f2f` | Primary action and dark surfaces. |
 | `--accent-soft` | `#dbe8dc` | Tags and status fills. |
 | `--amber` | `#b5762b` | Review/provenance/focus accent. |
+| `--amber-ink` | `#8a5414` | Amber text on `--amber-soft` chips (WCAG AA ≥4.5:1). |
 | `--warm` | `#e8dfcf` | Warm neutral panels. |
 | `--danger` | `#7d3f36` | Claim-boundary risk. |
 

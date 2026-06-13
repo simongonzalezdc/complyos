@@ -14,6 +14,10 @@
   --accent-dark: #213f2f;
   --accent-soft: #dbe8dc;
   --amber: #b5762b;
+  /* Accessible amber for text on --amber-soft chips: #b5762b only reaches
+     ~3:1 there, below WCAG 2.2 AA for normal text. This darker shade clears
+     4.5:1 while staying in the amber/provenance family. */
+  --amber-ink: #8a5414;
   --amber-soft: rgba(181, 118, 43, 0.14);
   --warm: #e8dfcf;
   --danger: #7d3f36;
@@ -346,7 +350,7 @@ h2 {
 
 .tag.sev-medium {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-ink);
 }
 
 /* ---- Login ------------------------------------------------------------ */
@@ -551,7 +555,7 @@ h2 {
 
 .tag.readiness-partial {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-ink);
 }
 
 .tag.readiness-missing {
