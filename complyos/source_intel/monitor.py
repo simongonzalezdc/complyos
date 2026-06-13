@@ -50,7 +50,13 @@ class SourceMonitor:
             if client is None:
                 coverage_gaps.append(f"{source.id}: no client configured")
                 continue
-            report = client.fetch(source, query=query)
+            try:
+                report = client.fetch(source, query=query)
+            except Exception as exc:  # noqa: BLE001 - one bad source must not abort the run
+                # Degrade gracefully: record the failure as a coverage gap and
+                # keep the snapshots already collected from healthy sources.
+                coverage_gaps.append(f"{source.id}: fetch failed: {type(exc).__name__}: {exc}")
+                continue
             snapshots.extend(report.snapshots)
             coverage_gaps.extend(f"{source.id}: {gap}" for gap in report.coverage_gaps)
 

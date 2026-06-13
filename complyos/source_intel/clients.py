@@ -36,7 +36,21 @@ class HttpxTransport:
 
     def get_json(self, url: str, *, params: dict[str, str]) -> HTTPResponse:
         response = httpx.get(url, params=params, timeout=self.timeout_seconds)
-        return HTTPResponse(status_code=response.status_code, data=response.json())
+        # Public regulator endpoints routinely answer rate-limit/5xx pages as
+        # HTML or empty bodies. Calling .json() unconditionally would raise
+        # before the client's status-code coverage-gap branch could run, so we
+        # branch on status and content-type first and degrade to empty data.
+        content_type = response.headers.get("content-type", "").lower()
+        if response.status_code >= 400 or "json" not in content_type:
+            return HTTPResponse(status_code=response.status_code, data={})
+        try:
+            payload = response.json()
+        except ValueError:
+            return HTTPResponse(status_code=response.status_code, data={})
+        return HTTPResponse(
+            status_code=response.status_code,
+            data=payload if isinstance(payload, dict) else {},
+        )
 
 
 class SourceFetchReport(BaseModel):
