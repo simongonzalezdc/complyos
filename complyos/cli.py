@@ -13,17 +13,10 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from complyos.api.mcp_server import (
-    _get_connector,
-    audit_compliance_gaps,
-    check_connector_health,
-    generate_audit_report,
-    get_user_compliance_status,
-)
+from complyos.api.mcp_server import _get_connector, check_connector_health
 from complyos.config import ComplyOSConfig
+from complyos.core.audit_views import shape_gaps, shape_report
 from complyos.core.release import build_deployment_checklist
-from complyos.core.remediation import RemediationEngine
-from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.core.time import utc_now
@@ -34,18 +27,19 @@ from complyos.notification.sender import NotificationSender, build_notifier_from
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.audit import AuditService
 from complyos.services.context import (
-    PERM_REMEDIATION_EXECUTE,
     ROLE_PERMISSIONS,
     ActorContext,
     default_local_context,
-    require_permission,
 )
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
@@ -133,7 +127,14 @@ def audit(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Audit compliance training gaps."""
-    result = asyncio.run(audit_compliance_gaps(department=department, region=region))
+
+    async def _audit():
+        gaps, ledger = await AuditService(_get_connector()).run_audit(
+            _local_cli_context(), department=department, region=region
+        )
+        return shape_gaps(gaps, ledger)
+
+    result = asyncio.run(_audit())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -169,7 +170,14 @@ def report(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Generate a structured audit report."""
-    result = asyncio.run(generate_audit_report(department=department, region=region))
+
+    async def _report():
+        report_model = await AuditService(_get_connector()).generate_report(
+            _local_cli_context(), department=department, region=region
+        )
+        return shape_report(report_model)
+
+    result = asyncio.run(_report())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -203,7 +211,13 @@ def status(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Get compliance status for a single user."""
-    result = asyncio.run(get_user_compliance_status(user_id))
+
+    async def _status():
+        return await AuditService(_get_connector()).get_status(
+            _local_cli_context(), user_id=user_id
+        )
+
+    result = asyncio.run(_status())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -245,11 +259,14 @@ def digest(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Show what changed since the last audit: new gaps, resolved gaps, trend."""
-    from complyos.api.mcp_server import generate_compliance_digest
 
-    result = asyncio.run(
-        generate_compliance_digest(department=department, region=region, db_path=db_path)
-    )
+    async def _digest():
+        digest_model = await AuditService(_get_connector(), LocalRepository(db_path)).get_digest(
+            _local_cli_context(), department=department, region=region
+        )
+        return digest_model.model_dump(mode="json")
+
+    result = asyncio.run(_digest())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -666,26 +683,19 @@ def remediate(
     notify_manager: bool = typer.Option(False, "--notify-manager/--no-notify-manager"),
 ):
     """Audit and remediate compliance gaps."""
+
     # Remediation mutates state (reminders, enrollment, manager notifications), so
-    # it is gated on the local operator context rather than running unattributed.
-    require_permission(_local_cli_context(), PERM_REMEDIATION_EXECUTE)
-    from complyos.api.mcp_server import _get_auditor, _get_connector
-
+    # RemediationService.execute owns the remediation:execute check on the local
+    # operator context rather than running unattributed.
     async def _remediate():
-        auditor = _get_auditor()
-        gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-        connector = _get_connector()
-        notifier = _get_notifier()
-        engine = RemediationEngine(connector, notifier=notifier)
-        actions = await engine.remediate_gaps(
-            gaps,
+        return await RemediationService(_get_connector(), notifier=_get_notifier()).execute(
+            _local_cli_context(),
+            department=department,
+            region=region,
             auto_remind=auto_remind,
             auto_enroll=auto_enroll,
             notify_manager=notify_manager,
         )
-
-        return gaps, actions, ledger
 
     gaps, actions, ledger = asyncio.run(_remediate())
     console.print(f"[bold]Gaps found:[/bold] {len(gaps)}")
@@ -715,16 +725,17 @@ def export(
     region: str | None = typer.Option(None, "--region", "-r"),
 ):
     """Export an audit report to HTML."""
-    from complyos.api.mcp_server import _get_auditor
 
     async def _export():
-        auditor = _get_auditor()
-        report = await auditor.generate_report(department=department, region=region)
-        return report
+        return await EvidenceService(_get_connector()).export_report(
+            _local_cli_context(),
+            output_path=output,
+            department=department,
+            region=region,
+        )
 
-    report = asyncio.run(_export())
-    path = export_html(report, output)
-    console.print(f"[green]Report exported to {path}[/green]")
+    result = asyncio.run(_export())
+    console.print(f"[green]Report exported to {result['output_path']}[/green]")
 
 
 @app.command()

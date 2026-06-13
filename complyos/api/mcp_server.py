@@ -16,28 +16,28 @@ from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.auditor import ComplianceAuditor
-from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.audit import AuditService
 from complyos.services.context import (
     PERM_AUDIT_READ,
-    PERM_AUDIT_RUN,
     PERM_CONNECTORS_READ,
-    PERM_REMEDIATION_EXECUTE,
     PERM_RULES_PREVIEW,
     ROLE_PERMISSIONS,
     ActorContext,
     default_local_context,
     require_permission,
 )
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
 from complyos.services.security_evidence import SecurityEvidenceService
 
 mcp = FastMCP("complyos")
@@ -160,9 +160,9 @@ async def audit_compliance_gaps(
     Returns:
         Summary of gaps found with user details and missing courses.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_RUN)
-    auditor = _get_auditor()
-    gaps, ledger = await auditor.audit_gaps(department=department, region=region)
+    gaps, ledger = await AuditService(_get_connector()).run_audit(
+        _mcp_context(), department=department, region=region
+    )
     return shape_gaps(gaps, ledger)
 
 
@@ -176,9 +176,7 @@ async def get_user_compliance_status(user_id: str) -> dict[str, Any]:
     Returns:
         User details, course-by-course status, and compliance summary.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_READ)
-    auditor = _get_auditor()
-    return await auditor.get_user_status(user_id)
+    return await AuditService(_get_connector()).get_status(_mcp_context(), user_id=user_id)
 
 
 @mcp.tool()
@@ -199,9 +197,9 @@ async def generate_audit_report(
         Structured report with severity breakdown, department analysis,
         top missing courses, and evidence hash.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_RUN)
-    auditor = _get_auditor()
-    report = await auditor.generate_report(department=department, region=region)
+    report = await AuditService(_get_connector()).generate_report(
+        _mcp_context(), department=department, region=region
+    )
     return shape_report(report)
 
 
@@ -225,11 +223,9 @@ async def generate_compliance_digest(
         New gaps, resolved gaps, trend (baseline/improving/worsening/flat),
         severity breakdown, and evidence hash.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_RUN)
-    from complyos.core.digest import DigestEngine
-
-    engine = DigestEngine(_get_auditor(), LocalRepository(db_path))
-    digest = await engine.generate(department=department, region=region)
+    digest = await AuditService(_get_connector(), LocalRepository(db_path)).get_digest(
+        _mcp_context(), department=department, region=region
+    )
     return digest.model_dump(mode="json")
 
 
@@ -331,15 +327,13 @@ async def remediate_compliance_gaps(
     """
     # Mutating remediation (reminders, auto-enroll, manager notifications) must
     # be explicitly authorized; the proposal-only default role cannot execute it.
-    require_permission(_mcp_context(), PERM_REMEDIATION_EXECUTE)
-    auditor = _get_auditor()
-    gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-    connector = _get_connector()
-    notifier = _get_notifier()
-    engine = RemediationEngine(connector, notifier=notifier)
-    actions = await engine.remediate_gaps(
-        gaps,
+    # RemediationService.execute owns the remediation:execute check.
+    gaps, actions, ledger = await RemediationService(
+        _get_connector(), notifier=_get_notifier()
+    ).execute(
+        _mcp_context(),
+        department=department,
+        region=region,
         auto_remind=auto_remind,
         auto_enroll=auto_enroll,
         notify_manager=notify_manager,
@@ -559,9 +553,11 @@ async def list_evidence_ledger(
     Returns:
         Evidence ledger entries.
     """
+    context = _mcp_context()
+    context = context.model_copy(update={"tenant_id": tenant_id})
     return {
-        "items": LocalRepository(db_path).list_evidence_ledger(
-            tenant_id=tenant_id,
+        "items": EvidenceService(_get_connector(), LocalRepository(db_path)).list_ledger(
+            context,
             limit=limit,
         )
     }

@@ -11,28 +11,25 @@ from pydantic import BaseModel, Field
 
 from complyos.api.mcp_server import _get_connector, _get_notifier
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
-from complyos.core.auditor import ComplianceAuditor
-from complyos.core.digest import DigestEngine
-from complyos.core.remediation import RemediationEngine
 from complyos.core.repository import LocalRepository
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.audit import AuditService
 from complyos.services.context import (
-    PERM_AUDIT_READ,
-    PERM_AUDIT_RUN,
     PERM_CONNECTORS_READ,
-    PERM_REMEDIATION_EXECUTE,
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
     require_permission,
 )
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.inbound_hooks import InboundHookService, InboundWebhookSignatureError
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 
@@ -223,9 +220,8 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_AUDIT_RUN)
-            gaps, ledger = await ComplianceAuditor(_get_connector()).audit_gaps(
-                department=department, region=region
+            gaps, ledger = await AuditService(_get_connector(), repo).run_audit(
+                context, department=department, region=region
             )
             return shape_gaps(gaps, ledger)
         except AuthorizationError as exc:
@@ -238,9 +234,8 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_AUDIT_RUN)
-            audit_report = await ComplianceAuditor(_get_connector()).generate_report(
-                department=department, region=region
+            audit_report = await AuditService(_get_connector(), repo).generate_report(
+                context, department=department, region=region
             )
             return shape_report(audit_report)
         except AuthorizationError as exc:
@@ -252,8 +247,9 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_AUDIT_READ)
-            return await ComplianceAuditor(_get_connector()).get_user_status(user_id)
+            return await AuditService(_get_connector(), repo).get_status(
+                context, user_id=user_id
+            )
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 
@@ -264,9 +260,8 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_AUDIT_RUN)
-            result = await DigestEngine(ComplianceAuditor(_get_connector()), repo).generate(
-                department=department, region=region
+            result = await AuditService(_get_connector(), repo).get_digest(
+                context, department=department, region=region
             )
             return result.model_dump(mode="json")
         except AuthorizationError as exc:
@@ -288,13 +283,12 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_REMEDIATION_EXECUTE)
-            connector = _get_connector()
-            gaps, ledger = await ComplianceAuditor(connector).audit_gaps(
-                department=body.department, region=body.region
-            )
-            actions = await RemediationEngine(connector, notifier=_get_notifier()).remediate_gaps(
-                gaps,
+            gaps, actions, ledger = await RemediationService(
+                _get_connector(), notifier=_get_notifier()
+            ).execute(
+                context,
+                department=body.department,
+                region=body.region,
                 auto_remind=body.auto_remind,
                 auto_enroll=body.auto_enroll,
                 notify_manager=body.notify_manager,
@@ -354,17 +348,15 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         limit: int = 50,
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
-        if not context.has_permission("evidence:read"):
-            raise _http_error(
-                "permission_denied",
-                "evidence:read required",
-                status.HTTP_403_FORBIDDEN,
-                request_id=context.request_id,
-            )
-        return {
-            "items": repo.list_evidence_ledger(tenant_id=context.tenant_id, limit=limit),
-            "actor_context": context.public_dict(),
-        }
+        try:
+            return {
+                "items": EvidenceService(_get_connector(), repo).list_ledger(
+                    context, limit=limit
+                ),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
 
     @router.get("/security/evidence")
     async def collect_security_evidence(
