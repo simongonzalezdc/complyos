@@ -31,7 +31,7 @@ fi
 
 # 2. Type check
 echo -n "▶ mypy … "
-if uv run --extra dev mypy complyos --ignore-missing-imports >/dev/null 2>&1; then
+if uv run --extra dev mypy complyos >/dev/null 2>&1; then
     echo -e "${GREEN}✓ clean${NC}"
 else
     echo -e "${RED}✗ failed${NC}"
