@@ -583,57 +583,45 @@ class PrivacyProgramService:
             "evidence_ledger": len(eligible_evidence_ids),
             "action_logs": len(eligible_action_log_ids),
         }
-        deleted_privacy_requests = (
-            0
-            if dry_run
-            else self.repository.delete_privacy_requests_by_ids(eligible_privacy_request_ids)
-        )
-        deleted_import_payloads = (
-            {"raw_import_rows": 0, "import_decisions": 0}
-            if dry_run
-            else self.repository.delete_import_payloads_for_batches(eligible_import_batch_ids)
-        )
-        deleted_ai_proposals = (
-            0
-            if dry_run
-            else self.repository.delete_ai_proposals_by_ids(eligible_ai_proposal_ids)
-        )
-        deleted_evidence = (
-            0
-            if dry_run
-            else self.repository.delete_evidence_entries_by_ids(eligible_evidence_ids)
-        )
-        deleted_action_logs = (
-            0
-            if dry_run
-            else self.repository.delete_action_logs_by_ids(eligible_action_log_ids)
-        )
-        deleted_counts = {
-            "privacy_requests": deleted_privacy_requests,
-            "raw_import_rows": deleted_import_payloads["raw_import_rows"],
-            "import_decisions": deleted_import_payloads["import_decisions"],
-            "ai_proposals": deleted_ai_proposals,
-            "evidence_ledger": deleted_evidence,
-            "action_logs": deleted_action_logs,
-        }
-        self.repository.save_action_log(
-            tenant_id=context.tenant_id,
-            actor_id=context.actor_id,
-            surface=context.surface,
-            action="privacy.retention.run",
-            object_type="retention_policy",
-            object_id=context.tenant_id,
-            result="dry_run" if dry_run else "success",
-            request_id=context.request_id,
-            metadata={
-                "dry_run": dry_run,
-                "eligible_counts": eligible_counts,
-                "deleted_counts": deleted_counts,
-                "cutoff_by_dataset": {
-                    key: value.isoformat() for key, value in cutoff_by_dataset.items()
+        cutoff_serialized = {key: value.isoformat() for key, value in cutoff_by_dataset.items()}
+        if dry_run:
+            deleted_counts = dict.fromkeys(eligible_counts, 0)
+            # No destructive writes on a dry run, so a standalone audit log is safe.
+            self.repository.save_action_log(
+                tenant_id=context.tenant_id,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                action="privacy.retention.run",
+                object_type="retention_policy",
+                object_id=context.tenant_id,
+                result="dry_run",
+                request_id=context.request_id,
+                metadata={
+                    "dry_run": True,
+                    "eligible_counts": eligible_counts,
+                    "deleted_counts": deleted_counts,
+                    "cutoff_by_dataset": cutoff_serialized,
                 },
-            },
-        )
+            )
+        else:
+            # Deletes + the "what was purged" audit record commit atomically, so a
+            # partial failure can never destroy PII/evidence without an audit trail.
+            deleted_counts = self.repository.purge_retention_eligible(
+                tenant_id=context.tenant_id,
+                privacy_request_ids=eligible_privacy_request_ids,
+                import_batch_ids=eligible_import_batch_ids,
+                ai_proposal_ids=eligible_ai_proposal_ids,
+                evidence_ids=eligible_evidence_ids,
+                action_log_ids=eligible_action_log_ids,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                request_id=context.request_id,
+                log_metadata={
+                    "dry_run": False,
+                    "eligible_counts": eligible_counts,
+                    "cutoff_by_dataset": cutoff_serialized,
+                },
+            )
         self._enqueue_privacy_event(
             context,
             event_type="privacy.retention.run",

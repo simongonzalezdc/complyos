@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -39,6 +40,28 @@ from complyos.models.database import (
 )
 from complyos.models.domain import Course, Enrollment, LearningRecord, LearningRecordStatus, User
 from complyos.source_intel.monitor import SourceMonitorRun
+
+# Legal-hold scopes that suspend deletion across an entire tenant (not a single
+# subject). Both "tenant" and "system" holds must block every retention dataset.
+_TENANT_WIDE_HOLD_SCOPES = ("tenant", "system")
+
+
+@dataclass(frozen=True)
+class HoldDecision:
+    """Single source of truth for which records an active legal hold protects.
+
+    Centralizing this prevents the per-query drift that let subject- and
+    system-scoped holds be silently ignored by most retention-eligibility
+    checks (a spoliation risk for a compliance product).
+    """
+
+    tenant_blocked: bool
+    held_subject_ids: frozenset[str] = field(default_factory=frozenset)
+
+    @property
+    def any_active(self) -> bool:
+        """True when any active hold exists (tenant/system-wide or per-subject)."""
+        return self.tenant_blocked or bool(self.held_subject_ids)
 
 
 class LocalRepository:
@@ -1244,10 +1267,35 @@ class LocalRepository:
                 DBLegalHold.status == "ACTIVE",
             )
             if subject_id is not None:
+                # A subject's deletion is blocked by a hold naming that subject OR
+                # by any tenant-wide/system-wide hold. Omitting "system" here was a
+                # spoliation gap: a system hold silently failed to block deletion.
                 query = query.where(
-                    (DBLegalHold.subject_id == subject_id) | (DBLegalHold.scope == "tenant")
+                    (DBLegalHold.subject_id == subject_id)
+                    | (DBLegalHold.scope.in_(_TENANT_WIDE_HOLD_SCOPES))
                 )
             return [self._to_legal_hold_dict(row) for row in query.all()]
+
+    def resolve_active_holds(self, *, tenant_id: str) -> HoldDecision:
+        """Evaluate all active holds for a tenant once, for uniform enforcement.
+
+        Returns whether a tenant-wide/system hold blocks everything, plus the set
+        of subject ids under a subject-scoped hold. Every retention-eligibility
+        query routes through this so the scope vocabulary cannot drift again.
+        """
+        with self._session() as session:
+            active = (
+                session.query(DBLegalHold)
+                .where(DBLegalHold.tenant_id == tenant_id, DBLegalHold.status == "ACTIVE")
+                .all()
+            )
+        tenant_blocked = any(hold.scope in _TENANT_WIDE_HOLD_SCOPES for hold in active)
+        held_subject_ids = frozenset(
+            hold.subject_id
+            for hold in active
+            if hold.subject_id and hold.scope == "subject"
+        )
+        return HoldDecision(tenant_blocked=tenant_blocked, held_subject_ids=held_subject_ids)
 
     def release_legal_hold(
         self,
@@ -1295,9 +1343,12 @@ class LocalRepository:
         cutoff: datetime,
     ) -> list[str]:
         closed_statuses = {"COMPLETED", "REJECTED", "CANCELLED"}
+        holds = self.resolve_active_holds(tenant_id=tenant_id)
+        if holds.tenant_blocked:
+            return []
         with self._session() as session:
             candidates = (
-                session.query(DBPrivacyRequest)
+                session.query(DBPrivacyRequest.id, DBPrivacyRequest.subject_id)
                 .where(
                     DBPrivacyRequest.tenant_id == tenant_id,
                     DBPrivacyRequest.created_at < cutoff,
@@ -1305,16 +1356,9 @@ class LocalRepository:
                 )
                 .all()
             )
-            active_holds = (
-                session.query(DBLegalHold)
-                .where(DBLegalHold.tenant_id == tenant_id, DBLegalHold.status == "ACTIVE")
-                .all()
-            )
-            tenant_hold_active = any(hold.scope == "tenant" for hold in active_holds)
-            held_subjects = {hold.subject_id for hold in active_holds if hold.subject_id}
-            if tenant_hold_active:
-                return []
-            return [request.id for request in candidates if request.subject_id not in held_subjects]
+        # Privacy requests carry subject_id, so we can exclude held subjects
+        # precisely rather than blocking the whole dataset.
+        return [row.id for row in candidates if row.subject_id not in holds.held_subject_ids]
 
     def list_retention_eligible_import_batch_ids(
         self,
@@ -1323,19 +1367,12 @@ class LocalRepository:
         cutoff: datetime,
     ) -> list[str]:
         terminal_statuses = {"PROMOTED", "REJECTED", "EXPIRED", "PROMOTION_FAILED"}
+        # Import batches have no indexed subject linkage, so any active hold of any
+        # scope fails closed: never purge while a hold exists rather than risk
+        # deleting a held subject's raw source payloads.
+        if self.resolve_active_holds(tenant_id=tenant_id).any_active:
+            return []
         with self._session() as session:
-            tenant_hold_active = (
-                session.query(DBLegalHold)
-                .where(
-                    DBLegalHold.tenant_id == tenant_id,
-                    DBLegalHold.status == "ACTIVE",
-                    DBLegalHold.scope == "tenant",
-                )
-                .first()
-                is not None
-            )
-            if tenant_hold_active:
-                return []
             rows = (
                 session.query(DBImportBatch.id)
                 .where(
@@ -1363,26 +1400,6 @@ class LocalRepository:
                 .count()
             )
 
-    def delete_import_payloads_for_batches(self, batch_ids: list[str]) -> dict[str, int]:
-        if not batch_ids:
-            return {"raw_import_rows": 0, "import_decisions": 0}
-        with self._session() as session:
-            import_decisions = (
-                session.query(DBImportDecision)
-                .where(DBImportDecision.batch_id.in_(batch_ids))
-                .delete(synchronize_session=False)
-            )
-            raw_import_rows = (
-                session.query(DBImportRow)
-                .where(DBImportRow.batch_id.in_(batch_ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
-            return {
-                "raw_import_rows": raw_import_rows,
-                "import_decisions": import_decisions,
-            }
-
     def list_retention_eligible_ai_proposal_ids(
         self,
         *,
@@ -1390,19 +1407,9 @@ class LocalRepository:
         cutoff: datetime,
     ) -> list[str]:
         disposable_statuses = {"REJECTED", "EXPIRED", "CANCELLED"}
+        if self.resolve_active_holds(tenant_id=tenant_id).any_active:
+            return []
         with self._session() as session:
-            tenant_hold_active = (
-                session.query(DBLegalHold)
-                .where(
-                    DBLegalHold.tenant_id == tenant_id,
-                    DBLegalHold.status == "ACTIVE",
-                    DBLegalHold.scope == "tenant",
-                )
-                .first()
-                is not None
-            )
-            if tenant_hold_active:
-                return []
             rows = (
                 session.query(DBAIProposal.id)
                 .where(
@@ -1414,40 +1421,15 @@ class LocalRepository:
             )
             return [row[0] for row in rows]
 
-    def delete_ai_proposals_by_ids(self, proposal_ids: list[str]) -> int:
-        if not proposal_ids:
-            return 0
-        with self._session() as session:
-            session.query(DBAIProvenance).where(
-                DBAIProvenance.proposal_id.in_(proposal_ids)
-            ).delete(synchronize_session=False)
-            deleted = (
-                session.query(DBAIProposal)
-                .where(DBAIProposal.id.in_(proposal_ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
-            return deleted
-
     def list_retention_eligible_evidence_ids(
         self,
         *,
         tenant_id: str,
         cutoff: datetime,
     ) -> list[str]:
+        if self.resolve_active_holds(tenant_id=tenant_id).any_active:
+            return []
         with self._session() as session:
-            tenant_hold_active = (
-                session.query(DBLegalHold)
-                .where(
-                    DBLegalHold.tenant_id == tenant_id,
-                    DBLegalHold.status == "ACTIVE",
-                    DBLegalHold.scope == "tenant",
-                )
-                .first()
-                is not None
-            )
-            if tenant_hold_active:
-                return []
             rows = (
                 session.query(DBEvidenceLedger.id)
                 .where(
@@ -1458,37 +1440,15 @@ class LocalRepository:
             )
             return [row[0] for row in rows]
 
-    def delete_evidence_entries_by_ids(self, evidence_ids: list[str]) -> int:
-        if not evidence_ids:
-            return 0
-        with self._session() as session:
-            deleted = (
-                session.query(DBEvidenceLedger)
-                .where(DBEvidenceLedger.id.in_(evidence_ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
-            return deleted
-
     def list_retention_eligible_action_log_ids(
         self,
         *,
         tenant_id: str,
         cutoff: datetime,
     ) -> list[str]:
+        if self.resolve_active_holds(tenant_id=tenant_id).any_active:
+            return []
         with self._session() as session:
-            tenant_hold_active = (
-                session.query(DBLegalHold)
-                .where(
-                    DBLegalHold.tenant_id == tenant_id,
-                    DBLegalHold.status == "ACTIVE",
-                    DBLegalHold.scope == "tenant",
-                )
-                .first()
-                is not None
-            )
-            if tenant_hold_active:
-                return []
             rows = (
                 session.query(DBAuditActionLog.id)
                 .where(
@@ -1499,29 +1459,97 @@ class LocalRepository:
             )
             return [row[0] for row in rows]
 
-    def delete_action_logs_by_ids(self, action_log_ids: list[str]) -> int:
-        if not action_log_ids:
-            return 0
-        with self._session() as session:
-            deleted = (
-                session.query(DBAuditActionLog)
-                .where(DBAuditActionLog.id.in_(action_log_ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
-            return deleted
+    def purge_retention_eligible(
+        self,
+        *,
+        tenant_id: str,
+        privacy_request_ids: list[str],
+        import_batch_ids: list[str],
+        ai_proposal_ids: list[str],
+        evidence_ids: list[str],
+        action_log_ids: list[str],
+        actor_id: str,
+        surface: str,
+        request_id: str | None,
+        log_metadata: dict[str, Any],
+    ) -> dict[str, int]:
+        """Delete all retention-eligible records AND write the audit record atomically.
 
-    def delete_privacy_requests_by_ids(self, request_ids: list[str]) -> int:
-        if not request_ids:
-            return 0
-        with self._session() as session:
-            deleted = (
-                session.query(DBPrivacyRequest)
-                .where(DBPrivacyRequest.id.in_(request_ids))
+        Every destructive delete plus the ``privacy.retention.run`` audit-log entry
+        commit (or roll back) together in one transaction. This closes the
+        chain-of-custody gap where a mid-sequence failure could leave PII/evidence
+        irreversibly destroyed with no audit trail of what was removed. Each DELETE
+        is tenant-scoped (defense in depth) so a wrong id list cannot reach across
+        tenants. Returns the per-dataset deleted counts.
+        """
+
+        def _delete(session: Session, model: Any, ids: list[str], *, tenant_scoped: bool) -> int:
+            if not ids:
+                return 0
+            clause = model.id.in_(ids)
+            if tenant_scoped:
+                clause = clause & (model.tenant_id == tenant_id)
+            return (
+                session.query(model)
+                .where(clause)
                 .delete(synchronize_session=False)
             )
-            session.commit()
-            return deleted
+
+        with self._session() as session:
+            try:
+                deleted_import_decisions = 0
+                deleted_import_rows = 0
+                if import_batch_ids:
+                    deleted_import_decisions = (
+                        session.query(DBImportDecision)
+                        .where(DBImportDecision.batch_id.in_(import_batch_ids))
+                        .delete(synchronize_session=False)
+                    )
+                    deleted_import_rows = (
+                        session.query(DBImportRow)
+                        .where(DBImportRow.batch_id.in_(import_batch_ids))
+                        .delete(synchronize_session=False)
+                    )
+                if ai_proposal_ids:
+                    session.query(DBAIProvenance).where(
+                        DBAIProvenance.proposal_id.in_(ai_proposal_ids)
+                    ).delete(synchronize_session=False)
+                deleted_counts = {
+                    "privacy_requests": _delete(
+                        session, DBPrivacyRequest, privacy_request_ids, tenant_scoped=True
+                    ),
+                    "raw_import_rows": deleted_import_rows,
+                    "import_decisions": deleted_import_decisions,
+                    "ai_proposals": _delete(
+                        session, DBAIProposal, ai_proposal_ids, tenant_scoped=True
+                    ),
+                    "evidence_ledger": _delete(
+                        session, DBEvidenceLedger, evidence_ids, tenant_scoped=True
+                    ),
+                    "action_logs": _delete(
+                        session, DBAuditActionLog, action_log_ids, tenant_scoped=True
+                    ),
+                }
+                session.add(
+                    DBAuditActionLog(
+                        id=str(uuid.uuid4()),
+                        tenant_id=tenant_id,
+                        actor_id=actor_id,
+                        surface=surface,
+                        action="privacy.retention.run",
+                        object_type="retention_policy",
+                        object_id=tenant_id,
+                        result="success",
+                        request_id=request_id,
+                        redacted_metadata={**log_metadata, "deleted_counts": deleted_counts},
+                        created_at=utc_now(),
+                    )
+                )
+                session.commit()
+                return deleted_counts
+            except Exception:
+                session.rollback()
+                raise
 
     def clear_all(self) -> None:
         with self._session() as session:
