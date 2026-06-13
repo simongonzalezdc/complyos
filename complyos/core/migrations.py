@@ -16,6 +16,7 @@ NOTIFICATION_OUTBOX_MIGRATION = "20260613_notification_outbox_hooks"
 NOTIFICATION_PREFERENCES_MIGRATION = "20260613_notification_preferences"
 INBOUND_WEBHOOKS_MIGRATION = "20260613_inbound_webhook_events"
 PERFORMANCE_INDEXES_MIGRATION = "20260614_performance_indexes"
+TENANT_SCOPING_INDEXES_MIGRATION = "20260615_tenant_scoping_indexes"
 
 
 class SchemaMigration(TypedDict):
@@ -189,6 +190,17 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
             "ON source_intel_proposals (run_id)",
             "CREATE INDEX IF NOT EXISTS ix_inbound_webhook_events_tenant_id "
             "ON inbound_webhook_events (tenant_id)",
+        ],
+    },
+    {
+        "migration_id": TENANT_SCOPING_INDEXES_MIGRATION,
+        "description": "Tenant-scoped indexes for DSR export/delete on PII tables",
+        "statements": [
+            "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users (tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_learning_records_user_tenant "
+            "ON learning_records (user_id, tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_user_tenant "
+            "ON enrollments (user_id, tenant_id)",
         ],
     },
 )

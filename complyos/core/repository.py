@@ -73,6 +73,21 @@ class LocalRepository:
     def _session(self) -> Session:
         return self._sessionmaker()
 
+    @staticmethod
+    def _owner_tenant_id(session: Session, user_id: str) -> str:
+        """Tenant a learner/item record inherits from its owning user.
+
+        Learning records and enrollments share their learner's tenant so DSR
+        export/delete can scope them precisely. Falls back to the default tenant
+        only when the learner has not been synced locally (e.g. standalone
+        import before an HR sync), matching the column default.
+        """
+        # no_autoflush: resolving the owner must not flush the half-built record
+        # currently pending in the session (its required columns aren't set yet).
+        with session.no_autoflush:
+            owner = session.get(DBUser, user_id)
+        return owner.tenant_id if owner is not None else "local-default"
+
     # ------------------------------------------------------------------
     # Users
     # ------------------------------------------------------------------
@@ -93,6 +108,7 @@ class LocalRepository:
             db_user.employment_status = user.employment_status.value
             db_user.manager_id = user.manager_id
             db_user.custom_attributes = user.custom_attributes
+            db_user.tenant_id = (user.custom_attributes or {}).get("tenant_id", "local-default")
             session.commit()
 
     def get_user(self, user_id: str) -> User | None:
@@ -163,6 +179,7 @@ class LocalRepository:
 
             db_enrollment.user_id = enrollment.user_id
             db_enrollment.course_id = enrollment.course_id
+            db_enrollment.tenant_id = self._owner_tenant_id(session, enrollment.user_id)
             db_enrollment.status = enrollment.status.value
             db_enrollment.assigned_date = enrollment.assigned_date
             db_enrollment.due_date = enrollment.due_date
@@ -200,6 +217,7 @@ class LocalRepository:
 
             db_record.user_id = record.user_id
             db_record.course_id = record.course_id
+            db_record.tenant_id = self._owner_tenant_id(session, record.user_id)
             db_record.source_system = record.source_system
             db_record.source_record_id = record.source_record_id
             db_record.status = record.status.value
@@ -227,6 +245,9 @@ class LocalRepository:
         evidence_id = str(uuid.uuid4())
         with self._session() as session:
             try:
+                batch = session.get(DBImportBatch, batch_id)
+                if batch is None:
+                    raise ValueError(f"unknown import batch during promotion: {batch_id}")
                 for row_id, record in row_record_pairs:
                     db_record = session.get(DBLearningRecord, record.id)
                     if db_record is None:
@@ -235,6 +256,9 @@ class LocalRepository:
 
                     db_record.user_id = record.user_id
                     db_record.course_id = record.course_id
+                    # Promoted records carry the batch's tenant so DSR scoping
+                    # holds even when the learner was never separately synced.
+                    db_record.tenant_id = batch.tenant_id
                     db_record.source_system = record.source_system
                     db_record.source_record_id = record.source_record_id
                     db_record.status = record.status.value
@@ -257,9 +281,6 @@ class LocalRepository:
                         raise ValueError(f"unknown import row during promotion: {row_id}")
                     row.validation_status = "PROMOTED"
 
-                batch = session.get(DBImportBatch, batch_id)
-                if batch is None:
-                    raise ValueError(f"unknown import batch during promotion: {batch_id}")
                 batch.status = "PROMOTED"
                 batch.promoted_by = promoted_by
                 batch.promoted_at = promoted_at
@@ -1209,18 +1230,29 @@ class LocalRepository:
 
     def get_subject_export(self, subject_id: str, *, tenant_id: str) -> dict[str, Any]:
         with self._session() as session:
+            # Tenant scoping is a real, indexed column on every PII table — no
+            # fallback. A subject (and their records) is only visible to the
+            # tenant that owns them, so one tenant cannot export another's data.
             user = session.get(DBUser, subject_id)
-            if user is not None:
-                user_tenant = (user.custom_attributes or {}).get("tenant_id", "local-default")
-                if user_tenant != tenant_id:
-                    user = None
+            if user is not None and user.tenant_id != tenant_id:
+                user = None
             learning_records = (
-                session.query(DBLearningRecord).where(DBLearningRecord.user_id == subject_id).all()
+                session.query(DBLearningRecord)
+                .where(
+                    DBLearningRecord.user_id == subject_id,
+                    DBLearningRecord.tenant_id == tenant_id,
+                )
+                .all()
                 if user is not None
                 else []
             )
             enrollments = (
-                session.query(DBEnrollment).where(DBEnrollment.user_id == subject_id).all()
+                session.query(DBEnrollment)
+                .where(
+                    DBEnrollment.user_id == subject_id,
+                    DBEnrollment.tenant_id == tenant_id,
+                )
+                .all()
                 if user is not None
                 else []
             )
@@ -1238,21 +1270,26 @@ class LocalRepository:
 
     def delete_subject_records(self, subject_id: str, *, tenant_id: str) -> dict[str, int]:
         with self._session() as session:
+            # Erasure is tenant-scoped on the indexed tenant_id column: a caller
+            # can only delete a subject and the records owned by their own tenant.
             user = session.get(DBUser, subject_id)
-            if user is None:
-                return {"users": 0, "learning_records": 0, "enrollments": 0}
-            user_tenant = (user.custom_attributes or {}).get("tenant_id", "local-default")
-            if user_tenant != tenant_id:
+            if user is None or user.tenant_id != tenant_id:
                 return {"users": 0, "learning_records": 0, "enrollments": 0}
 
             learning_records = (
                 session.query(DBLearningRecord)
-                .where(DBLearningRecord.user_id == subject_id)
+                .where(
+                    DBLearningRecord.user_id == subject_id,
+                    DBLearningRecord.tenant_id == tenant_id,
+                )
                 .delete(synchronize_session=False)
             )
             enrollments = (
                 session.query(DBEnrollment)
-                .where(DBEnrollment.user_id == subject_id)
+                .where(
+                    DBEnrollment.user_id == subject_id,
+                    DBEnrollment.tenant_id == tenant_id,
+                )
                 .delete(synchronize_session=False)
             )
             session.delete(user)

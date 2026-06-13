@@ -32,6 +32,7 @@ class DBUser(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
     employee_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -65,6 +66,7 @@ class DBEnrollment(Base):
     # subjects/items that were never independently synced into users/courses.
     # They are indexed (see migrations) but intentionally not ForeignKey-backed.
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     course_id: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -79,6 +81,7 @@ class DBLearningRecord(Base):
     __tablename__ = "learning_records"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     course_id: Mapped[str] = mapped_column(String, nullable=False)
     source_system: Mapped[str] = mapped_column(String, nullable=False)
@@ -504,14 +507,24 @@ def _ensure_sqlite_schema(engine: Any) -> None:
     if engine.dialect.name != "sqlite":
         return
     inspector = inspect(engine)
-    if "evidence_ledger" not in inspector.get_table_names():
-        return
-    evidence_columns = {column["name"] for column in inspector.get_columns("evidence_ledger")}
-    if "tenant_id" not in evidence_columns:
+    table_names = set(inspector.get_table_names())
+
+    def _add_tenant_id(table: str) -> None:
+        if table not in table_names:
+            return
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "tenant_id" in columns:
+            return
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    "ALTER TABLE evidence_ledger "
+                    f"ALTER TABLE {table} "
                     "ADD COLUMN tenant_id VARCHAR NOT NULL DEFAULT 'local-default'"
                 )
             )
+
+    # tenant_id is the scoping column for every PII/evidence table. Older local
+    # stores predate it on users/learning_records/enrollments, where its absence
+    # forced DSR export/delete to fall back to a single global tenant.
+    for table in ("evidence_ledger", "users", "learning_records", "enrollments"):
+        _add_tenant_id(table)
