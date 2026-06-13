@@ -45,7 +45,10 @@ def test_live_dashboard_health() -> None:
     assert response.json() == {"status": "ok", "service": "complyos-dashboard"}
 
 
-def test_live_dashboard_summary_endpoint() -> None:
+def test_live_dashboard_summary_endpoint(monkeypatch) -> None:
+    # Plain local dev: no auth token configured => legacy endpoint serves.
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.delenv("COMPLYOS_ALLOW_INSECURE_LOCAL", raising=False)
     client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
 
     response = client.get("/api/summary?department=Operations")
@@ -54,6 +57,27 @@ def test_live_dashboard_summary_endpoint() -> None:
     assert response.json()["scope"] == "department=Operations, region=None"
     assert response.json()["gaps_found"] == 1
     assert response.json()["evidence_hash"] == "hash-live"
+
+
+def test_live_dashboard_legacy_endpoints_disabled_in_secured_posture(monkeypatch) -> None:
+    """With a real token and no insecure opt-in, unauthenticated routes fail closed."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "dash-token")
+    monkeypatch.delenv("COMPLYOS_ALLOW_INSECURE_LOCAL", raising=False)
+    client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
+
+    assert client.get("/api/summary").status_code == 404
+    assert client.get("/api/audit").status_code == 404
+    assert client.get("/dashboard").status_code == 404
+
+
+def test_live_dashboard_legacy_endpoints_served_with_insecure_optin(monkeypatch) -> None:
+    """Token + explicit insecure opt-in keeps the legacy local routes available."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "dash-token")
+    monkeypatch.setenv("COMPLYOS_ALLOW_INSECURE_LOCAL", "1")
+    client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
+
+    assert client.get("/api/summary").status_code == 200
+    assert client.get("/dashboard").status_code == 200
 
 
 def test_live_dashboard_html_endpoint() -> None:

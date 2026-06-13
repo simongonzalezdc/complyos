@@ -77,3 +77,31 @@ class AuditService:
         require_permission(context, PERM_AUDIT_READ)
         engine = DigestEngine(ComplianceAuditor(self.connector), self.repository)
         return await engine.generate(department=department, region=region)
+
+    async def sync(self, context: ActorContext) -> dict[str, int | str]:
+        """Pull LMS data into the local cache (audit:run). Same flow as CLI ``sync``.
+
+        This is intentionally mutating: it clears and re-populates the local
+        cache. It is gated at audit:run because sync is the data-pull half of an
+        audit, and tenant scope is carried on the context for the action log.
+        """
+        require_permission(context, PERM_AUDIT_RUN)
+        healthy = await self.connector.authenticate()
+        if not healthy:
+            raise ValueError("connector authentication failed")
+        users = await self.connector.get_users()
+        courses = await self.connector.get_courses()
+        enrollments = await self.connector.get_enrollments()
+        learning_records = await self.connector.get_learning_records()
+        self.repository.clear_all()
+        self.repository.sync_users(users)
+        self.repository.sync_courses(courses)
+        self.repository.sync_enrollments(enrollments)
+        self.repository.sync_learning_records(learning_records)
+        return {
+            "connector": self.connector.name,
+            "users": len(users),
+            "courses": len(courses),
+            "enrollments": len(enrollments),
+            "learning_records": len(learning_records),
+        }

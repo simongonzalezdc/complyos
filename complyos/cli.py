@@ -41,6 +41,7 @@ from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
+from complyos.services.role_admin import RoleAdminService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
@@ -65,6 +66,10 @@ source_intel_app = typer.Typer(
     help="No-paid source monitoring and review queue",
 )
 admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
+admin_role_bindings_app = typer.Typer(
+    name="role-bindings",
+    help="Manage tenant-scoped role bindings",
+)
 governance_app = typer.Typer(name="governance", help="AI, HR, and school governance packets")
 privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
@@ -1601,6 +1606,85 @@ def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output r
     console.print(table)
 
 
+@admin_role_bindings_app.command("list")
+def admin_role_bindings_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    actor_id: str | None = typer.Option(None, "--actor-id", help="Filter by actor ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List tenant-scoped role bindings for the local operator's tenant."""
+    context = _local_cli_context()
+    bindings = RoleAdminService(LocalRepository(db_path)).list_role_bindings(
+        context,
+        actor_id=actor_id,
+    )
+    payload = {"role_bindings": bindings}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Role Bindings")
+    table.add_column("Actor")
+    table.add_column("Role")
+    table.add_column("Override")
+    table.add_column("Created By")
+    for binding in bindings:
+        override = binding.get("permissions_override") or []
+        table.add_row(
+            str(binding["actor_id"]),
+            str(binding["role"]),
+            ", ".join(override) if override else "—",
+            str(binding.get("created_by") or "—"),
+        )
+    console.print(table)
+
+
+@admin_role_bindings_app.command("set")
+def admin_role_bindings_set(
+    actor_id: str = typer.Argument(..., help="Actor ID to bind"),
+    role: str = typer.Option(..., "--role", help="Role name"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create or replace a tenant-scoped role binding for an actor."""
+    context = _local_cli_context()
+    try:
+        binding = RoleAdminService(LocalRepository(db_path)).set_role_binding(
+            context,
+            actor_id=actor_id,
+            role=role,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if json_output:
+        _print_json(binding)
+        return
+    console.print(f"[green]Bound actor {binding['actor_id']} to role {binding['role']}[/green]")
+
+
+@admin_role_bindings_app.command("remove")
+def admin_role_bindings_remove(
+    actor_id: str = typer.Argument(..., help="Actor ID to unbind"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Remove a tenant-scoped role binding for an actor."""
+    context = _local_cli_context()
+    try:
+        result = RoleAdminService(LocalRepository(db_path)).remove_role_binding(
+            context,
+            actor_id=actor_id,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if json_output:
+        _print_json(result)
+        return
+    console.print(f"[green]Removed role binding for actor {actor_id}[/green]")
+
+
 @security_app.command("evidence")
 def security_evidence(
     period: str = typer.Option("current", "--period", help="Evidence period label"),
@@ -2040,6 +2124,7 @@ app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(ai_app, name="ai")
 app.add_typer(source_intel_app, name="source-intel")
+admin_app.add_typer(admin_role_bindings_app, name="role-bindings")
 app.add_typer(admin_app, name="admin")
 app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")

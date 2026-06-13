@@ -31,6 +31,7 @@ from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
+from complyos.services.role_admin import RoleAdminService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 
@@ -102,6 +103,12 @@ class NotificationPreferenceBody(BaseModel):
     event_type: str = "*"
     enabled: bool = True
     reason: str | None = None
+
+
+class RoleBindingRequestBody(BaseModel):
+    actor_id: str
+    role: str
+    permissions_override: list[str] | None = None
 
 
 class RuleRequestBody(BaseModel):
@@ -229,6 +236,10 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             raise _permission_error(exc, context) from exc
 
     # ---- Audit/remediation parity with the CLI and MCP surfaces -------------
+    # Plan §8.2/§7 specifies plural resource names (/audits, /learners,
+    # /remediations). Those are the canonical paths; the original singular paths
+    # are kept as deprecated aliases so existing clients keep working.
+    @router.get("/audits")
     @router.get("/audit")
     async def audit(
         department: str | None = None,
@@ -257,6 +268,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 
+    @router.get("/learners/{user_id}/status")
     @router.get("/users/{user_id}/status")
     async def user_status(
         user_id: str,
@@ -325,6 +337,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 
+    @router.post("/remediations")
     @router.post("/remediate")
     async def remediate(
         body: RemediationRequestBody,
@@ -344,6 +357,62 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             return shape_remediation(gaps, actions, ledger)
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    @router.post("/sync")
+    async def sync(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            result = await AuditService(_get_connector(), repo).sync(context)
+            return {"synced": result, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("sync_failed", exc, context) from exc
+
+    @router.get("/admin/roles")
+    async def list_role_bindings(
+        actor_id: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return {
+                "role_bindings": RoleAdminService(repo).list_role_bindings(
+                    context, actor_id=actor_id
+                ),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/admin/roles")
+    async def set_role_binding(
+        body: RoleBindingRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return RoleAdminService(repo).set_role_binding(
+                context,
+                actor_id=body.actor_id,
+                role=body.role,
+                permissions_override=body.permissions_override,
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_role_binding", exc, context) from exc
+
+    @router.delete("/admin/roles/{actor_id}")
+    async def remove_role_binding(
+        actor_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return RoleAdminService(repo).remove_role_binding(context, actor_id=actor_id)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("role_binding_not_found", exc, context) from exc
 
     @router.post("/imports/preview")
     async def preview_import(

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from html import escape
 from pathlib import Path
 from typing import Protocol
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
 
 from complyos.core.dashboard import generate_dashboard
@@ -15,7 +16,24 @@ from complyos.core.repository import LocalRepository
 from complyos.models.domain import AuditReport
 from complyos.services.context import default_local_context
 from complyos.services.source_intel import SourceIntelService
-from complyos.web.api_v1 import build_api_v1_router
+from complyos.web.api_v1 import _truthy_env, build_api_v1_router
+
+
+def _guard_legacy_dev_endpoint() -> None:
+    """Refuse to serve the legacy unauthenticated endpoints in a secured posture.
+
+    The /api/audit, /api/summary, and /dashboard routes below are local/dev only
+    and carry no authentication. When the operator has configured a real auth
+    gate (COMPLYOS_API_TOKEN) without explicitly opting into insecure local use
+    (COMPLYOS_ALLOW_INSECURE_LOCAL), these unauthenticated routes must fail
+    closed so they cannot leak compliance data alongside the authenticated v1
+    API. With no token set (plain local dev), behavior is unchanged.
+    """
+    if os.getenv("COMPLYOS_API_TOKEN") and not _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="legacy unauthenticated endpoint disabled in secured posture",
+        )
 
 
 class AuditReporter(Protocol):
@@ -46,6 +64,8 @@ def create_dashboard_app(
         department: str | None = None,
         region: str | None = None,
     ) -> dict:
+        """Local/dev only: unauthenticated audit report (disabled in secured posture)."""
+        _guard_legacy_dev_endpoint()
         report = await auditor.generate_report(department=department, region=region)
         return report.model_dump(mode="json")
 
@@ -54,6 +74,8 @@ def create_dashboard_app(
         department: str | None = None,
         region: str | None = None,
     ) -> dict:
+        """Local/dev only: unauthenticated audit summary (disabled in secured posture)."""
+        _guard_legacy_dev_endpoint()
         report = await auditor.generate_report(department=department, region=region)
         return {
             "generated_at": report.generated_at.isoformat(),
@@ -71,6 +93,8 @@ def create_dashboard_app(
         department: str | None = None,
         region: str | None = None,
     ) -> HTMLResponse:
+        """Local/dev only: unauthenticated HTML dashboard (disabled in secured posture)."""
+        _guard_legacy_dev_endpoint()
         report = await auditor.generate_report(department=department, region=region)
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "dashboard.html"

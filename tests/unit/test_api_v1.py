@@ -530,3 +530,132 @@ def test_api_v1_rules_fail_closed_for_underprivileged(monkeypatch, tmp_path) -> 
     denied_preview = client.post("/api/v1/rules/preview", json=body, headers=headers)
     assert denied_preview.status_code == 403
     assert denied_preview.json()["detail"]["code"] == "permission_denied"
+
+
+def test_api_v1_admin_roles_crud_and_tenant_scope(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-admin-roles.db"))
+    client = TestClient(create_api_v1_app(repo))
+    # Only owner carries admin:manage.
+    owner_a = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "owner",
+        "X-Tenant-Id": "tenant-a",
+    }
+    owner_b = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "owner",
+        "X-Tenant-Id": "tenant-b",
+    }
+
+    created = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "reviewer"},
+        headers=owner_a,
+    )
+    assert created.status_code == 200
+    assert created.json()["role"] == "reviewer"
+
+    # Tenant B writes its own binding for the same actor_id.
+    client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "read_only"},
+        headers=owner_b,
+    )
+
+    listed_a = client.get("/api/v1/admin/roles", headers=owner_a)
+    assert listed_a.status_code == 200
+    assert {b["role"] for b in listed_a.json()["role_bindings"]} == {"reviewer"}
+
+    # BOLA: tenant A deleting actor-1 must not affect tenant B's binding.
+    removed = client.delete("/api/v1/admin/roles/actor-1", headers=owner_a)
+    assert removed.status_code == 200
+    assert removed.json()["removed"] is True
+
+    listed_b = client.get("/api/v1/admin/roles", headers=owner_b)
+    assert {b["role"] for b in listed_b.json()["role_bindings"]} == {"read_only"}
+
+
+def test_api_v1_admin_roles_fail_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-admin-denied.db"))))
+    # admin role lacks admin:manage by design.
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "admin"}
+
+    denied_list = client.get("/api/v1/admin/roles", headers=headers)
+    assert denied_list.status_code == 403
+    assert denied_list.json()["detail"]["code"] == "permission_denied"
+
+    denied_set = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "reviewer"},
+        headers=headers,
+    )
+    assert denied_set.status_code == 403
+
+
+def test_api_v1_admin_roles_rejects_unknown_role(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-admin-badrole.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "owner"}
+
+    response = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "not-a-role"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "bad_role_binding"
+
+
+def test_api_v1_sync_is_permission_gated(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-sync.db"))))
+
+    # read_only lacks audit:run; sync is mutating and must fail closed.
+    denied = client.post(
+        "/api/v1/sync",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+    # compliance_manager carries audit:run; sync succeeds and returns counts.
+    allowed = client.post(
+        "/api/v1/sync",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"},
+    )
+    assert allowed.status_code == 200
+    assert "users" in allowed.json()["synced"]
+
+
+def test_api_v1_plural_resource_aliases_reachable(monkeypatch, tmp_path) -> None:
+    """Plural paths (plan §8.2) and the legacy singular aliases both work."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-plural.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    # /audits (canonical plural) and /audit (deprecated alias) both work.
+    plural_audit = client.get("/api/v1/audits", headers=headers)
+    assert plural_audit.status_code == 200
+    assert "gaps_found" in plural_audit.json()
+    legacy_audit = client.get("/api/v1/audit", headers=headers)
+    assert legacy_audit.status_code == 200
+
+    # /learners/{id}/status and /users/{id}/status both work.
+    plural_learner = client.get("/api/v1/learners/unknown-user/status", headers=headers)
+    assert plural_learner.status_code == 200
+    legacy_learner = client.get("/api/v1/users/unknown-user/status", headers=headers)
+    assert legacy_learner.status_code == 200
+
+    # /remediations and /remediate both work.
+    plural_remediate = client.post("/api/v1/remediations", json={}, headers=headers)
+    assert plural_remediate.status_code == 200
+    legacy_remediate = client.post("/api/v1/remediate", json={}, headers=headers)
+    assert legacy_remediate.status_code == 200
