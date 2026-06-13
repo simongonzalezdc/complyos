@@ -13,6 +13,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from complyos.core.repository import LocalRepository
+from complyos.models.domain import LegalHoldScope, PrivacyRequestType
 from complyos.services.context import (
     PERM_LEGAL_HOLD_MANAGE,
     PERM_PRIVACY_APPROVE,
@@ -109,8 +110,7 @@ class PrivacyProgramService:
         notes: str | None = None,
     ) -> PrivacyRequestResult:
         require_permission(context, PERM_PRIVACY_REQUEST)
-        allowed = {"access", "export", "correction", "deletion", "restriction", "objection"}
-        if request_type not in allowed:
+        if request_type not in set(PrivacyRequestType):
             raise ValueError(f"unsupported privacy request type: {request_type}")
         created_at = datetime.now(UTC)
         request_id = str(uuid4())
@@ -380,7 +380,7 @@ class PrivacyProgramService:
         reason: str,
     ) -> LegalHoldResult:
         require_permission(context, PERM_LEGAL_HOLD_MANAGE)
-        if scope not in {"subject", "tenant", "system"}:
+        if scope not in set(LegalHoldScope):
             raise ValueError(f"unsupported legal hold scope: {scope}")
         if scope == "subject" and not subject_id:
             raise ValueError("subject legal hold requires subject_id")

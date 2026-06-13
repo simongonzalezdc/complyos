@@ -218,3 +218,47 @@ class EvidenceLedgerEntry(BaseModel):
     transformation_steps: list[str]
     output_hash: str
     output_summary: str
+
+
+# ---------------------------------------------------------------------------
+# Workflow vocabularies
+#
+# These name the valid states/types for the import, privacy, and legal-hold
+# workflows. They previously lived as ad-hoc string sets scattered across the
+# services (one set was even decorative and had drifted from the states the
+# code actually wrote), so the type system could not catch a typo'd status or
+# an unknown scope. Keeping them here as enums is the single source of truth.
+# ---------------------------------------------------------------------------
+class ImportBatchStatus(StrEnum):
+    DRAFT = "DRAFT"
+    PREVIEWED = "PREVIEWED"
+    QUARANTINED = "QUARANTINED"
+    PROMOTION_PENDING = "PROMOTION_PENDING"
+    PROMOTED = "PROMOTED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    PROMOTION_FAILED = "PROMOTION_FAILED"
+
+
+class ImportRowStatus(StrEnum):
+    PENDING = "PENDING"
+    VALID = "VALID"
+    REJECTED = "REJECTED"
+    NEEDS_DECISION = "NEEDS_DECISION"
+    PROMOTED = "PROMOTED"
+    IGNORED = "IGNORED"
+
+
+class PrivacyRequestType(StrEnum):
+    ACCESS = "access"
+    EXPORT = "export"
+    CORRECTION = "correction"
+    DELETION = "deletion"
+    RESTRICTION = "restriction"
+    OBJECTION = "objection"
+
+
+class LegalHoldScope(StrEnum):
+    SUBJECT = "subject"
+    TENANT = "tenant"
+    SYSTEM = "system"

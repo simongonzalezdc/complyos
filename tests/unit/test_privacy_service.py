@@ -91,6 +91,19 @@ def test_privacy_request_export_delete_and_legal_hold_flow(tmp_path) -> None:
     assert repo.get_user("u-privacy") is None
 
 
+def test_invalid_request_type_and_hold_scope_are_rejected(tmp_path) -> None:
+    """Validation is enum-driven (PrivacyRequestType / LegalHoldScope)."""
+    repo = LocalRepository(str(tmp_path / "invalid.db"))
+    service = PrivacyProgramService(repo)
+    context = default_local_context(role="privacy_admin")
+
+    with pytest.raises(ValueError, match="unsupported privacy request type"):
+        service.create_request(context, subject_id="u1", request_type="nonsense")
+
+    with pytest.raises(ValueError, match="unsupported legal hold scope"):
+        service.create_legal_hold(context, subject_id="u1", scope="nonsense", reason="x")
+
+
 def test_privacy_request_is_tenant_scoped(tmp_path) -> None:
     repo = LocalRepository(str(tmp_path / "tenant.db"))
     _save_subject(repo, tenant_id="tenant-a")

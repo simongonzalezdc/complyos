@@ -26,7 +26,7 @@ from complyos.connectors.normalization import parse_float as _parse_float
 from complyos.connectors.normalization import remap_row as _remap_row
 from complyos.connectors.normalization import to_learning_status as _to_learning_status
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import LearningRecord, LearningRecordStatus
+from complyos.models.domain import ImportRowStatus, LearningRecord, LearningRecordStatus
 from complyos.services.context import (
     PERM_IMPORT_DECIDE,
     PERM_IMPORT_PREVIEW,
@@ -38,18 +38,16 @@ from complyos.services.context import (
 FORMULA_PREFIXES = ("=", "+", "-", "@")
 TENANT_ALIASES = {"tenant_id": ["tenantid", "tenant", "orgid", "organizationid"]}
 TRACK_ALIASES = {"track": ["track", "profile", "context"]}
-IMPORT_BATCH_STATES = {
-    "DRAFT",
-    "PREVIEWED",
-    "QUARANTINED",
-    "PROMOTION_PENDING",
-    "PROMOTED",
-    "REJECTED",
-    "EXPIRED",
-    "PROMOTION_FAILED",
+# Row states derive from the ImportRowStatus enum so the vocabulary has one
+# source of truth. (The former IMPORT_BATCH_STATES set was decorative — never
+# referenced and already drifted from the states the service actually wrote —
+# so it was removed; ImportBatchStatus in the domain model is the canonical list.)
+ROW_STATES = {status.value for status in ImportRowStatus}
+BLOCKING_ROW_STATES = {
+    ImportRowStatus.PENDING.value,
+    ImportRowStatus.REJECTED.value,
+    ImportRowStatus.NEEDS_DECISION.value,
 }
-ROW_STATES = {"PENDING", "VALID", "REJECTED", "NEEDS_DECISION", "PROMOTED", "IGNORED"}
-BLOCKING_ROW_STATES = {"REJECTED", "NEEDS_DECISION", "PENDING"}
 
 
 class ImportIssue(BaseModel):
