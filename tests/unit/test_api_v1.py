@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,28 @@ def test_api_v1_health(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["service"] == "complyos-api-v1"
+
+
+def test_api_v1_fails_closed_when_unconfigured(monkeypatch, tmp_path) -> None:
+    """No token and no explicit insecure opt-in must reject privileged calls."""
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.delenv("COMPLYOS_ALLOW_INSECURE_LOCAL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-failclosed.db"))))
+
+    # An attacker-supplied owner role on an unauthenticated surface must NOT pass.
+    response = client.get("/api/v1/readiness", headers={"X-Actor-Role": "owner"})
+
+    assert response.status_code == 401
+
+
+def test_api_v1_insecure_local_flag_allows_explicit_local_use(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.setenv("COMPLYOS_ALLOW_INSECURE_LOCAL", "1")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-insecure.db"))))
+
+    response = client.get("/api/v1/readiness", headers={"X-Actor-Role": "read_only"})
+
+    assert response.status_code == 200
 
 
 def test_api_v1_token_auth_and_import_flow(monkeypatch, tmp_path) -> None:
@@ -292,7 +315,7 @@ def test_api_v1_records_signed_inbound_webhook_receipt(monkeypatch, tmp_path) ->
         },
         separators=(",", ":"),
     ).encode("utf-8")
-    timestamp = "2026-06-13T12:00:00Z"
+    timestamp = datetime.now(UTC).isoformat()
 
     response = client.post(
         "/api/v1/hooks/inbound/canvas",
@@ -331,7 +354,7 @@ def test_api_v1_rejects_invalid_inbound_webhook_signature(monkeypatch, tmp_path)
         headers={
             "Authorization": "Bearer test-token",
             "X-Actor-Role": "compliance_manager",
-            "X-ComplyOS-Timestamp": "2026-06-13T12:00:00Z",
+            "X-ComplyOS-Timestamp": datetime.now(UTC).isoformat(),
             "X-ComplyOS-Signature": "sha256=wrong",
         },
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated
 
@@ -118,6 +119,10 @@ def _bad_request(code: str, exc: Exception, context: ActorContext) -> HTTPExcept
     )
 
 
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
     repo = repository or LocalRepository()
     router = APIRouter(prefix="/api/v1", tags=["ComplyOS API v1"])
@@ -132,17 +137,30 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         expected_token = os.getenv("COMPLYOS_API_TOKEN")
         if expected_token:
             expected_header = f"Bearer {expected_token}"
-            if authorization != expected_header:
+            # Constant-time comparison avoids a token-length/prefix timing side
+            # channel on the only real auth gate for this PII surface.
+            if not hmac.compare_digest(authorization or "", expected_header):
                 raise _http_error(
                     "unauthorized",
                     "valid bearer token required",
                     status.HTTP_401_UNAUTHORIZED,
                 )
             auth_method = "bearer"
-        else:
-            # Local-first/dev mode remains explicit and context-backed. Production
-            # deployments must set COMPLYOS_API_TOKEN or replace this dependency.
+        elif _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"):
+            # Explicit, operator-acknowledged local/dev mode. Header-driven role
+            # and tenant are trusted only because the operator opted in.
             auth_method = "local_dev"
+        else:
+            # Fail closed: never silently honor attacker-controlled X-Actor-Role/
+            # X-Tenant-Id (which can request role=owner of any tenant) on an
+            # unauthenticated surface. Require a bearer token, or an explicit
+            # insecure opt-in for trusted local-only use.
+            raise _http_error(
+                "unauthorized",
+                "API authentication is not configured: set COMPLYOS_API_TOKEN, or "
+                "COMPLYOS_ALLOW_INSECURE_LOCAL=1 for trusted local-only use",
+                status.HTTP_401_UNAUTHORIZED,
+            )
 
         if x_actor_role not in ROLE_PERMISSIONS:
             raise _http_error(
@@ -303,6 +321,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
                 body=await request.body(),
                 headers=request.headers,
                 signing_secret=os.getenv("COMPLYOS_INBOUND_WEBHOOK_SECRET"),
+                require_signature=not _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"),
             )
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
