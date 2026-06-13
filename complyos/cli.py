@@ -29,13 +29,15 @@ from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
+from complyos.notification.outbox import WebhookEventSender
 from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
-from complyos.services.context import ROLE_PERMISSIONS, default_local_context
+from complyos.services.context import ROLE_PERMISSIONS, ActorContext, default_local_context
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
@@ -66,6 +68,7 @@ governance_app = typer.Typer(name="governance", help="AI, HR, and school governa
 privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
 security_app = typer.Typer(name="security", help="Security evidence and assurance readiness")
+notifications_app = typer.Typer(name="notifications", help="Drain notification outbox deliveries")
 console = Console()
 
 
@@ -105,6 +108,19 @@ def _get_webhook_notifier() -> WebhookNotifier | None:
     if not slack_url and not teams_url:
         return None
     return WebhookNotifier(slack_webhook_url=slack_url, teams_webhook_url=teams_url)
+
+
+def _get_outbox_sender() -> WebhookEventSender:
+    """Build a generic event sender without exposing webhook URLs in logs."""
+    channel_urls = {
+        "slack": os.getenv("COMPLYOS_SLACK_WEBHOOK_URL") or "",
+        "teams": os.getenv("COMPLYOS_TEAMS_WEBHOOK_URL") or "",
+        "webhook": os.getenv("COMPLYOS_WEBHOOK_URL") or "",
+    }
+    return WebhookEventSender(
+        channel_urls=channel_urls,
+        signing_secret=os.getenv("COMPLYOS_WEBHOOK_SECRET"),
+    )
 
 
 @app.command()
@@ -1247,6 +1263,64 @@ def source_intel_review(
     console.print(table)
 
 
+def _source_intel_notification_events(
+    *,
+    notification_service: NotificationOutboxService,
+    context: ActorContext,
+    schedule: dict[str, Any],
+    run_id: str,
+    summary: dict[str, Any],
+    channels: list[str],
+) -> list[dict[str, Any]]:
+    events = [
+        notification_service.enqueue_event(
+            context,
+            event_type="source_intel.run.completed",
+            object_type="source_intel_run",
+            object_id=run_id,
+            payload={
+                "schedule_id": schedule["id"],
+                "schedule_name": schedule["name"],
+                **summary,
+            },
+            channels=channels,
+        )
+    ]
+    if int(summary.get("proposal_count", 0)) > 0:
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="source_intel.proposals_waiting",
+                object_type="source_intel_run",
+                object_id=run_id,
+                payload={
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule["name"],
+                    "proposal_count": summary["proposal_count"],
+                    "query": summary["query"],
+                },
+                channels=channels,
+            )
+        )
+    if summary.get("coverage_gaps"):
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="source_intel.coverage_gap_found",
+                object_type="source_intel_run",
+                object_id=run_id,
+                payload={
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule["name"],
+                    "coverage_gaps": summary["coverage_gaps"],
+                    "query": summary["query"],
+                },
+                channels=channels,
+            )
+        )
+    return events
+
+
 @source_intel_app.command("schedule-add")
 def source_intel_schedule_add(
     db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
@@ -1312,13 +1386,26 @@ def source_intel_schedule_list(
 def source_intel_run_scheduled(
     db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
     force: bool = typer.Option(False, "--force", help="Run schedules even when not due"),
+    enqueue_notifications: bool = typer.Option(
+        True,
+        "--enqueue-notifications/--no-enqueue-notifications",
+        help="Queue notification events without sending network calls",
+    ),
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Execute due local source-intelligence schedules and record job receipts."""
     context = _local_cli_context(role="compliance_manager")
-    service = SourceIntelService(LocalRepository(db_path))
+    repository = LocalRepository(db_path)
+    service = SourceIntelService(repository)
+    notification_service = NotificationOutboxService(repository)
     schedules = service.due_schedules(context, force=force)
     executions = []
+    notification_events = []
+    channels = notify_channel or ["slack", "teams"]
     for schedule in schedules:
         started_at = datetime.utcnow()
         run_id = None
@@ -1345,6 +1432,17 @@ def source_intel_run_scheduled(
                 finished_at=datetime.utcnow(),
                 summary=summary,
             )
+            if enqueue_notifications:
+                notification_events.extend(
+                    _source_intel_notification_events(
+                        notification_service=notification_service,
+                        context=context,
+                        schedule=schedule,
+                        run_id=run_id,
+                        summary=summary,
+                        channels=channels,
+                    )
+                )
         except Exception as exc:
             execution = service.record_schedule_execution(
                 context,
@@ -1361,6 +1459,7 @@ def source_intel_run_scheduled(
     payload = {
         "scheduled_count": len(schedules),
         "executions": executions,
+        "notification_events": notification_events,
     }
     if json_output:
         _print_json(payload)
@@ -1429,6 +1528,116 @@ def security_evidence(
     console.print(f"[bold]Security evidence period:[/bold] {result.period}")
     console.print(f"[bold]Posture:[/bold] {result.posture}")
     console.print(f"[bold]Summary:[/bold] {result.summary}")
+
+
+@notifications_app.command("list")
+def notifications_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    limit: int = typer.Option(50, "--limit", help="Maximum pending deliveries to list"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List pending notification outbox deliveries without exposing webhook URLs."""
+    context = _local_cli_context(role="compliance_manager")
+    deliveries = NotificationOutboxService(LocalRepository(db_path)).list_pending_deliveries(
+        context,
+        limit=limit,
+    )
+    payload = {"pending_count": len(deliveries), "deliveries": deliveries}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Outbox")
+    table.add_column("Delivery")
+    table.add_column("Channel")
+    table.add_column("Event")
+    table.add_column("Status")
+    for delivery in deliveries:
+        event = delivery.get("event") or {}
+        table.add_row(
+            str(delivery["id"]),
+            str(delivery["channel"]),
+            str(event.get("event_type", "unknown")),
+            str(delivery["status"]),
+        )
+    console.print(table)
+
+
+@notifications_app.command("drain")
+def notifications_drain(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--send",
+        help="Preview by default; use --send to perform outbound webhook calls",
+    ),
+    limit: int = typer.Option(50, "--limit", help="Maximum pending deliveries to drain"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Drain pending notification deliveries through configured hook channels."""
+    context = _local_cli_context(role="compliance_manager")
+    service = NotificationOutboxService(LocalRepository(db_path))
+    deliveries = service.list_pending_deliveries(context, limit=limit)
+    results: list[dict[str, Any]] = []
+
+    async def _send_all() -> list[dict[str, Any]]:
+        sender = _get_outbox_sender()
+        sent_results: list[dict[str, Any]] = []
+        for delivery in deliveries:
+            try:
+                result = await sender.send_delivery(delivery)
+            except Exception as exc:
+                marked = service.mark_delivery_failed(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(exc),
+                )
+                sent_results.append({"delivery": marked, "status": marked["status"]})
+                continue
+
+            if result.get("skipped"):
+                marked = service.mark_delivery_skipped(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(result["error"]),
+                )
+            else:
+                marked = service.mark_delivery_sent(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    response_metadata={"status_code": result.get("status_code")},
+                )
+            sent_results.append({"delivery": marked, "status": marked["status"]})
+        return sent_results
+
+    if dry_run:
+        results = [
+            {
+                "delivery": delivery,
+                "status": "would_send",
+            }
+            for delivery in deliveries
+        ]
+    else:
+        results = asyncio.run(_send_all())
+
+    payload = {
+        "dry_run": dry_run,
+        "pending_count": len(deliveries),
+        "deliveries": results,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Drain")
+    table.add_column("Delivery")
+    table.add_column("Channel")
+    table.add_column("Status")
+    for item in results:
+        delivery = item["delivery"]
+        table.add_row(str(delivery["id"]), str(delivery["channel"]), str(item["status"]))
+    console.print(table)
 
 
 @governance_app.command("packet")
@@ -1669,6 +1878,7 @@ app.add_typer(source_intel_app, name="source-intel")
 app.add_typer(admin_app, name="admin")
 app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")
+app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
 
 

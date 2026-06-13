@@ -40,6 +40,7 @@ PERM_LEGAL_HOLD_MANAGE = "legal_hold:manage"
 PERM_SOURCE_INTEL_READ = "source_intel:read"
 PERM_SOURCE_INTEL_RUN = "source_intel:run"
 PERM_SOURCE_INTEL_DECIDE = "source_intel:decide"
+PERM_NOTIFICATIONS_MANAGE = "notifications:manage"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
@@ -72,6 +73,7 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_SOURCE_INTEL_READ,
         PERM_SOURCE_INTEL_RUN,
         PERM_SOURCE_INTEL_DECIDE,
+        PERM_NOTIFICATIONS_MANAGE,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -102,6 +104,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_SOURCE_INTEL_READ,
             PERM_SOURCE_INTEL_RUN,
             PERM_SOURCE_INTEL_DECIDE,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
     "privacy_admin": frozenset(
@@ -144,6 +147,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_READINESS_READ,
             PERM_SOURCE_INTEL_READ,
             PERM_SOURCE_INTEL_RUN,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
     "read_only": frozenset(

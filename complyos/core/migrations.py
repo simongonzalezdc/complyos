@@ -12,6 +12,7 @@ from typing import Any, TypedDict
 from sqlalchemy import text
 
 SOURCE_INTEL_HARDENING_MIGRATION = "20260612_source_intel_hardening"
+NOTIFICATION_OUTBOX_MIGRATION = "20260613_notification_outbox_hooks"
 
 
 class SchemaMigration(TypedDict):
@@ -53,6 +54,45 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
                 summary JSON NOT NULL DEFAULT '{}',
                 error VARCHAR,
                 created_by VARCHAR NOT NULL
+            )
+            """,
+        ],
+    },
+    {
+        "migration_id": NOTIFICATION_OUTBOX_MIGRATION,
+        "description": "Notification outbox events and retryable hook deliveries",
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS notification_events (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL DEFAULT 'local-default',
+                event_type VARCHAR NOT NULL,
+                source VARCHAR NOT NULL DEFAULT 'complyos',
+                object_type VARCHAR NOT NULL,
+                object_id VARCHAR,
+                payload JSON NOT NULL DEFAULT '{}',
+                payload_hash VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                created_by VARCHAR NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS notification_deliveries (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL DEFAULT 'local-default',
+                event_id VARCHAR NOT NULL,
+                channel VARCHAR NOT NULL,
+                destination_ref VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 3,
+                next_attempt_at DATETIME,
+                last_error VARCHAR,
+                response_metadata JSON NOT NULL DEFAULT '{}',
+                sent_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
         ],

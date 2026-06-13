@@ -143,6 +143,7 @@ RegWatch can now use the shared source-intelligence runtime without paid APIs:
 - `complyos source-intel schedule-add --db complyos.db --name daily-training-watch --json` creates a local schedule.
 - `complyos source-intel run-scheduled --db complyos.db --force --json` records durable job executions.
 - `complyos source-intel export-packet --db complyos.db --output packet.json --json` exports review/audit evidence.
+- `complyos notifications drain --db complyos.db --dry-run --json` previews queued Slack/Teams/customer hook deliveries.
 - `/source-intel/review` shows the human review queue in the dashboard app.
 
 The implemented clients cover Federal Register and eCFR contracts. OSHA, California,

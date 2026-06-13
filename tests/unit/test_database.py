@@ -36,9 +36,12 @@ class TestDatabaseInit:
         assert "schema_migrations" in table_names
         assert "source_intel_schedules" in table_names
         assert "source_intel_job_executions" in table_names
+        assert "notification_events" in table_names
+        assert "notification_deliveries" in table_names
 
         rows = session.execute(text("SELECT migration_id FROM schema_migrations")).scalars().all()
         assert "20260612_source_intel_hardening" in rows
+        assert "20260613_notification_outbox_hooks" in rows
         session.close()
 
 

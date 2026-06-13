@@ -167,6 +167,13 @@ and export packets before any downstream rule/module work. Slack/Teams
 notifications consume audit output rather than introducing a separate workflow
 engine.
 
+Notifications use an outbox pattern. Jobs enqueue tenant-scoped
+`notification_events` and `notification_deliveries`; a separate
+`complyos notifications drain` worker sends configured Slack, Teams, or generic
+customer webhooks. Outbound hook payloads include event IDs, idempotency keys,
+payload hashes, and optional HMAC signatures, while delivery rows keep retry,
+skip, sent, and dead-letter evidence without storing webhook URLs in packets.
+
 PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 
 The current SQLite-backed architecture handles ~10K users comfortably. For larger deployments:

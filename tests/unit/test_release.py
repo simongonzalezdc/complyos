@@ -43,3 +43,5 @@ def test_deployment_checklist_covers_source_intel_hardening() -> None:
     assert checks["source_intel_api_endpoints"]["ok"] is True
     assert checks["migration_strategy"]["ok"] is True
     assert checks["observability_action_logs"]["ok"] is True
+    assert checks["notification_outbox"]["ok"] is True
+    assert checks["signed_hook_sender"]["ok"] is True

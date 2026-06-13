@@ -23,6 +23,8 @@ from complyos.models.database import (
     DBImportRow,
     DBLearningRecord,
     DBLegalHold,
+    DBNotificationDelivery,
+    DBNotificationEvent,
     DBPrivacyRequest,
     DBRetentionPolicy,
     DBSourceIntelJobExecution,
@@ -676,6 +678,120 @@ class LocalRepository:
                 .all()
             )
             return [self._to_source_intel_job_execution_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Notification outbox persistence
+    # ------------------------------------------------------------------
+    def save_notification_event(
+        self,
+        *,
+        tenant_id: str,
+        event_type: str,
+        source: str,
+        object_type: str,
+        object_id: str | None,
+        payload: dict[str, Any],
+        payload_hash: str,
+        channels: list[str],
+        created_by: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        event_id = str(uuid.uuid4())
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            event = DBNotificationEvent(
+                id=event_id,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                source=source,
+                object_type=object_type,
+                object_id=object_id,
+                payload=payload,
+                payload_hash=payload_hash,
+                status="queued",
+                created_by=created_by,
+                created_at=timestamp,
+            )
+            session.add(event)
+            for channel in channels:
+                session.add(
+                    DBNotificationDelivery(
+                        id=str(uuid.uuid4()),
+                        tenant_id=tenant_id,
+                        event_id=event_id,
+                        channel=channel,
+                        destination_ref=channel,
+                        status="pending",
+                        attempts=0,
+                        max_attempts=3,
+                        response_metadata={},
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                    )
+                )
+            session.commit()
+            session.refresh(event)
+            return self._to_notification_event_dict(event, delivery_count=len(channels))
+
+    def list_notification_deliveries(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None = "pending",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBNotificationDelivery).where(
+                DBNotificationDelivery.tenant_id == tenant_id
+            )
+            if status:
+                query = query.where(DBNotificationDelivery.status == status)
+            rows = (
+                query.order_by(DBNotificationDelivery.created_at.asc())
+                .limit(limit)
+                .all()
+            )
+            deliveries: list[dict[str, Any]] = []
+            for row in rows:
+                event = session.get(DBNotificationEvent, row.event_id)
+                deliveries.append(self._to_notification_delivery_dict(row, event))
+            return deliveries
+
+    def mark_notification_delivery(
+        self,
+        *,
+        tenant_id: str,
+        delivery_id: str,
+        status: str,
+        increment_attempts: bool,
+        response_metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+        next_attempt_at: datetime | None = None,
+        sent_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            delivery = (
+                session.query(DBNotificationDelivery)
+                .where(
+                    DBNotificationDelivery.tenant_id == tenant_id,
+                    DBNotificationDelivery.id == delivery_id,
+                )
+                .first()
+            )
+            if delivery is None:
+                raise ValueError(f"unknown notification delivery: {delivery_id}")
+            if increment_attempts:
+                delivery.attempts += 1
+            delivery.status = status
+            delivery.response_metadata = response_metadata or {}
+            delivery.last_error = error
+            delivery.next_attempt_at = next_attempt_at
+            delivery.sent_at = sent_at
+            delivery.updated_at = datetime.utcnow()
+            session.commit()
+            session.refresh(delivery)
+            event = session.get(DBNotificationEvent, delivery.event_id)
+            return self._to_notification_delivery_dict(delivery, event)
 
     @staticmethod
     def _to_snapshot_dict(snapshot: DBAuditSnapshot) -> dict[str, Any]:
@@ -1551,6 +1667,55 @@ class LocalRepository:
             "summary": db.summary or {},
             "error": db.error,
             "created_by": db.created_by,
+        }
+
+    @staticmethod
+    def _to_notification_event_dict(
+        db: DBNotificationEvent,
+        *,
+        delivery_count: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "event_type": db.event_type,
+            "source": db.source,
+            "object_type": db.object_type,
+            "object_id": db.object_id,
+            "payload": db.payload or {},
+            "payload_hash": db.payload_hash,
+            "status": db.status,
+            "created_by": db.created_by,
+            "created_at": db.created_at,
+            "delivery_count": delivery_count,
+        }
+
+    @staticmethod
+    def _to_notification_delivery_dict(
+        db: DBNotificationDelivery,
+        event: DBNotificationEvent | None,
+    ) -> dict[str, Any]:
+        event_payload = (
+            LocalRepository._to_notification_event_dict(event)
+            if event is not None
+            else None
+        )
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "event_id": db.event_id,
+            "channel": db.channel,
+            "destination_ref": db.destination_ref,
+            "status": db.status,
+            "attempts": db.attempts,
+            "max_attempts": db.max_attempts,
+            "next_attempt_at": db.next_attempt_at,
+            "last_error": db.last_error,
+            "response_metadata": db.response_metadata or {},
+            "sent_at": db.sent_at,
+            "created_at": db.created_at,
+            "updated_at": db.updated_at,
+            "event": event_payload,
         }
 
     @staticmethod

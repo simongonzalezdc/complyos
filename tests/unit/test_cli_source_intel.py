@@ -205,3 +205,40 @@ def test_source_intel_cli_schedules_runs_and_exports_packet(tmp_path: Path) -> N
     assert export_payload["output"] == str(packet_path)
     assert packet_path.exists()
     assert json.loads(packet_path.read_text(encoding="utf-8"))["proposal_count"] == 2
+
+
+def test_source_intel_run_scheduled_enqueues_notification_events(tmp_path: Path) -> None:
+    db_path = tmp_path / "source-intel-notifications.db"
+    created = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "schedule-add",
+            "--db",
+            str(db_path),
+            "--name",
+            "daily-training-watch",
+            "--query",
+            "training",
+            "--interval-hours",
+            "24",
+            "--json",
+        ],
+    )
+    assert created.exit_code == 0
+
+    run = runner.invoke(
+        app,
+        ["source-intel", "run-scheduled", "--db", str(db_path), "--force", "--json"],
+    )
+
+    assert run.exit_code == 0
+    run_payload = json.loads(run.output)
+    assert run_payload["notification_events"][0]["event_type"] == "source_intel.run.completed"
+    assert run_payload["notification_events"][1]["event_type"] == "source_intel.proposals_waiting"
+
+    listed = runner.invoke(app, ["notifications", "list", "--db", str(db_path), "--json"])
+    assert listed.exit_code == 0
+    pending_payload = json.loads(listed.output)
+    assert pending_payload["pending_count"] == 4
+    assert {item["channel"] for item in pending_payload["deliveries"]} == {"slack", "teams"}

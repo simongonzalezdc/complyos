@@ -94,6 +94,18 @@ def build_deployment_checklist(root: Path | str = ".") -> list[ReleaseCheck]:
             "complyos/services/source_intel.py",
             "source_intel.schedule.execute",
         ),
+        (
+            "notification_outbox",
+            "Notification outbox",
+            "complyos/services/notifications.py",
+            "notification.event.enqueue",
+        ),
+        (
+            "signed_hook_sender",
+            "Signed hook sender",
+            "complyos/notification/outbox.py",
+            "X-ComplyOS-Signature",
+        ),
     ]
     for check_id, label, relative_path, required_text in deployment_checks:
         ok = _file_contains(base, relative_path, required_text)

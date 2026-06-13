@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+from complyos.core.repository import LocalRepository
+from complyos.services.context import default_local_context
+from complyos.services.notifications import NotificationOutboxService
+
+
+def test_notification_outbox_service_enqueues_tenant_scoped_event_and_deliveries(
+    tmp_path,
+) -> None:
+    repo = LocalRepository(str(tmp_path / "notifications.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+
+    event = service.enqueue_event(
+        context,
+        event_type="source_intel.proposals_waiting",
+        object_type="source_intel_run",
+        object_id="run-123",
+        payload={"proposal_count": 2, "secret": "redacted-before-store"},
+        channels=["slack", "teams"],
+    )
+
+    assert event["tenant_id"] == "tenant-a"
+    assert event["event_type"] == "source_intel.proposals_waiting"
+    assert event["payload_hash"]
+    assert event["delivery_count"] == 2
+    assert "secret" not in event["payload"]
+
+    pending = service.list_pending_deliveries(context)
+    assert {delivery["channel"] for delivery in pending} == {"slack", "teams"}
+    assert {delivery["status"] for delivery in pending} == {"pending"}
+    assert {delivery["event"]["event_type"] for delivery in pending} == {
+        "source_intel.proposals_waiting"
+    }
+
+    other_context = default_local_context(tenant_id="tenant-b", role="compliance_manager")
+    assert service.list_pending_deliveries(other_context) == []
+
+    actions = repo.list_action_logs(tenant_id="tenant-a")
+    assert actions[0]["action"] == "notification.event.enqueue"
+    assert actions[0]["redacted_metadata"]["event_type"] == "source_intel.proposals_waiting"
+
+
+def test_notification_outbox_service_marks_delivery_states(tmp_path) -> None:
+    repo = LocalRepository(str(tmp_path / "notifications-states.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+    service.enqueue_event(
+        context,
+        event_type="audit.completed",
+        object_type="audit_snapshot",
+        object_id="snap-1",
+        payload={"gaps_found": 3},
+        channels=["webhook"],
+    )
+    delivery = service.list_pending_deliveries(context)[0]
+
+    sent = service.mark_delivery_sent(
+        context,
+        delivery_id=delivery["id"],
+        response_metadata={"status_code": 202},
+    )
+    assert sent["status"] == "sent"
+    assert sent["attempts"] == 1
+    assert sent["response_metadata"]["status_code"] == 202
+
+    service.enqueue_event(
+        context,
+        event_type="audit.high_risk_gaps_found",
+        object_type="audit_snapshot",
+        object_id="snap-2",
+        payload={"critical": 1},
+        channels=["webhook"],
+    )
+    failed_delivery = service.list_pending_deliveries(context)[0]
+    failed = service.mark_delivery_failed(
+        context,
+        delivery_id=failed_delivery["id"],
+        error="503 Service Unavailable",
+    )
+    assert failed["status"] == "pending"
+    assert failed["attempts"] == 1
+    assert failed["last_error"] == "503 Service Unavailable"
