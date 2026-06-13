@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -149,6 +150,14 @@ class ImportRepositoryMixin(RepositoryBase, RepositoryMappers):
     # ------------------------------------------------------------------
     def save_ai_proposal(self, proposal: dict[str, Any]) -> None:
         provenance = proposal.get("provenance") or {}
+        # redaction_policy is a structured dict (what was actually masked) but the
+        # provenance column is a String summary; keep the full dict in usage_metadata.
+        raw_policy = provenance.get("redaction_policy", "unknown")
+        policy_summary = (
+            json.dumps(raw_policy, sort_keys=True, separators=(",", ":"))
+            if isinstance(raw_policy, dict)
+            else str(raw_policy)
+        )
         with self._session() as session:
             session.add(
                 DBAIProposal(
@@ -169,7 +178,7 @@ class ImportRepositoryMixin(RepositoryBase, RepositoryMappers):
                     model_provider=provenance.get("model_provider", "unknown"),
                     model_name=provenance.get("model_name", "unknown"),
                     prompt_hash=provenance.get("prompt_hash", ""),
-                    redaction_policy=provenance.get("redaction_policy", "unknown"),
+                    redaction_policy=policy_summary,
                     response_hash=provenance.get("response_hash", proposal["output_hash"]),
                     usage_metadata=provenance,
                 )
@@ -201,5 +210,16 @@ class ImportRepositoryMixin(RepositoryBase, RepositoryMappers):
                 proposal.approved_by = approved_by
             if approved_at is not None:
                 proposal.approved_at = approved_at
+            session.commit()
+
+    def update_ai_proposal_created_at(
+        self, proposal_id: str, created_at: datetime
+    ) -> None:
+        """Adjust a proposal's created_at (used by tests/TTL backdating)."""
+        with self._session() as session:
+            proposal = session.get(DBAIProposal, proposal_id)
+            if proposal is None:
+                return
+            proposal.created_at = created_at
             session.commit()
 
