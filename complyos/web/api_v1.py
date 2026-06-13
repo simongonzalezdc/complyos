@@ -12,21 +12,22 @@ from pydantic import BaseModel, Field
 from complyos.api.mcp_server import _get_connector, _get_notifier
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.repository import LocalRepository
+from complyos.models.domain import AssignmentRule
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
-    PERM_CONNECTORS_READ,
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
-    require_permission,
 )
 from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.inbound_hooks import InboundHookService, InboundWebhookSignatureError
 from complyos.services.notifications import NotificationOutboxService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
@@ -101,6 +102,21 @@ class NotificationPreferenceBody(BaseModel):
     event_type: str = "*"
     enabled: bool = True
     reason: str | None = None
+
+
+class RuleRequestBody(BaseModel):
+    name: str
+    target_criteria: dict[str, object] = Field(default_factory=dict)
+    course_ids: list[str] = Field(default_factory=list)
+    deadline_days: int = 30
+
+    def to_rule(self) -> AssignmentRule:
+        return AssignmentRule(
+            name=self.name,
+            target_criteria=dict(self.target_criteria),
+            course_ids=list(self.course_ids),
+            deadline_days_from_trigger=self.deadline_days,
+        )
 
 
 def _http_error(
@@ -267,13 +283,45 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 
+    @router.get("/connectors")
+    async def list_connectors(
+        profile: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            connectors = ConnectorRegistry(_get_connector()).list(context, profile=profile)
+            return {"connectors": connectors, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_connector_profile", exc, context) from exc
+
     @router.get("/connectors/health")
     async def connector_health(
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
         try:
-            require_permission(context, PERM_CONNECTORS_READ)
-            return await _get_connector().health_check()
+            return await ConnectorRegistry(_get_connector()).health(context)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/rules/validate")
+    async def validate_rule(
+        body: RuleRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PolicyRuleService(repo).validate(context, body.to_rule())
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/rules/preview")
+    async def preview_rule(
+        body: RuleRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PolicyRuleService(repo).preview(context, body.to_rule())
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 

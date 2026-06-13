@@ -18,15 +18,13 @@ from complyos.core.audit_views import shape_gaps, shape_remediation, shape_repor
 from complyos.core.auditor import ComplianceAuditor
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
-from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
     PERM_AUDIT_READ,
-    PERM_CONNECTORS_READ,
-    PERM_RULES_PREVIEW,
     ROLE_PERMISSIONS,
     ActorContext,
     default_local_context,
@@ -35,6 +33,7 @@ from complyos.services.context import (
 from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
@@ -236,9 +235,8 @@ async def check_connector_health() -> dict[str, Any]:
     Returns:
         Connector status, authentication state, and any errors.
     """
-    require_permission(_mcp_context(), PERM_CONNECTORS_READ)
-    connector = _get_connector()
-    return await connector.health_check()
+    # ConnectorRegistry.health owns the connectors:read check.
+    return await ConnectorRegistry(_get_connector()).health(_mcp_context())
 
 
 @mcp.tool()
@@ -261,16 +259,14 @@ async def validate_assignment_rule(
     Returns:
         Validation result with valid flag, issues list, and preview.
     """
-    require_permission(_mcp_context(), PERM_RULES_PREVIEW)
-    repo = LocalRepository()
-    engine = AssignmentRuleEngine(repo)
     rule = AssignmentRule(
         name=name,
         target_criteria=target_criteria,
         course_ids=course_ids,
         deadline_days_from_trigger=deadline_days,
     )
-    return engine.validate_rule(rule)
+    # PolicyRuleService.validate owns the rules:preview check.
+    return PolicyRuleService(LocalRepository()).validate(_mcp_context(), rule)
 
 
 @mcp.tool()
@@ -291,16 +287,14 @@ async def preview_assignment_rule(
     Returns:
         Affected users, missing courses, and total enrollment count.
     """
-    require_permission(_mcp_context(), PERM_RULES_PREVIEW)
-    repo = LocalRepository()
-    engine = AssignmentRuleEngine(repo)
     rule = AssignmentRule(
         name=name,
         target_criteria=target_criteria,
         course_ids=course_ids,
         deadline_days_from_trigger=deadline_days,
     )
-    return engine.preview_rule(rule)
+    # PolicyRuleService.preview owns the rules:preview check.
+    return PolicyRuleService(LocalRepository()).preview(_mcp_context(), rule)
 
 
 @mcp.tool()

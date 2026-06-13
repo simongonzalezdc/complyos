@@ -13,12 +13,11 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from complyos.api.mcp_server import _get_connector, check_connector_health
+from complyos.api.mcp_server import _get_connector
 from complyos.config import ComplyOSConfig
 from complyos.core.audit_views import shape_gaps, shape_report
 from complyos.core.release import build_deployment_checklist
 from complyos.core.repository import LocalRepository
-from complyos.core.rules import AssignmentRuleEngine
 from complyos.core.time import utc_now
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
@@ -28,6 +27,7 @@ from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
     ROLE_PERMISSIONS,
     ActorContext,
@@ -37,6 +37,7 @@ from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.notifications import NotificationOutboxService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
@@ -323,7 +324,9 @@ def digest(
 @app.command()
 def health():
     """Check LMS connector health."""
-    result = asyncio.run(check_connector_health())
+    result = asyncio.run(
+        ConnectorRegistry(_get_connector()).health(_local_cli_context())
+    )
 
     status_color = "green" if result["status"] == "healthy" else "red"
     console.print(f"[bold]Connector:[/bold] {result['connector']}")
@@ -369,16 +372,14 @@ def connectors(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Show the connector capability matrix."""
-    from complyos.connectors.capabilities import list_connector_capabilities
-
     try:
-        items = list_connector_capabilities(profile=profile)
+        items = ConnectorRegistry(_get_connector()).list(_local_cli_context(), profile=profile)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
     if json_output:
-        console.print(json.dumps([item.to_dict() for item in items], indent=2))
+        console.print(json.dumps(items, indent=2))
         return
 
     table = Table(title="ComplyOS Connector Matrix")
@@ -392,13 +393,13 @@ def connectors(
 
     for item in items:
         table.add_row(
-            item.name,
-            item.profile,
-            item.status,
-            item.auth,
-            "yes" if item.supports_learning_records else "no",
-            "yes" if item.supports_due_dates else "no",
-            "yes" if item.supports_expiry else "no",
+            str(item["name"]),
+            str(item["profile"]),
+            str(item["status"]),
+            str(item["auth"]),
+            "yes" if item["supports_learning_records"] else "no",
+            "yes" if item["supports_due_dates"] else "no",
+            "yes" if item["supports_expiry"] else "no",
         )
     console.print(table)
 
@@ -626,8 +627,7 @@ def validate_rule(
         data = json.load(f)
 
     rule = AssignmentRule(**data)
-    engine = AssignmentRuleEngine(LocalRepository(db_path))
-    result = engine.validate_rule(rule)
+    result = PolicyRuleService(LocalRepository(db_path)).validate(_local_cli_context(), rule)
 
     if result["valid"]:
         console.print("[green]Rule is valid[/green]")
@@ -650,8 +650,7 @@ def preview_rule(
         data = json.load(f)
 
     rule = AssignmentRule(**data)
-    engine = AssignmentRuleEngine(LocalRepository(db_path))
-    result = engine.preview_rule(rule)
+    result = PolicyRuleService(LocalRepository(db_path)).preview(_local_cli_context(), rule)
 
     console.print(f"[bold]Rule:[/bold] {result['rule_name']}")
     console.print(

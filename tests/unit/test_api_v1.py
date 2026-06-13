@@ -439,3 +439,94 @@ def test_api_v1_sets_and_lists_notification_preferences(monkeypatch, tmp_path) -
     assert listed.status_code == 200
     assert listed.json()["preferences"][0]["channel"] == "email"
     assert listed.json()["preferences"][0]["event_type"] == "privacy.request.created"
+
+
+def test_api_v1_lists_connector_capability_matrix(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-connectors.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    listed = client.get("/api/v1/connectors", headers=headers)
+    assert listed.status_code == 200
+    matrix = listed.json()["connectors"]
+    assert any(item["name"] == "csv" for item in matrix)
+
+    filtered = client.get("/api/v1/connectors", params={"profile": "campus"}, headers=headers)
+    assert filtered.status_code == 200
+    assert all(item["profile"] in {"campus", "both"} for item in filtered.json()["connectors"])
+
+
+def test_api_v1_connectors_list_fails_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-conn-denied.db"))))
+
+    denied = client.get(
+        "/api/v1/connectors",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+
+def _seed_rule_repo(repo: LocalRepository) -> None:
+    from datetime import date
+
+    from complyos.models.domain import Course, EmploymentStatus, User
+
+    repo.save_user(
+        User(
+            id="u1",
+            employee_id="E001",
+            email="alice@example.com",
+            first_name="Alice",
+            last_name="Smith",
+            department="Engineering",
+            region="US",
+            hire_date=date(2023, 1, 1),
+            employment_status=EmploymentStatus.ACTIVE,
+        )
+    )
+    repo.save_course(Course(id="c1", code="SEC-101", title="Security", mandatory=True))
+
+
+def test_api_v1_validates_and_previews_assignment_rules(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-rules.db"))
+    _seed_rule_repo(repo)
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+    body = {
+        "name": "Engineering Security",
+        "target_criteria": {"department": "Engineering"},
+        "course_ids": ["c1"],
+        "deadline_days": 30,
+    }
+
+    validated = client.post("/api/v1/rules/validate", json=body, headers=headers)
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+
+    previewed = client.post("/api/v1/rules/preview", json=body, headers=headers)
+    assert previewed.status_code == 200
+    assert previewed.json()["rule_name"] == "Engineering Security"
+    assert len(previewed.json()["users"]) == 1
+
+
+def test_api_v1_rules_fail_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-rules-denied.db"))))
+    body = {
+        "name": "Engineering Security",
+        "target_criteria": {"department": "Engineering"},
+        "course_ids": ["c1"],
+    }
+    # importer lacks rules:preview.
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "importer"}
+
+    denied_validate = client.post("/api/v1/rules/validate", json=body, headers=headers)
+    assert denied_validate.status_code == 403
+    assert denied_validate.json()["detail"]["code"] == "permission_denied"
+
+    denied_preview = client.post("/api/v1/rules/preview", json=body, headers=headers)
+    assert denied_preview.status_code == 403
+    assert denied_preview.json()["detail"]["code"] == "permission_denied"
