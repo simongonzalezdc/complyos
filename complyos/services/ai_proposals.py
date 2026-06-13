@@ -74,6 +74,20 @@ _PII_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 _MASK = "[REDACTED]"
 
+# Policy stamped on proposal types that reference learners only by opaque,
+# non-PII fields (user_id/department/course titles), so name/email/employee_id
+# are excluded by construction rather than masked after the fact.
+_PII_EXCLUDED_POLICY: dict[str, Any] = {
+    "strategy": "pii_excluded_by_construction",
+    "masked_fields": ["name", "email", "employee_id"],
+    "masked_count": 0,
+}
+
+
+def _norm(value: Any) -> str:
+    """Normalize a value into a stable lowercase match key (for clustering)."""
+    return "" if value is None else " ".join(str(value).split()).strip().lower()
+
 
 class AIProposalExpiredError(ValueError):
     """Raised when an AI proposal is approved after its TTL has elapsed."""
@@ -242,6 +256,255 @@ class AIProposalService:
             input_hash=input_hash,
             output_hash=output_hash,
             output=output,
+            provenance=provenance,
+            warnings=["proposal-only; cannot mutate compliance records"],
+        )
+
+    # ------------------------------------------------------------------
+    # Additional deterministic, proposal-only types (WP15b)
+    #
+    # Each flows through the SAME store + provenance + approve/reject/expiry
+    # lifecycle as propose_mapping and carries ``state_mutation_allowed: False``.
+    # None of them name a learner by PII: drafts reference the opaque internal
+    # ``user_id`` and non-PII fields (department, course titles, counts), and
+    # duplicate clustering groups by a hash of the identity so the raw name/email
+    # never reaches the stored output or the hash preimage.
+    # ------------------------------------------------------------------
+    def propose_anomaly_summary(
+        self,
+        context: ActorContext,
+        *,
+        issues: list[dict[str, Any]],
+        model_name: str = "rules-v1",
+    ) -> AIProposalResult:
+        """Summarize anomaly signals (stale/backdated/duplicate counts) as a draft.
+
+        Only each issue's ``code`` is read; messages/values are discarded so no
+        record-level PII can reach the stored summary.
+        """
+        require_permission(context, PERM_AI_PROPOSE)
+        codes = sorted(str(issue.get("code", "UNKNOWN")) for issue in issues)
+        counts: dict[str, int] = {}
+        for code in codes:
+            counts[code] = counts.get(code, 0) + 1
+        total = len(codes)
+        parts = [f"{count} {code}" for code, count in sorted(counts.items())]
+        summary = (
+            f"{total} anomaly signal(s): " + ", ".join(parts)
+            if total
+            else "no anomaly signals detected"
+        )
+        return self._store_proposal(
+            context,
+            proposal_type="anomaly_summary",
+            model_name=model_name,
+            input_preimage={"issue_codes": codes},
+            output={
+                "summary": summary,
+                "counts_by_code": counts,
+                "total_signals": total,
+            },
+            redaction_policy={
+                "strategy": "codes_only_no_records",
+                "masked_fields": [],
+                "masked_count": 0,
+            },
+        )
+
+    def propose_gap_explanation(
+        self,
+        context: ActorContext,
+        *,
+        user_id: str,
+        department: str | None = None,
+        missing_courses: list[str] | None = None,
+        days_overdue: int | None = None,
+        severity: str = "medium",
+        model_name: str = "rules-v1",
+    ) -> AIProposalResult:
+        """Draft a plain-language explanation of one compliance gap (PII-free).
+
+        Pass a gap's non-PII projection: its ``user.id``, ``user.department``,
+        the missing course *titles*, ``days_overdue`` and ``severity``. The draft
+        never references the learner's name or email.
+        """
+        require_permission(context, PERM_AI_PROPOSE)
+        titles = list(missing_courses or [])
+        course_clause = ", ".join(titles) if titles else "no outstanding courses"
+        overdue_clause = (
+            f" Overdue by {int(days_overdue)} day(s)."
+            if days_overdue
+            else " Not yet overdue."
+        )
+        explanation = (
+            f"Learner {user_id} in {department or 'an unspecified department'} has "
+            f"{len(titles)} outstanding mandatory course(s): {course_clause}."
+            f"{overdue_clause} Severity: {severity}."
+        )
+        return self._store_proposal(
+            context,
+            proposal_type="gap_explanation",
+            model_name=model_name,
+            input_preimage={
+                "user_id": user_id,
+                "department": department,
+                "missing_courses": titles,
+                "days_overdue": days_overdue,
+                "severity": severity,
+            },
+            output={
+                "user_id": user_id,
+                "department": department,
+                "missing_courses": titles,
+                "days_overdue": days_overdue,
+                "severity": severity,
+                "explanation": explanation,
+            },
+            redaction_policy=_PII_EXCLUDED_POLICY,
+        )
+
+    def propose_remediation_message(
+        self,
+        context: ActorContext,
+        *,
+        user_id: str,
+        missing_courses: list[str] | None = None,
+        deadline: str | None = None,
+        model_name: str = "rules-v1",
+    ) -> AIProposalResult:
+        """Draft a reminder message for a learner's outstanding courses (PII-free).
+
+        Addresses the learner by opaque ``user_id`` rather than name/email; the
+        human approver personalizes and sends. Deterministic template.
+        """
+        require_permission(context, PERM_AI_PROPOSE)
+        titles = list(missing_courses or [])
+        course_clause = ", ".join(titles) if titles else "your assigned mandatory training"
+        deadline_clause = (
+            f" Please complete by {deadline}." if deadline else " Please complete it promptly."
+        )
+        message = (
+            f"Reminder for learner {user_id}: you have {len(titles)} outstanding "
+            f"mandatory course(s): {course_clause}.{deadline_clause}"
+        )
+        return self._store_proposal(
+            context,
+            proposal_type="remediation_message",
+            model_name=model_name,
+            input_preimage={
+                "user_id": user_id,
+                "missing_courses": titles,
+                "deadline": deadline,
+            },
+            output={
+                "user_id": user_id,
+                "missing_courses": titles,
+                "deadline": deadline,
+                "message_draft": message,
+            },
+            redaction_policy=_PII_EXCLUDED_POLICY,
+        )
+
+    def propose_duplicate_clustering(
+        self,
+        context: ActorContext,
+        *,
+        rows: list[dict[str, Any]],
+        model_name: str = "rules-v1",
+    ) -> AIProposalResult:
+        """Cluster likely-duplicate learner/course rows by a hashed identity key.
+
+        PII in the input rows is redacted before hashing; the output exposes only
+        a short identity *signature* (a hash, never the raw name/email) plus the
+        row numbers in each cluster.
+        """
+        require_permission(context, PERM_AI_PROPOSE)
+        redacted_rows, redaction_policy = _redact_rows(rows)
+        clusters: dict[str, list[int]] = {}
+        for index, row in enumerate(rows):
+            emp = _norm(row.get("employee_id") or row.get("emp_id"))
+            name = _norm(
+                row.get("name")
+                or f"{row.get('first_name', '')} {row.get('last_name', '')}"
+            )
+            course = _norm(row.get("course_id") or row.get("course"))
+            identity = emp or (f"{name}|{course}" if name.strip() else "")
+            if not identity.strip("|"):
+                continue
+            signature = _hash({"identity": identity})
+            clusters.setdefault(signature, []).append(index)
+        duplicate_clusters = [
+            {"signature": signature[:16], "row_numbers": indexes, "size": len(indexes)}
+            for signature, indexes in clusters.items()
+            if len(indexes) > 1
+        ]
+        return self._store_proposal(
+            context,
+            proposal_type="duplicate_clustering",
+            model_name=model_name,
+            input_preimage={"redacted_sample_rows": redacted_rows},
+            output={
+                "duplicate_clusters": duplicate_clusters,
+                "rows_examined": len(rows),
+                "duplicate_groups": len(duplicate_clusters),
+            },
+            redaction_policy=redaction_policy,
+        )
+
+    def _store_proposal(
+        self,
+        context: ActorContext,
+        *,
+        proposal_type: str,
+        model_name: str,
+        input_preimage: dict[str, Any],
+        output: dict[str, Any],
+        redaction_policy: dict[str, Any],
+    ) -> AIProposalResult:
+        """Shared persistence path for the deterministic proposal types.
+
+        Stamps the proposal-only guardrail flags, computes the provenance hashes,
+        and stores the proposal as PROPOSED. Mirrors propose_mapping exactly.
+        """
+        self._last_hash_preimage = input_preimage
+        input_hash = _hash(input_preimage)
+        full_output = {
+            **output,
+            "state_mutation_allowed": False,
+            "requires_human_approval": True,
+        }
+        output_hash = _hash(full_output)
+        proposal_id = str(uuid4())
+        provenance = {
+            "model_provider": "deterministic-local",
+            "model_name": model_name,
+            "prompt_hash": _hash({"task": proposal_type, "input": input_preimage}),
+            "redaction_policy": redaction_policy,
+            "response_hash": output_hash,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        self.repository.save_ai_proposal(
+            {
+                "id": proposal_id,
+                "tenant_id": context.tenant_id,
+                "proposal_type": proposal_type,
+                "input_hash": input_hash,
+                "output_hash": output_hash,
+                "status": "PROPOSED",
+                "created_by": context.actor_id,
+                "created_at": datetime.now(UTC),
+                "output": full_output,
+                "provenance": provenance,
+            }
+        )
+        return AIProposalResult(
+            proposal_id=proposal_id,
+            tenant_id=context.tenant_id,
+            proposal_type=proposal_type,
+            status="PROPOSED",
+            input_hash=input_hash,
+            output_hash=output_hash,
+            output=full_output,
             provenance=provenance,
             warnings=["proposal-only; cannot mutate compliance records"],
         )
