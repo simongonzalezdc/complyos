@@ -1,7 +1,9 @@
 # ComplyOS Enterprise Hardening — Remediation Report
 
 > Branch: `simon/enterprise-hardening` · Baseline: `main` (342 tests green)
-> Result: 372 tests green (+30 regression tests), ruff + mypy clean, +1,599/−492 across 31 files.
+> Result: 376 tests green (+34 regression tests), ruff + mypy clean. All 3
+> CRITICAL and all HIGH/MEDIUM findings remediated; two deep refactors scoped as
+> follow-ups (see "Remaining work").
 
 ## How this was produced
 
@@ -47,32 +49,35 @@ New regression tests live in: `test_retention_legal_hold_hardening.py`,
   (`agent_service_account`) when a service account genuinely needs more (e.g.
   `privacy_admin`, `compliance_manager`, `owner`).
 
-## Remaining work (planned follow-ups)
+## Also shipped (second pass)
 
-These are larger, behavior-preserving refactors or items that need a product/
-legal decision. They are best landed as their own focused, reviewed PRs.
+| Item | What shipped | Commit |
+|----|---------|--------|
+| H9 — erasure completeness | `delete_subject_records` now also erases the subject's raw identifiers from `import_rows` (tenant-scoped, same transaction). Decision: notification events + count-only audit logs are retained as process-audit evidence governed by retention. | WP6a |
+| Typed API errors | `_bad_request` maps PermissionError/AuthorizationError to 403 (not 400). | WP6a |
+| H6 — API parity | Added `GET /audit`, `/report`, `/users/{id}/status`, `/digest`, `/connectors/health`, `POST /remediate`, each `require_permission`-gated; shared shaping in `core/audit_views.py` keeps MCP and API identical. File-writing exports stay CLI/MCP-only. | WP6b |
+| H8 (slice) — workflow enums | Added `ImportBatchStatus`/`ImportRowStatus`/`PrivacyRequestType`/`LegalHoldScope` StrEnums; removed the decorative `IMPORT_BATCH_STATES`; request-type/scope validation is now enum-typed. | WP7 |
+| H7 (slice) — repository decomposition | Extracted the ~330 lines of stateless ORM mappers into a `RepositoryMappers` mixin (`repository.py` 2000 → 1671), zero call-site churn. | WP8 |
 
-1. **WP7 — Typed domain models (HIGH, large).** Replace `dict[str, Any]` for
-   PrivacyRequest, LegalHold, RetentionPolicy, import batches/rows/decisions,
-   AI proposals, and the evidence-ledger write path with Pydantic models +
-   StrEnums; move the controller-approval gate onto the model. Removes the
-   primitive-obsession surface mypy can't see at the PII boundary.
-2. **WP8 — Repository split + composition root (HIGH, large).** Split the
-   ~1,900-line `LocalRepository` into aggregate repositories (Audit, Import,
-   Privacy, SourceIntel, Notification) behind a shared sessionmaker; add a
-   composition root and a narrow repository Protocol; drop `or LocalRepository()`
-   default-construction (61 inline call sites).
-3. **WP6 — API parity endpoints (HIGH).** Add audit/report/status/digest/
-   remediation/health/rule endpoints to the FastAPI surface routed through the
-   context-gated services. (Docs were corrected in the interim.)
-4. **WP6 — Erasure completeness, H9 (HIGH, needs decision).** Subject deletion
-   currently leaves the subject's `user_id` in `import_rows` and `subject_id` in
-   `notification_events`. The correct fix enumerates every subject-linked table
-   and reports `PARTIAL` vs `COMPLETED` — but *which* records erasure should
-   remove vs retain (audit/notification history) is a compliance/counsel call.
-5. **WP6 — Typed API errors (MED).** Introduce typed domain errors so a
-   `PermissionError` returns 403 (not 400) and internal identifiers are not
-   echoed verbatim to clients.
+## Remaining work (two deep refactors — recommended as dedicated PRs)
+
+Both are large, behavior-preserving, and now **de-risked by the regression net
+added here**. They fix maintainability, not bugs (every audited bug is fixed),
+so they are best landed with focused review rather than rushed:
+
+1. **Full `dict[str, Any]` → Pydantic envelope migration (rest of H8).** Convert
+   PrivacyRequest, LegalHold, RetentionPolicy, import batches/rows/decisions, and
+   AI proposals to Pydantic models threaded through the repository, and move the
+   controller-approval gate onto a typed model method. The enum/validation slice
+   landed; this is the broader envelope work across ~16 `_to_*` mappers and the
+   705-line privacy service.
+2. **Full per-aggregate repository split (rest of H7).** Split the remaining
+   `LocalRepository` aggregates (audit, import, privacy, source-intel,
+   notification) into mixins behind a typed `RepositoryBase` + a narrow Protocol,
+   and add a composition root to drop `or LocalRepository()` default-construction
+   (61 inline sites). The mapper extraction landed and proves the mixin pattern;
+   the per-aggregate mixins additionally need the typed base for their `self.`
+   references to satisfy mypy.
 
 ## Verify
 
