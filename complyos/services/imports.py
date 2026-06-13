@@ -18,16 +18,13 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from complyos.connectors.csv_file import (
-    ENROLLMENT_ALIASES,
-    STATUS_SYNONYMS,
-    _normalize_header,
-    _parse_date,
-    _parse_datetime,
-    _parse_float,
-    _remap_row,
-    _to_learning_status,
-)
+from complyos.connectors.normalization import ENROLLMENT_ALIASES, STATUS_SYNONYMS
+from complyos.connectors.normalization import normalize_header as _normalize_header
+from complyos.connectors.normalization import parse_date as _parse_date
+from complyos.connectors.normalization import parse_datetime as _parse_datetime
+from complyos.connectors.normalization import parse_float as _parse_float
+from complyos.connectors.normalization import remap_row as _remap_row
+from complyos.connectors.normalization import to_learning_status as _to_learning_status
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import LearningRecord, LearningRecordStatus
 from complyos.services.context import (
@@ -440,8 +437,16 @@ class ImportService:
                 )
             )
 
+        # File-scoped warnings still gate every row to NEEDS_DECISION, but are
+        # reported once at the batch level rather than copied into each row
+        # (which made the stored evidence and preview O(rows x file_issues) noisy
+        # and mislabeled each row as owning a file-level problem).
+        file_decision_warning = any(
+            issue.code in {"UNEXPECTED_COLUMN", "STALE_EXPORT"} for issue in global_issues
+        )
+
         for index, raw_row in enumerate(raw_rows, start=2):
-            row_issues = list(global_issues)
+            row_issues: list[ImportIssue] = []
             mapped = _remap_row(raw_row, ENROLLMENT_ALIASES)
             tenant_map = _remap_row(raw_row, TENANT_ALIASES)
             track_map = _remap_row(raw_row, TRACK_ALIASES)
@@ -508,9 +513,8 @@ class ImportService:
                 seen_keys.add(duplicate_key)
 
             has_blocker = any(issue.severity == "blocker" for issue in row_issues)
-            has_decision_warning = any(
-                issue.code in {"UNEXPECTED_COLUMN", "DUPLICATE_ROW", "STALE_EXPORT"}
-                for issue in row_issues
+            has_decision_warning = file_decision_warning or any(
+                issue.code == "DUPLICATE_ROW" for issue in row_issues
             )
             if has_blocker:
                 status = "REJECTED"
@@ -531,7 +535,10 @@ class ImportService:
                 }
             )
 
-        issues = [
+        # File-global issues are reported once here; per-row issues follow. This
+        # also surfaces file-level issues (e.g. PARTIAL_LOAD) when there are no
+        # data rows, which the previous per-row flatten silently dropped.
+        issues = list(global_issues) + [
             issue
             for row in rows
             for issue in (ImportIssue(**item) for item in row["issues"])

@@ -14,7 +14,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from complyos.connectors.csv_file import ENROLLMENT_ALIASES, _normalize_header
+from complyos.connectors.normalization import ENROLLMENT_ALIASES
+from complyos.connectors.normalization import normalize_header as _normalize_header
 from complyos.core.repository import LocalRepository
 from complyos.services.context import (
     PERM_AI_APPROVE,

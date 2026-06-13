@@ -12,18 +12,28 @@ import csv
 import hashlib
 import json
 import os
-from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.normalization import (
+    ENROLLMENT_ALIASES,
+    STATUS_SYNONYMS,
+)
+from complyos.connectors.normalization import (
+    normalize_status_for_expiry as _normalize_status_for_expiry,  # noqa: E501
+)
+from complyos.connectors.normalization import parse_date as _parse_date
+from complyos.connectors.normalization import parse_datetime as _parse_datetime
+from complyos.connectors.normalization import parse_float as _parse_float
+from complyos.connectors.normalization import remap_row as _remap_row
+from complyos.connectors.normalization import to_learning_status as _to_learning_status
 from complyos.models.domain import (
     Course,
     EmploymentStatus,
     Enrollment,
     EnrollmentStatus,
     LearningRecord,
-    LearningRecordStatus,
     User,
 )
 
@@ -57,100 +67,7 @@ COURSE_ALIASES: dict[str, list[str]] = {
     "category": ["category", "type", "coursetype"],
 }
 
-ENROLLMENT_ALIASES: dict[str, list[str]] = {
-    "id": ["id", "enrollmentid", "registrationid", "learningrecordid", "transcriptid"],
-    "user_id": ["userid", "user", "learnerid", "studentid"],
-    "course_id": ["courseid", "course", "learningitemid"],
-    "status": ["status", "enrollmentstatus", "completionstatus"],
-    "assigned_date": ["assigneddate", "enrolldate", "enrollmentdate", "registrationdate"],
-    "due_date": ["duedate", "deadline", "targetdate"],
-    "completed_date": ["completeddate", "completiondate", "finisheddate"],
-    "completion_percentage": ["completionpercentage", "progress", "percentcomplete"],
-    "score": ["score", "grade", "finalscore"],
-    "expires_at": ["expiresat", "expirationdate", "expirydate", "recertificationdate"],
-    "source_system": ["sourcesystem", "system", "platform", "lms"],
-    "source_record_id": ["sourcerecordid", "externalid", "transcriptitemid"],
-    "exempt": ["exempt", "waived", "exception"],
-}
-
-DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]
-DATETIME_FORMATS = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", *DATE_FORMATS]
-
-# LMS-specific status vocabulary -> EnrollmentStatus
-STATUS_SYNONYMS: dict[str, EnrollmentStatus] = {
-    "completed": EnrollmentStatus.COMPLETED,
-    "complete": EnrollmentStatus.COMPLETED,
-    "passed": EnrollmentStatus.COMPLETED,
-    "finished": EnrollmentStatus.COMPLETED,
-    "in_progress": EnrollmentStatus.IN_PROGRESS,
-    "inprogress": EnrollmentStatus.IN_PROGRESS,
-    "started": EnrollmentStatus.IN_PROGRESS,
-    "active": EnrollmentStatus.IN_PROGRESS,
-    "not_started": EnrollmentStatus.NOT_STARTED,
-    "notstarted": EnrollmentStatus.NOT_STARTED,
-    "enrolled": EnrollmentStatus.NOT_STARTED,
-    "registered": EnrollmentStatus.NOT_STARTED,
-    "overdue": EnrollmentStatus.OVERDUE,
-    "past_due": EnrollmentStatus.OVERDUE,
-    "exempt": EnrollmentStatus.EXEMPT,
-    "waived": EnrollmentStatus.EXEMPT,
-}
-
 TRUTHY = {"true", "yes", "y", "1", "required", "mandatory"}
-
-
-def _normalize_header(header: str) -> str:
-    return header.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
-
-
-def _remap_row(row: dict[str, str], aliases: dict[str, list[str]]) -> dict[str, str]:
-    """Map a raw CSV row onto canonical field names via the alias table."""
-    normalized = {_normalize_header(k): (v or "").strip() for k, v in row.items() if k}
-    result: dict[str, str] = {}
-    for field, candidates in aliases.items():
-        for candidate in candidates:
-            if candidate in normalized and normalized[candidate] != "":
-                result[field] = normalized[candidate]
-                break
-    return result
-
-
-def _parse_date(value: str | None) -> date | None:
-    if not value:
-        return None
-    for fmt in DATE_FORMATS:
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(value).date()
-    except ValueError:
-        return None
-
-
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        pass
-    for fmt in DATETIME_FORMATS:
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_float(value: str | None) -> float | None:
-    if not value:
-        return None
-    try:
-        return float(value.rstrip("%"))
-    except ValueError:
-        return None
 
 
 def _sanitize_source_row(row: dict[Any, Any]) -> dict[str, Any]:
@@ -169,45 +86,6 @@ def _sanitize_source_row(row: dict[Any, Any]) -> dict[str, Any]:
 def _hash_row(row: dict[str, Any]) -> str:
     payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _is_expired(expires_at: date | None, as_of: date | None = None) -> bool:
-    return expires_at is not None and expires_at < (as_of or date.today())
-
-
-def _normalize_status_for_expiry(
-    status: EnrollmentStatus,
-    expires_at: date | None,
-    *,
-    exempt: bool = False,
-    as_of: date | None = None,
-) -> EnrollmentStatus:
-    if exempt or status == EnrollmentStatus.EXEMPT:
-        return EnrollmentStatus.EXEMPT
-    if status == EnrollmentStatus.COMPLETED and _is_expired(expires_at, as_of):
-        return EnrollmentStatus.OVERDUE
-    return status
-
-
-def _to_learning_status(
-    status: EnrollmentStatus,
-    expires_at: date | None = None,
-    *,
-    exempt: bool = False,
-    as_of: date | None = None,
-) -> LearningRecordStatus:
-    status = _normalize_status_for_expiry(status, expires_at, exempt=exempt, as_of=as_of)
-    return {
-        EnrollmentStatus.NOT_STARTED: LearningRecordStatus.NOT_STARTED,
-        EnrollmentStatus.IN_PROGRESS: LearningRecordStatus.IN_PROGRESS,
-        EnrollmentStatus.COMPLETED: LearningRecordStatus.COMPLETED,
-        EnrollmentStatus.OVERDUE: (
-            LearningRecordStatus.EXPIRED
-            if _is_expired(expires_at, as_of) and not exempt
-            else LearningRecordStatus.OVERDUE
-        ),
-        EnrollmentStatus.EXEMPT: LearningRecordStatus.EXEMPT,
-    }[status]
 
 
 class CSVConnector(LMSConnector):

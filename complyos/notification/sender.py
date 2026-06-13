@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from email.message import EmailMessage
 from typing import Any
 
@@ -88,3 +89,24 @@ class NotificationSender:
         """Notify a manager about a critical compliance gap."""
         subject, body = render_manager_notification(user, course, gap)
         return await self.send_email(manager_email, subject, body)
+
+
+def build_notifier_from_env() -> NotificationSender | None:
+    """Build a NotificationSender from COMPLYOS_SMTP_* env vars, or None.
+
+    Single source of truth shared by the CLI and MCP surfaces so SMTP
+    credential resolution (env-var names, default port, required fields) cannot
+    drift between them.
+    """
+    host = os.getenv("COMPLYOS_SMTP_HOST")
+    username = os.getenv("COMPLYOS_SMTP_USERNAME")
+    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
+    if not (host and username and password):
+        return None
+    return NotificationSender(
+        host=host,
+        port=int(os.getenv("COMPLYOS_SMTP_PORT", "587")),
+        username=username,
+        password=password,
+        from_address=os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com"),
+    )

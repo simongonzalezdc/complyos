@@ -30,7 +30,7 @@ from complyos.core.time import utc_now
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
 from complyos.notification.outbox import EmailEventSender, WebhookEventSender
-from complyos.notification.sender import NotificationSender
+from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
@@ -88,23 +88,7 @@ def _print_json(data: object) -> None:
 
 def _get_notifier() -> NotificationSender | None:
     """Build a NotificationSender from environment or return None."""
-    import os
-
-    host = os.getenv("COMPLYOS_SMTP_HOST")
-    port = int(os.getenv("COMPLYOS_SMTP_PORT", "587"))
-    username = os.getenv("COMPLYOS_SMTP_USERNAME")
-    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
-    from_addr = os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com")
-
-    if host and username and password:
-        return NotificationSender(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            from_address=from_addr,
-        )
-    return None
+    return build_notifier_from_env()
 
 
 def _get_webhook_notifier() -> WebhookNotifier | None:

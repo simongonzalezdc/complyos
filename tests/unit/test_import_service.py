@@ -51,6 +51,31 @@ def test_bad_csv_fails_closed_and_does_not_promote(tmp_path) -> None:
     assert repo.list_learning_records() == []
 
 
+def test_file_level_issue_is_reported_once_not_per_row(tmp_path) -> None:
+    """A file-scoped issue (unexpected column) is emitted once, not duplicated per row."""
+    repo = LocalRepository(str(tmp_path / "dedupe-imports.db"))
+    service = ImportService(repo)
+    context = default_local_context(surface="cli")
+    # Three clean rows that share one unexpected column.
+    csv_text = (
+        "user_id,course_id,status,surprise\n"
+        "u1,c1,completed,a\n"
+        "u2,c2,completed,b\n"
+        "u3,c3,completed,c\n"
+    )
+
+    preview = service.preview(context, ImportPreviewRequest(csv_text=csv_text))
+
+    unexpected = [i for i in preview.issues if i.code == "UNEXPECTED_COLUMN"]
+    assert len(unexpected) == 1  # was previously one copy per data row
+    # The file-level warning still gates every row to a decision.
+    assert preview.row_counts.get("NEEDS_DECISION", 0) == 3
+    assert preview.can_promote is False
+    # Each row stores only its own (here: none) issues, not the file-level copy.
+    rows = repo.list_import_rows(preview.batch_id)
+    assert all(row["issues"] == [] for row in rows)
+
+
 def test_explicit_decision_can_accept_needs_decision_row(tmp_path) -> None:
     repo = LocalRepository(str(tmp_path / "decision.db"))
     service = ImportService(repo)
