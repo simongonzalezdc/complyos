@@ -24,6 +24,7 @@ from complyos.models.database import (
     DBImportBatch,
     DBImportRow,
     DBLearningRecord,
+    DBTenant,
     DBUser,
 )
 from complyos.models.domain import Course, Enrollment, LearningRecord, LearningRecordStatus, User
@@ -452,4 +453,33 @@ class LocalRepository(
                 .all()
             )
             return [self._to_action_log_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Tenant governance metadata
+    # ------------------------------------------------------------------
+    def get_tenant_metadata(self, tenant_id: str) -> dict[str, Any]:
+        """Return a tenant's data-governance metadata, tenant-scoped by id.
+
+        Surfaces the GDPR-shaped fields a buyer/auditor asks for (data region,
+        processing purpose, data categories, retention, subprocessors). A missing
+        tenant row yields sensible empties so callers never have to special-case
+        an unseeded tenant.
+        """
+        with self._session() as session:
+            row = session.get(DBTenant, tenant_id)
+            if row is None:
+                return {
+                    "data_region": None,
+                    "processing_purpose": None,
+                    "data_categories": [],
+                    "retention_policy": {},
+                    "subprocessor_profile": {},
+                }
+            return {
+                "data_region": row.data_region,
+                "processing_purpose": row.processing_purpose,
+                "data_categories": list(row.data_categories or []),
+                "retention_policy": dict(row.retention_policy or {}),
+                "subprocessor_profile": dict(row.subprocessor_profile or {}),
+            }
 

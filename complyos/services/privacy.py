@@ -94,6 +94,16 @@ class RetentionCleanupResult(BaseModel):
     actor_context: dict[str, str] = Field(default_factory=dict)
 
 
+class PrivacyPostureResult(BaseModel):
+    """Read-only privacy posture: active legal holds + the retention policy."""
+
+    tenant_id: str
+    active_legal_holds: list[dict[str, Any]] = Field(default_factory=list)
+    retention_policy: dict[str, Any] = Field(default_factory=dict)
+    generated_at: datetime
+    actor_context: dict[str, str] = Field(default_factory=dict)
+
+
 class PrivacyProgramService:
     """Operational privacy workflows over repository-backed records."""
 
@@ -162,6 +172,26 @@ class PrivacyProgramService:
             status="PENDING_CONTROLLER_APPROVAL",
             region=region,
             created_at=created_at,
+            actor_context=context.public_dict(),
+        )
+
+    def get_privacy_posture(self, context: ActorContext) -> PrivacyPostureResult:
+        """Return the tenant's read-only privacy posture (active holds + policy).
+
+        Gated by ``privacy:request``: the privacy program has no dedicated pure
+        read permission, and this is the same permission the shell's read-only
+        privacy view already required, so the service layer becomes the single
+        authorization choke-point for the posture read. Tenant-scoped: holds and
+        the retention policy are resolved for ``context.tenant_id`` only.
+        """
+        require_permission(context, PERM_PRIVACY_REQUEST)
+        holds = self.repository.list_active_legal_holds(tenant_id=context.tenant_id)
+        retention_policy = self.repository.get_retention_policy(context.tenant_id)
+        return PrivacyPostureResult(
+            tenant_id=context.tenant_id,
+            active_legal_holds=holds,
+            retention_policy=retention_policy,
+            generated_at=datetime.now(UTC),
             actor_context=context.public_dict(),
         )
 

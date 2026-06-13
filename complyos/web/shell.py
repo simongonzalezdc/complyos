@@ -28,12 +28,10 @@ from complyos.models.domain import AuditReport
 from complyos.notification.signing import sign_payload, verify_signature
 from complyos.services.audit import AuditService
 from complyos.services.context import (
-    PERM_PRIVACY_REQUEST,
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
-    require_permission,
 )
 from complyos.services.evidence import EvidenceService
 from complyos.services.imports import (
@@ -42,6 +40,7 @@ from complyos.services.imports import (
     ImportPreviewResult,
     ImportService,
 )
+from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
 from complyos.services.role_admin import RoleAdminService
@@ -174,7 +173,10 @@ def build_shell_router(
             _sign_role(role, secret),
             httponly=True,
             samesite="lax",
-            secure=False,  # local-first; a TLS terminator/proxy owns Secure in prod
+            # Local-first default is HTTP, so Secure is off and a TLS
+            # terminator/proxy owns it in prod; flip COMPLYOS_SESSION_SECURE to
+            # mark the cookie Secure when the console is served over HTTPS.
+            secure=_truthy_env("COMPLYOS_SESSION_SECURE"),
             path=SHELL_PREFIX,
         )
 
@@ -579,11 +581,12 @@ def build_shell_router(
         context = _shell_context(request)
         if context is None:
             return _login_redirect()
-        # Gate the read explicitly at the same choke-point the privacy service
-        # uses, so a role without privacy:request gets the inline permission panel
-        # rather than a posture page it should not see.
+        # Route the read through PrivacyProgramService so the service layer is the
+        # single authorization choke-point (privacy:request). A role lacking the
+        # permission gets the inline panel rather than a posture page it shouldn't
+        # see, and the shell no longer reaches into the repository directly.
         try:
-            require_permission(context, PERM_PRIVACY_REQUEST)
+            posture = PrivacyProgramService(repository).get_privacy_posture(context)
         except AuthorizationError as exc:
             return _permission_panel(
                 request,
@@ -592,16 +595,14 @@ def build_shell_router(
                 module_label="Privacy & retention",
                 error=exc,
             )
-        holds = repository.list_active_legal_holds(tenant_id=context.tenant_id)
-        retention_policy = repository.get_retention_policy(context.tenant_id)
         return _render(
             request,
             "privacy.html",
             {
                 "active": "privacy",
                 "context": context,
-                "holds": holds,
-                "retention_policy": sorted(retention_policy.items()),
+                "holds": posture.active_legal_holds,
+                "retention_policy": sorted(posture.retention_policy.items()),
             },
         )
 
@@ -631,6 +632,7 @@ def build_shell_router(
                 "controls": report.controls,
                 "summary": summary,
                 "posture": report.posture,
+                "tenant_metadata": report.tenant_metadata,
             },
         )
 

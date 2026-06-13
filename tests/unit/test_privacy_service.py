@@ -135,6 +135,44 @@ def test_privacy_request_is_tenant_scoped(tmp_path) -> None:
         service.export_subject(tenant_b, request.request_id)
 
 
+def test_get_privacy_posture_is_tenant_scoped(tmp_path) -> None:
+    """The posture read returns only the calling tenant's holds + policy."""
+    repo = LocalRepository(str(tmp_path / "posture-tenant.db"))
+    service = PrivacyProgramService(repo)
+    tenant_a = default_local_context(tenant_id="tenant-a", role="privacy_admin")
+    tenant_b = default_local_context(tenant_id="tenant-b", role="privacy_admin")
+
+    hold_a = service.create_legal_hold(
+        tenant_a, subject_id="s-a", scope="subject", reason="hold-a"
+    )
+    service.create_legal_hold(tenant_b, subject_id="s-b", scope="subject", reason="hold-b")
+    service.configure_retention_policy(
+        tenant_a,
+        raw_import_days=30,
+        evidence_days=2555,
+        action_log_days=2555,
+        ai_proposal_days=180,
+    )
+
+    posture = service.get_privacy_posture(tenant_a)
+
+    hold_ids = {hold["id"] for hold in posture.active_legal_holds}
+    assert hold_ids == {hold_a.hold_id}  # tenant-b's hold is not visible
+    assert posture.retention_policy["raw_import_days"] == 30
+    assert posture.tenant_id == "tenant-a"
+
+
+def test_get_privacy_posture_fails_closed_without_permission(tmp_path) -> None:
+    """A role lacking privacy:request cannot read the posture (fails closed)."""
+    repo = LocalRepository(str(tmp_path / "posture-denied.db"))
+    service = PrivacyProgramService(repo)
+    # read_only carries readiness/evidence reads but NOT privacy:request.
+    context = default_local_context(role="read_only")
+
+    with pytest.raises(PermissionError):
+        service.get_privacy_posture(context)
+
+
 def test_privacy_workflows_enqueue_notification_events(tmp_path) -> None:
     repo = LocalRepository(str(tmp_path / "privacy-notifications.db"))
     _save_subject(repo)

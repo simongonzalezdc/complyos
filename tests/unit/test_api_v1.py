@@ -50,6 +50,35 @@ def test_api_v1_insecure_local_flag_allows_explicit_local_use(monkeypatch, tmp_p
     assert response.status_code == 200
 
 
+def test_api_v1_readiness_surfaces_tenant_metadata(monkeypatch, tmp_path) -> None:
+    """The readiness response carries the tenant's data-governance metadata.
+
+    init_db seeds local-default with a known processing purpose and data
+    category, so the readiness endpoint must surface those five governance
+    fields (plan §15) without renaming or dropping the existing report shape.
+    """
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-meta.db"))))
+
+    response = client.get("/api/v1/readiness", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
+    body = response.json()
+    # Existing fields remain (backward-compatible add, not a rename).
+    assert "posture" in body
+    assert "controls" in body
+    meta = body["tenant_metadata"]
+    assert set(meta) == {
+        "data_region",
+        "processing_purpose",
+        "data_categories",
+        "retention_policy",
+        "subprocessor_profile",
+    }
+    assert meta["processing_purpose"] == "local learning-compliance operations"
+    assert meta["data_categories"] == ["workforce_learning_records"]
+
+
 def test_api_v1_token_auth_and_import_flow(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
     repo = LocalRepository(str(tmp_path / "api-auth.db"))

@@ -11,6 +11,56 @@
   certification.
 </p>
 
+<section class="panel" aria-labelledby="governance-heading">
+  <h2 id="governance-heading">Data governance</h2>
+  <p class="lede">
+    Tenant data-governance metadata: data region, processing purpose, data
+    categories, retention, and subprocessors.
+  </p>
+  <table class="kv-table" aria-label="Tenant data-governance metadata">
+    <caption class="table-caption">
+      Governance attributes recorded for this tenant.
+    </caption>
+    <thead>
+      <tr><th scope="col">Attribute</th><th scope="col">Value</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th scope="row">Data region</th>
+        <td>{{ tenant_metadata.data_region or '—' }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Processing purpose</th>
+        <td>{{ tenant_metadata.processing_purpose or '—' }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Data categories</th>
+        <td>
+          {% if tenant_metadata.data_categories %}
+          {{ tenant_metadata.data_categories | join(', ') }}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th scope="row">Retention</th>
+        <td>
+          {% if tenant_metadata.retention_policy %}
+          <span class="mono">{{ tenant_metadata.retention_policy }}</span>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th scope="row">Subprocessors</th>
+        <td>
+          {% if tenant_metadata.subprocessor_profile %}
+          <span class="mono">{{ tenant_metadata.subprocessor_profile }}</span>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
 <section class="panel" aria-labelledby="posture-heading">
   <h2 id="posture-heading">Posture</h2>
   <p class="lede">{{ posture }}</p>

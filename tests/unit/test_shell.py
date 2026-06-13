@@ -143,6 +143,30 @@ def test_shell_login_rejects_wrong_token(monkeypatch, tmp_path) -> None:
     assert client.cookies.get("complyos_shell") is None
 
 
+def test_shell_session_cookie_not_secure_by_default(monkeypatch, tmp_path) -> None:
+    """Local-first default serves over HTTP, so the cookie is not marked Secure."""
+    monkeypatch.delenv("COMPLYOS_SESSION_SECURE", raising=False)
+    client = _client(monkeypatch, tmp_path)
+
+    login = client.post("/shell/login", data={"token": "shell-token"}, follow_redirects=False)
+
+    set_cookie = login.headers["set-cookie"]
+    assert "complyos_shell=" in set_cookie
+    assert "Secure" not in set_cookie
+
+
+def test_shell_session_cookie_secure_when_flag_set(monkeypatch, tmp_path) -> None:
+    """With COMPLYOS_SESSION_SECURE set, the session cookie carries Secure."""
+    monkeypatch.setenv("COMPLYOS_SESSION_SECURE", "1")
+    client = _client(monkeypatch, tmp_path)
+
+    login = client.post("/shell/login", data={"token": "shell-token"}, follow_redirects=False)
+
+    set_cookie = login.headers["set-cookie"]
+    assert "complyos_shell=" in set_cookie
+    assert "Secure" in set_cookie
+
+
 def test_shell_logout_clears_cookie(monkeypatch, tmp_path) -> None:
     client = _client(monkeypatch, tmp_path)
     client.post("/shell/login", data={"token": "shell-token"})
