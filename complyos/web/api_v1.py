@@ -95,6 +95,11 @@ class RemediationRequestBody(BaseModel):
     notify_manager: bool = False
 
 
+class ReportExportRequestBody(BaseModel):
+    department: str | None = None
+    region: str | None = None
+
+
 class SourceIntelDecisionBody(BaseModel):
     state: str
 
@@ -291,6 +296,23 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
                 context, department=department, region=region
             )
             return shape_report(audit_report)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/exports/reports")
+    async def export_report(
+        body: ReportExportRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Remote report export gated at evidence:export. Unlike the CLI/MCP
+        # file-writing export, this returns the rendered report content in the
+        # response body and never writes to arbitrary server disk from a remote
+        # call (plan §8.2). Underprivileged callers fail closed at the service.
+        try:
+            result = await EvidenceService(_get_connector(), repo).render_report(
+                context, department=body.department, region=body.region
+            )
+            return {**result, "actor_context": context.public_dict()}
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 

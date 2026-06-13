@@ -139,14 +139,14 @@ PARITY_MATRIX: tuple[MatrixRow, ...] = (
         api_prefix="/report",
     ),
     MatrixRow(
-        workflow="Export report (file-writing)",
+        workflow="Export report",
         cli="export",
         mcp="export_audit_report_html",
-        api_prefix=None,
-        # Matrix §7 lists POST /api/v1/exports/reports, but file-writing export
-        # is intentionally CLI/MCP-only: the API returns the structured report
-        # JSON (/report) and does not write report files server-side.
-        na_reasons={"api": "file-writing export is CLI/MCP-only, not an API route"},
+        api_prefix="/exports/reports",
+        # Matrix §7/§8.2: POST /api/v1/exports/reports now exists. The API export
+        # returns the rendered report CONTENT (HTML + evidence_hash) in the
+        # response and never writes report files to arbitrary server disk from a
+        # remote call; the CLI/MCP tools keep the file-writing behavior.
     ),
     MatrixRow(
         workflow="Digest",
@@ -157,13 +157,8 @@ PARITY_MATRIX: tuple[MatrixRow, ...] = (
     MatrixRow(
         workflow="Connector matrix (list)",
         cli="connectors",
-        mcp=None,
+        mcp="list_connectors",
         api_prefix="/connectors",
-        # Matrix §7 says MCP "add/keep connector-list tool"; a dedicated
-        # connector-list MCP tool is not yet implemented. The capability is
-        # reachable via CLI + API, so this is a follow-up gap, not a parity
-        # failure (connector listing is read-only, never MCP-only-mutating).
-        mcp_optional=True,
     ),
     MatrixRow(
         workflow="Connector health",
@@ -174,12 +169,8 @@ PARITY_MATRIX: tuple[MatrixRow, ...] = (
     MatrixRow(
         workflow="Sync",
         cli="sync",
-        mcp=None,
+        mcp="sync",
         api_prefix="/sync",
-        # Matrix §7 says MCP "add sync tool if absent"; no sync MCP tool exists
-        # yet. Sync is mutating but reachable via CLI + API (not MCP-only), so
-        # §9.2 is satisfied. Tracked as a follow-up gap.
-        mcp_optional=True,
     ),
     MatrixRow(
         workflow="Import preview",
@@ -417,14 +408,18 @@ MUTATING_MCP_TOOLS: tuple[MutatingMCPTool, ...] = (
         cli="privacy retention run",
         api_prefix="/privacy/retention-policy",
     ),
+    MutatingMCPTool(
+        tool="send_notification",
+        permission="notifications:manage",
+        cli="notify-test",  # CLI test-send proves it is not MCP-only
+        api_prefix=None,
+    ),
 )
 
-# Documented exception: send_notification is a side-effecting MCP tool (sends an
-# external email) but is NOT in the mutating allow-list because it does not
-# change internal compliance/tenant state, the matrix lists no "send arbitrary
-# notification" workflow, and it currently enforces no service permission. This
-# is flagged as a follow-up hardening gap (see test below), not silently dropped.
-KNOWN_UNGATED_SIDE_EFFECT_TOOLS = frozenset({"send_notification"})
+# WP13b closed the last ungated side-effect tool: send_notification now requires
+# notifications:manage and is in the mutating allow-list above. The set is kept
+# (empty) so a future ungated side-effect tool is a deliberate, visible addition.
+KNOWN_UNGATED_SIDE_EFFECT_TOOLS: frozenset[str] = frozenset()
 
 
 class TestNoMcpOnlyMutatingCapability:
@@ -486,16 +481,16 @@ class TestNoMcpOnlyMutatingCapability:
             f"got '{exc.value.permission}'"
         )
 
-    def test_send_notification_is_a_documented_followup_gap(self) -> None:
-        """send_notification is side-effecting and ungated: track as a follow-up.
+    def test_no_ungated_side_effect_tools_remain(self) -> None:
+        """WP13b closed the send_notification gap: no ungated side-effect tools remain.
 
-        This locks the known gap so it cannot silently grow: if a permission gate
-        is later added, update KNOWN_UNGATED_SIDE_EFFECT_TOOLS and add it to the
-        mutating allow-list. The test asserts the tool exists and is documented.
+        send_notification now requires notifications:manage and is in the mutating
+        allow-list. The known-gap set must be empty; if a new ungated side-effect
+        tool is ever added it should be a deliberate, visible addition here.
         """
+        assert not KNOWN_UNGATED_SIDE_EFFECT_TOOLS
         assert "send_notification" in MCP_TOOLS
-        assert "send_notification" in KNOWN_UNGATED_SIDE_EFFECT_TOOLS
-        assert "send_notification" not in {s.tool for s in MUTATING_MCP_TOOLS}
+        assert "send_notification" in {s.tool for s in MUTATING_MCP_TOOLS}
 
 
 def _minimal_kwargs_for(tool: str, db_path: str) -> dict[str, str | bool | int]:
@@ -525,9 +520,18 @@ def _minimal_kwargs_for(tool: str, db_path: str) -> dict[str, str | bool | int]:
             "ai_proposal_days": 30,
         },
         "run_privacy_retention": {},
+        "send_notification": {
+            "to_address": "to@example.com",
+            "subject": "s",
+            "body": "b",
+        },
     }
     kwargs: dict[str, str | bool | int] = dict(per_tool.get(tool, {}))
-    # remediate_compliance_gaps and export_audit_report_html take no db_path.
-    if tool not in {"remediate_compliance_gaps", "export_audit_report_html"}:
+    # These tools take no db_path kwarg.
+    if tool not in {
+        "remediate_compliance_gaps",
+        "export_audit_report_html",
+        "send_notification",
+    }:
         kwargs.update(common)
     return kwargs

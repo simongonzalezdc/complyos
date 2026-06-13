@@ -162,10 +162,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-def export_html(report: AuditReport, output_path: str = "report.html") -> str:
-    """Export an AuditReport to a styled HTML file.
+def render_html(report: AuditReport) -> str:
+    """Render an AuditReport to a styled HTML string (no disk write).
 
-    Returns the path to the generated file.
+    This is the in-memory half of the export so a remote surface (API) can
+    return report content in the response body without writing to server disk,
+    while file-writing surfaces (CLI/MCP) reuse it via ``export_html``.
     """
     severity_counts = report.gaps_by_severity
     dept_rows = "\n".join(
@@ -181,7 +183,7 @@ def export_html(report: AuditReport, output_path: str = "report.html") -> str:
     if not gap_rows:
         gap_rows = '<tr><td colspan="5">No gaps found</td></tr>'
 
-    html = HTML_TEMPLATE.format(
+    return HTML_TEMPLATE.format(
         generated_at=report.generated_at.isoformat(),
         scope=report.scope or "all",
         total_users=report.total_users_audited,
@@ -194,6 +196,14 @@ def export_html(report: AuditReport, output_path: str = "report.html") -> str:
         gap_rows=gap_rows,
         evidence_hash=report.evidence_hash,
     )
+
+
+def export_html(report: AuditReport, output_path: str = "report.html") -> str:
+    """Export an AuditReport to a styled HTML file.
+
+    Returns the path to the generated file.
+    """
+    html = render_html(report)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)

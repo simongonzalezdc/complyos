@@ -328,6 +328,47 @@ def test_api_v1_audit_report_parity(monkeypatch, tmp_path) -> None:
     assert denied.status_code == 403
 
 
+def test_api_v1_export_report_returns_content_not_disk_write(monkeypatch, tmp_path) -> None:
+    """POST /exports/reports returns rendered content + evidence hash; no server file."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-export.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    response = client.post("/api/v1/exports/reports", json={}, headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["format"] == "html"
+    # Report CONTENT is returned in the response, not a server file path.
+    assert "<html" in payload["content"].lower()
+    assert "output_path" not in payload
+    assert len(payload["evidence_hash"]) == 64
+    assert payload["gaps_found"] >= 0
+    # Nothing was written to server disk by the remote export call.
+    assert not list(tmp_path.glob("*.html"))
+
+
+def test_api_v1_export_report_denied_for_underprivileged_role(monkeypatch, tmp_path) -> None:
+    """A role without evidence:export is denied the report export (403)."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-export-403.db"))))
+
+    denied = client.post(
+        "/api/v1/exports/reports",
+        json={},
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+
 def test_api_v1_authorization_failure_returns_403_not_400(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
     client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-403.db"))))

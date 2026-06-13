@@ -12,9 +12,12 @@ from complyos.api.mcp_server import (
     check_connector_health,
     generate_audit_report,
     get_user_compliance_status,
+    list_connectors,
+    sync,
 )
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.workday import WorkdayConnector
+from complyos.services.context import AuthorizationError
 
 
 class TestMCPTools:
@@ -67,6 +70,50 @@ class TestMCPTools:
         assert result["connector"] == "mock"
         assert result["authenticated"] is True
         assert result["status"] == "healthy"
+
+    async def test_list_connectors(self, monkeypatch, tmp_path):
+        # Read-only connector matrix; default proposal-only role holds connectors:read.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        result = await list_connectors()
+
+        assert isinstance(result["connectors"], list)
+        assert result["connectors"]
+        assert {"name", "profile", "status"} <= set(result["connectors"][0])
+
+    async def test_list_connectors_denied_for_unprivileged_role(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "importer")  # lacks connectors:read
+
+        with pytest.raises(AuthorizationError) as exc:
+            await list_connectors()
+
+        assert exc.value.permission == "connectors:read"
+
+    async def test_sync_mirrors_cli_sync(self, monkeypatch, tmp_path):
+        # Mutating cache pull; default proposal-only role holds audit:run.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+        monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+        monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+
+        result = await sync(db_path=str(tmp_path / "sync.db"))
+
+        assert result["connector"] == "mock"
+        assert result["users"] >= 1
+        assert {"users", "courses", "enrollments", "learning_records"} <= set(result)
+
+    async def test_sync_denied_for_unprivileged_role(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "read_only")  # lacks audit:run
+
+        with pytest.raises(AuthorizationError) as exc:
+            await sync(db_path=str(tmp_path / "denied-sync.db"))
+
+        assert exc.value.permission == "audit:run"
 
 
 class TestConnectorSelection:

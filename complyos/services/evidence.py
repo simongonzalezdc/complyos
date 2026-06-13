@@ -13,7 +13,7 @@ from typing import Any
 
 from complyos.connectors.base import LMSConnector
 from complyos.core.auditor import ComplianceAuditor
-from complyos.core.report_exporter import export_html
+from complyos.core.report_exporter import export_html, render_html
 from complyos.core.repository import LocalRepository
 from complyos.services.context import (
     PERM_EVIDENCE_EXPORT,
@@ -50,6 +50,32 @@ class EvidenceService:
         path = export_html(report, output_path)
         return {
             "output_path": path,
+            "gaps_found": report.gaps_found,
+            "total_users": report.total_users_audited,
+            "evidence_hash": report.evidence_hash,
+        }
+
+    async def render_report(
+        self,
+        context: ActorContext,
+        *,
+        department: str | None = None,
+        region: str | None = None,
+    ) -> dict[str, Any]:
+        """Render an audit report and return its content in memory (no disk write).
+
+        Same evidence:export choke-point as ``export_report``, but returns the
+        rendered HTML body plus the evidence hash instead of writing a file. This
+        lets a remote surface (the API) export a report without ever writing PII
+        to arbitrary server disk from a remote call.
+        """
+        require_permission(context, PERM_EVIDENCE_EXPORT)
+        report = await ComplianceAuditor(self.connector).generate_report(
+            department=department, region=region
+        )
+        return {
+            "format": "html",
+            "content": render_html(report),
             "gaps_found": report.gaps_found,
             "total_users": report.total_users_audited,
             "evidence_hash": report.evidence_hash,

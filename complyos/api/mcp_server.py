@@ -24,6 +24,7 @@ from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
     PERM_EVIDENCE_EXPORT,
+    PERM_NOTIFICATIONS_MANAGE,
     ROLE_PERMISSIONS,
     ActorContext,
     default_local_context,
@@ -228,8 +229,46 @@ async def generate_compliance_digest(
 
 
 @mcp.tool()
+async def sync(db_path: str = "complyos.db") -> dict[str, Any]:
+    """Mutating: pull LMS data into the local SQLite cache.
+
+    Mirrors the CLI ``sync`` command and ``POST /api/v1/sync``. This clears and
+    re-populates the local cache, so it is gated at audit:run. The default
+    proposal-only MCP role (agent_service_account) holds audit:run; an unprivileged
+    role is denied at the service boundary.
+
+    Args:
+        db_path: SQLite database path.
+
+    Returns:
+        Connector name and the count of synced users, courses, enrollments,
+        and learning records.
+    """
+    result = await AuditService(_get_connector(), LocalRepository(db_path)).sync(_mcp_context())
+    return dict(result)
+
+
+@mcp.tool()
+async def list_connectors(profile: str | None = None) -> dict[str, Any]:
+    """Read-only: list the connector capability matrix.
+
+    Mirrors the CLI ``connectors`` command and ``GET /api/v1/connectors``. Does
+    not connect to or mutate any LMS; it reports configured connector
+    capabilities only.
+
+    Args:
+        profile: Optional filter (all, workforce, or campus).
+
+    Returns:
+        The connector capability matrix.
+    """
+    # ConnectorRegistry.list owns the connectors:read check.
+    return {"connectors": ConnectorRegistry(_get_connector()).list(_mcp_context(), profile=profile)}
+
+
+@mcp.tool()
 async def check_connector_health() -> dict[str, Any]:
-    """Check the health of the LMS connector.
+    """Read-only: check the health of the LMS connector.
 
     Returns:
         Connector status, authentication state, and any errors.
@@ -408,7 +447,12 @@ async def send_notification(
     subject: str,
     body: str,
 ) -> dict[str, Any]:
-    """Send a custom email notification.
+    """Mutating side effect: send a custom external email notification.
+
+    Gated at notifications:manage. The default proposal-only MCP role
+    (agent_service_account) lacks notifications:manage and is therefore DENIED,
+    so a connected agent cannot send arbitrary external email; raise
+    COMPLYOS_MCP_ROLE to a role that holds notifications:manage to allow it.
 
     Args:
         to_address: Recipient email address
@@ -418,6 +462,8 @@ async def send_notification(
     Returns:
         Dict with 'sent' boolean and optional 'error' string.
     """
+    # Fail closed before resolving SMTP credentials or sending any email.
+    require_permission(_mcp_context(), PERM_NOTIFICATIONS_MANAGE)
     notifier = _get_notifier()
     if notifier is None:
         return {"sent": False, "error": "SMTP not configured"}
