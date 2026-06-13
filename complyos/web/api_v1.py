@@ -111,12 +111,19 @@ def _permission_error(exc: AuthorizationError, context: ActorContext) -> HTTPExc
 
 
 def _bad_request(code: str, exc: Exception, context: ActorContext) -> HTTPException:
-    return _http_error(
-        code,
-        str(exc),
-        status.HTTP_400_BAD_REQUEST,
-        request_id=context.request_id,
+    """Map a service exception to the right client status.
+
+    A PermissionError (including AuthorizationError) is an authorization failure
+    and must be 403, not 400 — several endpoints catch (PermissionError,
+    ValueError) together, so classifying here keeps the status honest without a
+    separate except clause at every call site. Validation errors stay 400.
+    """
+    status_code = (
+        status.HTTP_403_FORBIDDEN
+        if isinstance(exc, PermissionError)
+        else status.HTTP_400_BAD_REQUEST
     )
+    return _http_error(code, str(exc), status_code, request_id=context.request_id)
 
 
 def _truthy_env(name: str) -> bool:

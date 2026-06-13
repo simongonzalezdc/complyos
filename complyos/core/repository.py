@@ -1292,13 +1292,45 @@ class LocalRepository:
                 )
                 .delete(synchronize_session=False)
             )
+            # Complete the erasure: the subject's raw identifiers also live in
+            # import rows (normalized_payload.user_id), so a "COMPLETED" deletion
+            # must remove those too. Notification events and the count-only audit
+            # action logs are intentionally retained as process-audit evidence
+            # that the workflow happened; those are governed by retention cleanup.
+            import_rows = self._delete_subject_import_rows(session, subject_id, tenant_id=tenant_id)
             session.delete(user)
             session.commit()
             return {
                 "users": 1,
                 "learning_records": learning_records,
                 "enrollments": enrollments,
+                "import_rows": import_rows,
             }
+
+    @staticmethod
+    def _delete_subject_import_rows(session: Session, subject_id: str, *, tenant_id: str) -> int:
+        """Delete import rows whose normalized payload carries the subject id.
+
+        Import rows link to a batch (tenant-scoped) and hold the subject id inside
+        a JSON payload, so we resolve the tenant's batches and filter in Python to
+        stay portable across SQLite and PostgreSQL JSON dialects.
+        """
+        batch_ids = [
+            row[0]
+            for row in session.query(DBImportBatch.id)
+            .where(DBImportBatch.tenant_id == tenant_id)
+            .all()
+        ]
+        if not batch_ids:
+            return 0
+        deleted = 0
+        rows = session.query(DBImportRow).where(DBImportRow.batch_id.in_(batch_ids)).all()
+        for row in rows:
+            payload = row.normalized_payload or {}
+            if payload.get("user_id") == subject_id:
+                session.delete(row)
+                deleted += 1
+        return deleted
 
     def save_legal_hold(self, hold: dict[str, Any]) -> None:
         with self._session() as session:

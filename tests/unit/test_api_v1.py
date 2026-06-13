@@ -301,6 +301,29 @@ def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) ->
     assert packet.json()["decided_count"] == 1
 
 
+def test_api_v1_authorization_failure_returns_403_not_400(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-403.db"))))
+    headers = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "privacy_admin",
+        "X-Tenant-Id": "tenant-a",
+    }
+    created = client.post(
+        "/api/v1/privacy/requests",
+        json={"subject_id": "u1", "request_type": "deletion"},
+        headers=headers,
+    )
+    assert created.status_code == 200
+    request_id = created.json()["request_id"]
+
+    # Deleting before controller approval is an authorization failure: the
+    # service raises PermissionError, which must surface as 403, not 400.
+    denied = client.post(f"/api/v1/privacy/requests/{request_id}/delete", headers=headers)
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "privacy_delete_failed"
+
+
 def test_api_v1_records_signed_inbound_webhook_receipt(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
     monkeypatch.setenv("COMPLYOS_INBOUND_WEBHOOK_SECRET", "inbound-secret")

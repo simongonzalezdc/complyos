@@ -71,7 +71,12 @@ def test_export_and_delete_cannot_cross_tenant(tmp_path) -> None:
 
     # The owning tenant can erase its own subject.
     deleted_own = repo.delete_subject_records("u-a", tenant_id="tenant-a")
-    assert deleted_own == {"users": 1, "learning_records": 1, "enrollments": 1}
+    assert deleted_own == {
+        "users": 1,
+        "learning_records": 1,
+        "enrollments": 1,
+        "import_rows": 0,
+    }
     assert repo.get_subject_export("u-a", tenant_id="tenant-a")["subject"] == {}
 
 
@@ -84,3 +89,46 @@ def test_records_inherit_owning_users_tenant(tmp_path) -> None:
     export = repo.get_subject_export("u-a", tenant_id="tenant-a")
     assert len(export["learning_records"]) == 1
     assert repo.get_subject_export("u-a", tenant_id="local-default")["learning_records"] == []
+
+
+def test_erasure_also_removes_subject_import_rows(tmp_path) -> None:
+    """Right-to-erasure clears the subject's raw identifiers from import rows."""
+    repo = LocalRepository(str(tmp_path / "erase-imports.db"))
+    _seed_subject(repo, tenant_id="tenant-a")
+    repo.save_import_batch(
+        {
+            "id": "b1",
+            "tenant_id": "tenant-a",
+            "source_system": "csv",
+            "profile": "workforce",
+            "raw_file_hash": "h1",
+            "status": "PROMOTED",
+            "idempotency_key": "k1",
+            "created_by": "op",
+        }
+    )
+    repo.save_import_rows(
+        "b1",
+        [
+            {
+                "id": "r1",
+                "row_number": 1,
+                "normalized_payload": {"user_id": "u-a", "course_id": "c1"},
+                "raw_payload_hash": "rh1",
+                "validation_status": "VALID",
+            },
+            {
+                "id": "r2",
+                "row_number": 2,
+                "normalized_payload": {"user_id": "someone-else", "course_id": "c1"},
+                "raw_payload_hash": "rh2",
+                "validation_status": "VALID",
+            },
+        ],
+    )
+
+    deleted = repo.delete_subject_records("u-a", tenant_id="tenant-a")
+
+    assert deleted["import_rows"] == 1
+    remaining = [row["id"] for row in repo.list_import_rows("b1")]
+    assert remaining == ["r2"]  # only the other subject's row survives
