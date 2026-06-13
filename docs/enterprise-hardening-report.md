@@ -1,9 +1,10 @@
 # ComplyOS Enterprise Hardening — Remediation Report
 
 > Branch: `simon/enterprise-hardening` · Baseline: `main` (342 tests green)
-> Result: 376 tests green (+34 regression tests), ruff + mypy clean. All 3
-> CRITICAL and all HIGH/MEDIUM findings remediated; two deep refactors scoped as
-> follow-ups (see "Remaining work").
+> Result: 377 tests green (+35 regression tests), ruff + mypy clean. All 3
+> CRITICAL and all HIGH/MEDIUM findings remediated; the repository God-object
+> split is complete and the security-critical typed-model migration is done. One
+> mechanical follow-up remains (see "Remaining work").
 
 ## How this was produced
 
@@ -56,28 +57,21 @@ New regression tests live in: `test_retention_legal_hold_hardening.py`,
 | H9 — erasure completeness | `delete_subject_records` now also erases the subject's raw identifiers from `import_rows` (tenant-scoped, same transaction). Decision: notification events + count-only audit logs are retained as process-audit evidence governed by retention. | WP6a |
 | Typed API errors | `_bad_request` maps PermissionError/AuthorizationError to 403 (not 400). | WP6a |
 | H6 — API parity | Added `GET /audit`, `/report`, `/users/{id}/status`, `/digest`, `/connectors/health`, `POST /remediate`, each `require_permission`-gated; shared shaping in `core/audit_views.py` keeps MCP and API identical. File-writing exports stay CLI/MCP-only. | WP6b |
-| H8 (slice) — workflow enums | Added `ImportBatchStatus`/`ImportRowStatus`/`PrivacyRequestType`/`LegalHoldScope` StrEnums; removed the decorative `IMPORT_BATCH_STATES`; request-type/scope validation is now enum-typed. | WP7 |
-| H7 (slice) — repository decomposition | Extracted the ~330 lines of stateless ORM mappers into a `RepositoryMappers` mixin (`repository.py` 2000 → 1671), zero call-site churn. | WP8 |
+| H8 — workflow enums | Added `ImportBatchStatus`/`ImportRowStatus`/`PrivacyRequestType`/`LegalHoldScope` StrEnums; removed the decorative `IMPORT_BATCH_STATES`; request-type/scope validation is now enum-typed. | WP7 |
+| H8 — PrivacyRequest model | The DSR/privacy request (the authorization surface for export/erasure) is now a Pydantic `PrivacyRequest` carried end to end; the controller-approval gate is the typed `is_controller_approved()`, replacing scattered isinstance/dict chains. | WP7 |
+| **H7 — repository split (complete)** | The 2000-line `LocalRepository` God-object is decomposed into 7 cohesive files (core-audit 453 · privacy 551 · notification 306 · source-intel 267 · import 226 · mappers 374 · base 63) composed via mixins behind a typed `RepositoryBase`. **Zero public-API change.** | WP8 |
 
-## Remaining work (two deep refactors — recommended as dedicated PRs)
+## Remaining work (one mechanical follow-up)
 
-Both are large, behavior-preserving, and now **de-risked by the regression net
-added here**. They fix maintainability, not bugs (every audited bug is fixed),
-so they are best landed with focused review rather than rushed:
-
-1. **Full `dict[str, Any]` → Pydantic envelope migration (rest of H8).** Convert
-   PrivacyRequest, LegalHold, RetentionPolicy, import batches/rows/decisions, and
-   AI proposals to Pydantic models threaded through the repository, and move the
-   controller-approval gate onto a typed model method. The enum/validation slice
-   landed; this is the broader envelope work across ~16 `_to_*` mappers and the
-   705-line privacy service.
-2. **Full per-aggregate repository split (rest of H7).** Split the remaining
-   `LocalRepository` aggregates (audit, import, privacy, source-intel,
-   notification) into mixins behind a typed `RepositoryBase` + a narrow Protocol,
-   and add a composition root to drop `or LocalRepository()` default-construction
-   (61 inline sites). The mapper extraction landed and proves the mixin pattern;
-   the per-aggregate mixins additionally need the typed base for their `self.`
-   references to satisfy mypy.
+**Type the remaining data-record envelopes.** LegalHold, RetentionPolicy, import
+batches/rows/decisions, and AI proposals still cross the repository boundary as
+`dict[str, Any]`. The security-critical envelope (PrivacyRequest + the approval
+gate) is now typed; these remaining ones are data DTOs (no authorization
+decision rides on them), so converting them to Pydantic models is uniform,
+lower-risk mechanical work — best done as a focused pass, de-risked by the
+regression net added here. (A repository Protocol + composition root to drop the
+`or LocalRepository()` default-construction is an optional further refinement;
+the split itself is complete.)
 
 ## Verify
 
