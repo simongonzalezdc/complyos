@@ -217,12 +217,12 @@ def test_retention_purge_is_atomic_with_its_audit_log(tmp_path, monkeypatch) -> 
     # staged. utc_now() is only evaluated when building the audit-log row inside
     # the purge transaction (the eligibility reads use the passed cutoff), so
     # raising here exercises exactly the deletes-staged-then-log-fails path.
-    import complyos.core.repository as repo_module
+    import complyos.core.privacy_repo as privacy_repo_module
 
     def _boom() -> datetime:
         raise RuntimeError("simulated audit-log write failure")
 
-    monkeypatch.setattr(repo_module, "utc_now", _boom)
+    monkeypatch.setattr(privacy_repo_module, "utc_now", _boom)
 
     with pytest.raises(RuntimeError, match="simulated audit-log write failure"):
         service.run_retention_cleanup(context, dry_run=False)
