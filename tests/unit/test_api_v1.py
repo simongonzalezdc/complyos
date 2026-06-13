@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 
 from fastapi.testclient import TestClient
 
 from complyos.core.repository import LocalRepository
+from complyos.notification.signing import sign_payload
 from complyos.web.api_v1 import create_api_v1_app
 
 CSV_TEXT = "user_id,course_id,status,source_record_id\nu1,c1,completed,sr1\n"
 
 
 def _hook_signature(secret: str, *, timestamp: str, body: bytes) -> str:
-    digest = hmac.new(
-        secret.encode("utf-8"),
-        timestamp.encode("utf-8") + b"." + body,
-        hashlib.sha256,
-    ).hexdigest()
-    return f"sha256={digest}"
+    # Exercise the production signer so inbound verification is tested end-to-end.
+    return sign_payload(secret, timestamp=timestamp, body=body)
 
 
 def test_api_v1_health(tmp_path) -> None:

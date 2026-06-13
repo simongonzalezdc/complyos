@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from collections.abc import Mapping
 from typing import Any
 
 from complyos.core.repository import LocalRepository
+from complyos.notification.signing import verify_signature
 from complyos.services.context import (
     PERM_NOTIFICATIONS_MANAGE,
     ActorContext,
@@ -106,16 +106,9 @@ def _verify_signature(
     signature = headers.get("x-complyos-signature") or headers.get("X-ComplyOS-Signature")
     if not timestamp or not signature:
         raise InboundWebhookSignatureError("missing inbound webhook signature")
-    expected = _signature(signing_secret, timestamp=timestamp, body=body)
-    if not hmac.compare_digest(expected, signature):
+    if not verify_signature(signing_secret, timestamp=timestamp, body=body, signature=signature):
         raise InboundWebhookSignatureError("invalid inbound webhook signature")
     return True
-
-
-def _signature(secret: str, *, timestamp: str, body: bytes) -> str:
-    signed = timestamp.encode("utf-8") + b"." + body
-    digest = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
 
 
 def _parse_body(body: bytes) -> dict[str, Any]:

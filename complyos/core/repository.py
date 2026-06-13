@@ -866,6 +866,7 @@ class LocalRepository:
         tenant_id: str,
         status: str | None = "pending",
         limit: int = 50,
+        due_at: datetime | None = None,
     ) -> list[dict[str, Any]]:
         with self._session() as session:
             query = session.query(DBNotificationDelivery).where(
@@ -873,12 +874,41 @@ class LocalRepository:
             )
             if status:
                 query = query.where(DBNotificationDelivery.status == status)
+            if due_at is not None:
+                # Honor the retry backoff: a delivery that failed and was scheduled
+                # for a future retry must not be re-attempted until it is due. Rows
+                # never attempted (next_attempt_at IS NULL) are always due.
+                query = query.where(
+                    DBNotificationDelivery.next_attempt_at.is_(None)
+                    | (DBNotificationDelivery.next_attempt_at <= due_at)
+                )
             rows = query.order_by(DBNotificationDelivery.created_at.asc()).limit(limit).all()
             deliveries: list[dict[str, Any]] = []
             for row in rows:
                 event = session.get(DBNotificationEvent, row.event_id)
                 deliveries.append(self._to_notification_delivery_dict(row, event))
             return deliveries
+
+    def get_notification_delivery(
+        self,
+        *,
+        tenant_id: str,
+        delivery_id: str,
+    ) -> dict[str, Any] | None:
+        """Point lookup of one tenant-scoped delivery (avoids a bounded list scan)."""
+        with self._session() as session:
+            delivery = (
+                session.query(DBNotificationDelivery)
+                .where(
+                    DBNotificationDelivery.tenant_id == tenant_id,
+                    DBNotificationDelivery.id == delivery_id,
+                )
+                .first()
+            )
+            if delivery is None:
+                return None
+            event = session.get(DBNotificationEvent, delivery.event_id)
+            return self._to_notification_delivery_dict(delivery, event)
 
     def mark_notification_delivery(
         self,

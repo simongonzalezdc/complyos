@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from complyos.core.repository import LocalRepository
 from complyos.services.context import default_local_context
 from complyos.services.notifications import NotificationOutboxService
@@ -82,6 +84,56 @@ def test_notification_outbox_service_marks_delivery_states(tmp_path) -> None:
     assert failed["status"] == "pending"
     assert failed["attempts"] == 1
     assert failed["last_error"] == "503 Service Unavailable"
+
+
+def test_failed_delivery_respects_backoff_then_dead_letters_at_max_attempts(tmp_path) -> None:
+    """Failed deliveries back off (no hot-loop) and dead-letter at max_attempts."""
+    repo = LocalRepository(str(tmp_path / "notifications-deadletter.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+    service.enqueue_event(
+        context,
+        event_type="privacy.delete.blocked_by_legal_hold",
+        object_type="privacy_request",
+        object_id="dsr-1",
+        payload={"subject_id": "u-1"},
+        channels=["webhook"],
+    )
+    delivery_id = service.list_pending_deliveries(context)[0]["id"]
+
+    # Attempt 1: still retryable, and a backoff is scheduled.
+    first = service.mark_delivery_failed(context, delivery_id=delivery_id, error="503")
+    assert first["status"] == "pending"
+    assert first["attempts"] == 1
+    assert first["next_attempt_at"] is not None
+
+    # Backoff is ENFORCED: a just-failed delivery is not returned for draining
+    # until its next_attempt_at elapses (this is the hot-loop regression guard).
+    assert service.list_pending_deliveries(context) == []
+
+    # Attempt 2: still pending (2 < max_attempts of 3).
+    second = service.mark_delivery_failed(context, delivery_id=delivery_id, error="503")
+    assert second["status"] == "pending"
+    assert second["attempts"] == 2
+
+    # Attempt 3: hits max_attempts -> dead_letter, and the retry clock is cleared.
+    third = service.mark_delivery_failed(context, delivery_id=delivery_id, error="503")
+    assert third["status"] == "dead_letter"
+    assert third["attempts"] == 3
+    assert third["next_attempt_at"] is None
+
+    # A dead-letter result is recorded in the audit action log.
+    actions = repo.list_action_logs(tenant_id="tenant-a")
+    assert any(item["result"] == "dead_letter" for item in actions)
+
+
+def test_mark_delivery_failed_raises_for_unknown_delivery(tmp_path) -> None:
+    repo = LocalRepository(str(tmp_path / "notifications-unknown.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+
+    with pytest.raises(ValueError, match="unknown notification delivery"):
+        service.mark_delivery_failed(context, delivery_id="does-not-exist", error="boom")
 
 
 def test_notification_preferences_disable_channel_without_losing_event_audit(

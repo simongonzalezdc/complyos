@@ -131,10 +131,14 @@ class NotificationOutboxService:
     ) -> list[dict[str, Any]]:
         """List pending deliveries for the current tenant."""
         require_permission(context, PERM_NOTIFICATIONS_MANAGE)
+        # due_at enforces the retry backoff: a delivery scheduled for a future
+        # retry is excluded until it is due, so a down endpoint cannot hot-loop
+        # through max_attempts in a single drain pass.
         return self.repository.list_notification_deliveries(
             tenant_id=context.tenant_id,
             status="pending",
             limit=limit,
+            due_at=utc_now(),
         )
 
     def mark_delivery_sent(
@@ -186,7 +190,11 @@ class NotificationOutboxService:
     ) -> dict[str, Any]:
         """Record a failed attempt, leaving room for retry or dead-letter state."""
         require_permission(context, PERM_NOTIFICATIONS_MANAGE)
-        current = self._get_pending_delivery(context, delivery_id)
+        current = self.repository.get_notification_delivery(
+            tenant_id=context.tenant_id, delivery_id=delivery_id
+        )
+        if current is None:
+            raise ValueError(f"unknown notification delivery: {delivery_id}")
         next_attempt_count = int(current["attempts"]) + 1
         max_attempts = int(current["max_attempts"])
         status = "dead_letter" if next_attempt_count >= max_attempts else "pending"
@@ -201,12 +209,6 @@ class NotificationOutboxService:
         )
         self._log_delivery(context, delivery, result=status)
         return delivery
-
-    def _get_pending_delivery(self, context: ActorContext, delivery_id: str) -> dict[str, Any]:
-        for delivery in self.list_pending_deliveries(context, limit=500):
-            if delivery["id"] == delivery_id:
-                return delivery
-        raise ValueError(f"unknown pending notification delivery: {delivery_id}")
 
     def _log_delivery(
         self,
