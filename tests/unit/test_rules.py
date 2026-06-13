@@ -8,7 +8,14 @@ import pytest
 
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
-from complyos.models.domain import AssignmentRule, Course, Enrollment, EnrollmentStatus, User
+from complyos.models.domain import (
+    AssignmentRule,
+    Course,
+    EmploymentStatus,
+    Enrollment,
+    EnrollmentStatus,
+    User,
+)
 
 
 @pytest.fixture
@@ -34,7 +41,7 @@ def seeded_repo(repo: LocalRepository):
             department="Engineering",
             region="US",
             hire_date=date(2023, 1, 1),
-            employment_status="active",
+            employment_status=EmploymentStatus.ACTIVE,
         )
     )
     repo.save_user(
@@ -47,7 +54,7 @@ def seeded_repo(repo: LocalRepository):
             department="Engineering",
             region="EU",
             hire_date=date(2023, 1, 1),
-            employment_status="active",
+            employment_status=EmploymentStatus.ACTIVE,
         )
     )
     repo.save_user(
@@ -60,7 +67,7 @@ def seeded_repo(repo: LocalRepository):
             department="HR",
             region="US",
             hire_date=date(2023, 1, 1),
-            employment_status="active",
+            employment_status=EmploymentStatus.ACTIVE,
         )
     )
     repo.save_course(Course(id="c1", code="SEC-101", title="Security", mandatory=True))
@@ -210,6 +217,7 @@ class TestPreviewRule:
     ):
         # u1 has a custom attribute
         user = seeded_repo.get_user("u1")
+        assert user is not None
         user.custom_attributes["level"] = "senior"
         seeded_repo.save_user(user)
 

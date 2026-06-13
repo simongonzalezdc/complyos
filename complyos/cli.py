@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -21,30 +22,53 @@ from complyos.api.mcp_server import (
     get_user_compliance_status,
 )
 from complyos.config import ComplyOSConfig
+from complyos.core.release import build_deployment_checklist
 from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
+from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
+from complyos.notification.outbox import EmailEventSender, WebhookEventSender
 from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
+from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
-from complyos.services.context import ROLE_PERMISSIONS, default_local_context
+from complyos.services.context import ROLE_PERMISSIONS, ActorContext, default_local_context
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
+from complyos.services.source_intel import SourceIntelService
+from complyos.source_intel import (
+    ECFRClient,
+    FederalRegisterClient,
+    SourceDefinition,
+    SourceFetchReport,
+    SourceIntelEngine,
+    SourceMonitor,
+    SourceReviewStore,
+    SourceSnapshot,
+    SourceType,
+    free_public_source_definitions,
+)
 
 app = typer.Typer(name="complyos", help="L&D Compliance & Learning Operations")
 import_app = typer.Typer(name="import", help="Preview, decide, and promote import batches")
 evidence_app = typer.Typer(name="evidence", help="Inspect evidence ledger entries")
 ai_app = typer.Typer(name="ai", help="Proposal-only AI assistance")
+source_intel_app = typer.Typer(
+    name="source-intel",
+    help="No-paid source monitoring and review queue",
+)
 admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
 governance_app = typer.Typer(name="governance", help="AI, HR, and school governance packets")
 privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
 security_app = typer.Typer(name="security", help="Security evidence and assurance readiness")
+notifications_app = typer.Typer(name="notifications", help="Drain notification outbox deliveries")
 console = Console()
 
 
@@ -84,6 +108,32 @@ def _get_webhook_notifier() -> WebhookNotifier | None:
     if not slack_url and not teams_url:
         return None
     return WebhookNotifier(slack_webhook_url=slack_url, teams_webhook_url=teams_url)
+
+
+def _get_outbox_sender() -> WebhookEventSender:
+    """Build a generic event sender without exposing webhook URLs in logs."""
+    channel_urls = {
+        "slack": os.getenv("COMPLYOS_SLACK_WEBHOOK_URL") or "",
+        "teams": os.getenv("COMPLYOS_TEAMS_WEBHOOK_URL") or "",
+        "webhook": os.getenv("COMPLYOS_WEBHOOK_URL") or "",
+    }
+    return WebhookEventSender(
+        channel_urls=channel_urls,
+        signing_secret=os.getenv("COMPLYOS_WEBHOOK_SECRET"),
+    )
+
+
+def _get_email_outbox_sender() -> EmailEventSender:
+    """Build an SMTP-backed event sender with env-configured default recipients."""
+    recipients = [
+        item.strip()
+        for item in os.getenv("COMPLYOS_NOTIFICATION_EMAIL_TO", "").split(",")
+        if item.strip()
+    ]
+    return EmailEventSender(
+        notification_sender=_get_notifier() or NotificationSender(),
+        default_recipients=recipients,
+    )
 
 
 @app.command()
@@ -383,6 +433,61 @@ def sync(
     )
 
 
+def _audit_schedule_notification_events(
+    *,
+    notification_service: NotificationOutboxService,
+    context: ActorContext,
+    result: Any,
+    channels: list[str],
+) -> list[dict[str, Any]]:
+    events = [
+        notification_service.enqueue_event(
+            context,
+            event_type="audit.completed",
+            object_type="audit_snapshot",
+            object_id=result.snapshot_id,
+            payload={
+                "job_name": result.job_name,
+                "scope": result.scope,
+                "gaps_found": result.gaps_found,
+                "gaps_by_severity": result.gaps_by_severity,
+                "evidence_hash": result.evidence_hash,
+                "email_subject": "ComplyOS scheduled audit completed",
+                "summary": (
+                    f"Scheduled audit {result.job_name} completed with "
+                    f"{result.gaps_found} gaps."
+                ),
+            },
+            channels=channels,
+        )
+    ]
+    high_risk_count = int(result.gaps_by_severity.get("critical", 0)) + int(
+        result.gaps_by_severity.get("high", 0)
+    )
+    if high_risk_count:
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="audit.high_risk_gaps_found",
+                object_type="audit_snapshot",
+                object_id=result.snapshot_id,
+                payload={
+                    "job_name": result.job_name,
+                    "scope": result.scope,
+                    "high_risk_count": high_risk_count,
+                    "gaps_by_severity": result.gaps_by_severity,
+                    "email_subject": "ComplyOS high-risk audit gaps found",
+                    "summary": (
+                        f"Scheduled audit {result.job_name} found "
+                        f"{high_risk_count} high/critical gaps."
+                    ),
+                },
+                channels=channels,
+            )
+        )
+    return events
+
+
 @app.command("run-schedule")
 def run_schedule(
     config_path: str = typer.Option(
@@ -392,6 +497,15 @@ def run_schedule(
     ),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
     force: bool = typer.Option(False, "--force", help="Run jobs even when last_run_at is not due"),
+    enqueue_notifications: bool = typer.Option(
+        True,
+        "--enqueue-notifications/--no-enqueue-notifications",
+        help="Queue audit notification events without sending network calls",
+    ),
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
 ):
     """Run due scheduled audit jobs once."""
     from complyos.api.mcp_server import _get_auditor
@@ -411,6 +525,9 @@ def run_schedule(
     repo = LocalRepository(db_path or ComplyOSConfig.load(config_path).database_path())
     auditor = _get_auditor()
     notifier = _get_webhook_notifier()
+    context = _local_cli_context(role="compliance_manager")
+    notification_service = NotificationOutboxService(repo)
+    channels = notify_channel or ["email", "slack", "teams"]
 
     async def _run():
         results = []
@@ -430,6 +547,15 @@ def run_schedule(
     if not results:
         console.print("[yellow]No scheduled audit jobs were due[/yellow]")
         return
+
+    if enqueue_notifications:
+        for result in results:
+            _audit_schedule_notification_events(
+                notification_service=notification_service,
+                context=context,
+                result=result,
+                channels=channels,
+            )
 
     table = Table(title="Scheduled Audit Runs")
     table.add_column("Job")
@@ -883,6 +1009,579 @@ def ai_approve(
     console.print("[yellow]No compliance records were changed by this approval.[/yellow]")
 
 
+class _FixtureSourceClient:
+    """No-network fixture client for local source-intelligence demos."""
+
+    def fetch(self, source: SourceDefinition, *, query: str) -> SourceFetchReport:
+        snapshot = SourceSnapshot.from_text(
+            source_id=source.id,
+            url=source.url,
+            title="Fixture final rule and microlearning cue",
+            text=(
+                "A final rule says covered employers must train workers. "
+                "Managers can use scenario practice, examples, and a checklist "
+                f"for {query} follow-up."
+            ),
+            metadata={"fixture": True, "query": query},
+        )
+        return SourceFetchReport(source_id=source.id, snapshots=[snapshot], coverage_gaps=[])
+
+
+def _fixture_source() -> SourceDefinition:
+    return SourceDefinition(
+        id="fixture-official-training-source",
+        name="Fixture official training source",
+        url="https://example.gov/fixture-training-rule",
+        source_type=SourceType.OFFICIAL_REGULATOR,
+        authority="official",
+        jurisdictions=["US"],
+        topics=["safety training", "manager feedback"],
+        metadata={"cost": "free", "auth": "none", "fixture": True},
+    )
+
+
+def _run_fixture_source_monitor(query: str):
+    source = _fixture_source()
+    monitor = SourceMonitor(
+        sources=[source],
+        clients={source.id: _FixtureSourceClient()},
+        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
+    )
+    return monitor.run(query=query)
+
+
+@source_intel_app.command("sources")
+def source_intel_sources(
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List built-in no-paid source definitions and blocked parser gaps."""
+    sources = list(free_public_source_definitions().values())
+    payload = {"sources": [source.model_dump(mode="json") for source in sources]}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="No-paid Source Intelligence Sources")
+    table.add_column("Source")
+    table.add_column("Jurisdiction")
+    table.add_column("Cost")
+    table.add_column("Auth")
+    table.add_column("Status")
+    for source in sources:
+        table.add_row(
+            source.name,
+            ", ".join(source.jurisdictions),
+            str(source.metadata.get("cost", "unknown")),
+            str(source.metadata.get("auth", "unknown")),
+            str(source.metadata.get("status", "unknown")),
+        )
+    console.print(table)
+
+
+@source_intel_app.command("run-fixture")
+def source_intel_run_fixture(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    db_path: str | None = typer.Option(None, "--db", help="Optional SQLite DB review queue"),
+    query: str = typer.Option("training", "--query", help="Source-monitoring query label"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run a no-network fixture through RegWatch and MicroLearn adapters."""
+    run = _run_fixture_source_monitor(query)
+    SourceReviewStore(store_path).save_many(run.proposals)
+    db_receipt = None
+    if db_path:
+        context = _local_cli_context(role="compliance_manager")
+        db_receipt = SourceIntelService(LocalRepository(db_path)).record_run(
+            context,
+            query=query,
+            run=run,
+        )
+    payload = {
+        "source_count": run.source_count,
+        "snapshot_count": run.snapshot_count,
+        "proposal_count": run.proposal_count,
+        "proposal_ids": [proposal.id for proposal in run.proposals],
+        "coverage_gaps": run.coverage_gaps,
+        "store": store_path,
+        "db_receipt": db_receipt,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Sources checked:[/bold] {run.source_count}")
+    console.print(f"[bold]Snapshots:[/bold] {run.snapshot_count}")
+    console.print(f"[bold]Proposals saved:[/bold] {run.proposal_count}")
+    console.print(f"[bold]Store:[/bold] {store_path}")
+
+
+@source_intel_app.command("run-public")
+def source_intel_run_public(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    query: str = typer.Option("training", "--query", help="Search query for public sources"),
+    source_filter: str | None = typer.Option(
+        None,
+        "--source",
+        help="Comma-separated source IDs; defaults to implemented free clients",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show planned free calls only"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run implemented free/public source clients; no paid accounts required."""
+    all_sources = free_public_source_definitions()
+    default_ids = ["federal-register", "ecfr-title-29"]
+    source_ids = (
+        [item.strip() for item in source_filter.split(",") if item.strip()]
+        if source_filter
+        else default_ids
+    )
+    missing = [source_id for source_id in source_ids if source_id not in all_sources]
+    if missing:
+        console.print(f"[red]Unknown source IDs:[/red] {', '.join(missing)}")
+        raise typer.Exit(1)
+
+    payload_base = {
+        "dry_run": dry_run,
+        "query": query,
+        "source_ids": source_ids,
+        "store": store_path,
+    }
+    if dry_run:
+        if json_output:
+            _print_json(payload_base)
+            return
+        console.print("[yellow]Dry run only:[/yellow] no network calls made")
+        console.print(f"[bold]Query:[/bold] {query}")
+        console.print(f"[bold]Sources:[/bold] {', '.join(source_ids)}")
+        console.print(f"[bold]Store:[/bold] {store_path}")
+        return
+
+    selected_sources = [all_sources[source_id] for source_id in source_ids]
+    clients: dict[str, Any] = {
+        "federal-register": FederalRegisterClient(),
+        "ecfr-title-29": ECFRClient(),
+    }
+    monitor = SourceMonitor(
+        sources=selected_sources,
+        clients=clients,
+        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
+    )
+    run = monitor.run(query=query)
+    SourceReviewStore(store_path).save_many(run.proposals)
+    payload = {
+        **payload_base,
+        "source_count": run.source_count,
+        "snapshot_count": run.snapshot_count,
+        "proposal_count": run.proposal_count,
+        "proposal_ids": [proposal.id for proposal in run.proposals],
+        "coverage_gaps": run.coverage_gaps,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Sources checked:[/bold] {run.source_count}")
+    console.print(f"[bold]Snapshots:[/bold] {run.snapshot_count}")
+    console.print(f"[bold]Proposals saved:[/bold] {run.proposal_count}")
+    if run.coverage_gaps:
+        for gap in run.coverage_gaps:
+            console.print(f"[yellow]Coverage gap:[/yellow] {gap}")
+
+
+@source_intel_app.command("run-upload")
+def source_intel_run_upload(
+    path: str = typer.Argument(..., help="Approved source text file to process"),
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    source_id: str = typer.Option("approved-upload", "--source-id", help="Source ID"),
+    source_name: str = typer.Option("Approved upload", "--source-name", help="Source name"),
+    source_url: str | None = typer.Option(None, "--source-url", help="Citation/source URL"),
+    authority: str = typer.Option("internal", "--authority", help="official, trusted, internal"),
+    topic: Annotated[
+        list[str] | None,
+        typer.Option("--topic", help="Repeatable topic tag"),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Process an approved text upload without network/API access."""
+    source_path = Path(path)
+    text = source_path.read_text(encoding="utf-8")
+    source = SourceDefinition(
+        id=source_id,
+        name=source_name,
+        url=source_url or source_path.as_uri(),
+        source_type=SourceType.INTERNAL_UPLOAD,
+        authority=authority,
+        jurisdictions=[],
+        topics=topic or ["approved upload"],
+        metadata={"cost": "free", "auth": "none", "upload_path": source_path.name},
+    )
+    snapshot = SourceSnapshot.from_text(
+        source_id=source.id,
+        url=source.url,
+        title=source_name,
+        text=text,
+        metadata={"upload": True, "filename": source_path.name},
+    )
+    proposals = SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]).evaluate(
+        [source],
+        [snapshot],
+    )
+    SourceReviewStore(store_path).save_many(proposals)
+    payload = {
+        "source_id": source.id,
+        "snapshot_count": 1,
+        "proposal_count": len(proposals),
+        "proposal_ids": [proposal.id for proposal in proposals],
+        "proposal_signal_types": [proposal.signal.signal_type for proposal in proposals],
+        "store": store_path,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Source:[/bold] {source.id}")
+    console.print("[bold]Snapshots:[/bold] 1")
+    console.print(f"[bold]Proposals saved:[/bold] {len(proposals)}")
+    console.print(f"[bold]Store:[/bold] {store_path}")
+
+
+@source_intel_app.command("review")
+def source_intel_review(
+    store_path: str = typer.Option(
+        "source-intel-reviews.jsonl",
+        "--store",
+        help="Local JSONL review queue path",
+    ),
+    db_path: str | None = typer.Option(None, "--db", help="Optional SQLite DB review queue"),
+    proposal_id: str | None = typer.Option(None, "--proposal-id", help="Proposal ID to decide"),
+    state: str | None = typer.Option(None, "--state", help="New review state"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List or update local source-intelligence review proposals."""
+    if db_path:
+        context = _local_cli_context(role="compliance_manager")
+        service = SourceIntelService(LocalRepository(db_path))
+        if proposal_id or state:
+            if not proposal_id or not state:
+                console.print("[red]Both --proposal-id and --state are required to decide.[/red]")
+                raise typer.Exit(1)
+            try:
+                db_proposal = service.decide_proposal(context, proposal_id=proposal_id, state=state)
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
+            db_decision_payload: dict[str, Any] = {"proposal": db_proposal}
+            if json_output:
+                _print_json(db_decision_payload)
+                return
+            console.print(f"[green]Updated proposal:[/green] {db_proposal['id']}")
+            console.print(f"[bold]State:[/bold] {db_proposal['approval_state']}")
+            return
+
+        db_proposals = service.list_proposals(context)
+        db_list_payload: dict[str, Any] = {"proposals": db_proposals}
+        if json_output:
+            _print_json(db_list_payload)
+            return
+
+        table = Table(title="Source Intelligence DB Review Queue")
+        table.add_column("Proposal")
+        table.add_column("Adapter")
+        table.add_column("Signal")
+        table.add_column("State")
+        for db_row in db_proposals:
+            table.add_row(
+                str(db_row["id"]),
+                str(db_row["adapter_name"]),
+                str(db_row["signal_type"]),
+                str(db_row["approval_state"]),
+            )
+        console.print(table)
+        return
+
+    store = SourceReviewStore(store_path)
+    if proposal_id or state:
+        if not proposal_id or not state:
+            console.print("[red]Both --proposal-id and --state are required to decide.[/red]")
+            raise typer.Exit(1)
+        try:
+            jsonl_proposal = store.decide(proposal_id, state=state)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        decision_payload: dict[str, Any] = {"proposal": jsonl_proposal.model_dump(mode="json")}
+        if json_output:
+            _print_json(decision_payload)
+            return
+        console.print(f"[green]Updated proposal:[/green] {jsonl_proposal.id}")
+        console.print(f"[bold]State:[/bold] {jsonl_proposal.approval_state}")
+        return
+
+    proposals = store.list()
+    list_payload: dict[str, Any] = {
+        "proposals": [proposal.model_dump(mode="json") for proposal in proposals]
+    }
+    if json_output:
+        _print_json(list_payload)
+        return
+
+    table = Table(title="Source Intelligence Review Queue")
+    table.add_column("Proposal")
+    table.add_column("Adapter")
+    table.add_column("Signal")
+    table.add_column("State")
+    for jsonl_row in proposals:
+        table.add_row(
+            jsonl_row.id,
+            jsonl_row.adapter_name,
+            jsonl_row.signal.signal_type,
+            jsonl_row.approval_state,
+        )
+    console.print(table)
+
+
+def _source_intel_notification_events(
+    *,
+    notification_service: NotificationOutboxService,
+    context: ActorContext,
+    schedule: dict[str, Any],
+    run_id: str,
+    summary: dict[str, Any],
+    channels: list[str],
+) -> list[dict[str, Any]]:
+    events = [
+        notification_service.enqueue_event(
+            context,
+            event_type="source_intel.run.completed",
+            object_type="source_intel_run",
+            object_id=run_id,
+            payload={
+                "schedule_id": schedule["id"],
+                "schedule_name": schedule["name"],
+                **summary,
+            },
+            channels=channels,
+        )
+    ]
+    if int(summary.get("proposal_count", 0)) > 0:
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="source_intel.proposals_waiting",
+                object_type="source_intel_run",
+                object_id=run_id,
+                payload={
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule["name"],
+                    "proposal_count": summary["proposal_count"],
+                    "query": summary["query"],
+                },
+                channels=channels,
+            )
+        )
+    if summary.get("coverage_gaps"):
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="source_intel.coverage_gap_found",
+                object_type="source_intel_run",
+                object_id=run_id,
+                payload={
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule["name"],
+                    "coverage_gaps": summary["coverage_gaps"],
+                    "query": summary["query"],
+                },
+                channels=channels,
+            )
+        )
+    return events
+
+
+@source_intel_app.command("schedule-add")
+def source_intel_schedule_add(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    name: str = typer.Option(..., "--name", help="Stable schedule name"),
+    query: str = typer.Option("training", "--query", help="Source-monitoring query label"),
+    interval_hours: int = typer.Option(24, "--interval-hours", help="Run cadence in hours"),
+    mode: str = typer.Option("fixture", "--mode", help="Execution mode; fixture is local-only"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create/update a local source-intelligence schedule without external API setup."""
+    context = _local_cli_context(role="compliance_manager")
+    try:
+        schedule = SourceIntelService(LocalRepository(db_path)).create_schedule(
+            context,
+            name=name,
+            query=query,
+            interval_hours=interval_hours,
+            source_ids=["fixture-official-training-source"],
+            mode=mode,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    payload = {"schedule": schedule}
+    if json_output:
+        _print_json(payload)
+        return
+    console.print(f"[green]Schedule saved:[/green] {schedule['name']}")
+    console.print(f"[bold]Interval hours:[/bold] {schedule['interval_hours']}")
+
+
+@source_intel_app.command("schedule-list")
+def source_intel_schedule_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List local source-intelligence schedules."""
+    context = _local_cli_context(role="compliance_manager")
+    schedules = SourceIntelService(LocalRepository(db_path)).list_schedules(context)
+    payload = {"schedules": schedules}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Source Intelligence Schedules")
+    table.add_column("Name")
+    table.add_column("Query")
+    table.add_column("Mode")
+    table.add_column("Interval")
+    table.add_column("Status")
+    for schedule in schedules:
+        table.add_row(
+            str(schedule["name"]),
+            str(schedule["query"]),
+            str(schedule["mode"]),
+            f"{schedule['interval_hours']}h",
+            str(schedule["status"]),
+        )
+    console.print(table)
+
+
+@source_intel_app.command("run-scheduled")
+def source_intel_run_scheduled(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    force: bool = typer.Option(False, "--force", help="Run schedules even when not due"),
+    enqueue_notifications: bool = typer.Option(
+        True,
+        "--enqueue-notifications/--no-enqueue-notifications",
+        help="Queue notification events without sending network calls",
+    ),
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Execute due local source-intelligence schedules and record job receipts."""
+    context = _local_cli_context(role="compliance_manager")
+    repository = LocalRepository(db_path)
+    service = SourceIntelService(repository)
+    notification_service = NotificationOutboxService(repository)
+    schedules = service.due_schedules(context, force=force)
+    executions = []
+    notification_events = []
+    channels = notify_channel or ["slack", "teams"]
+    for schedule in schedules:
+        started_at = datetime.utcnow()
+        run_id = None
+        try:
+            if schedule["mode"] != "fixture":
+                raise ValueError(f"unsupported schedule mode: {schedule['mode']}")
+            run = _run_fixture_source_monitor(str(schedule["query"]))
+            receipt = service.record_run(context, query=str(schedule["query"]), run=run)
+            run_id = str(receipt["run_id"])
+            summary = {
+                "schedule_name": schedule["name"],
+                "query": schedule["query"],
+                "source_count": run.source_count,
+                "snapshot_count": run.snapshot_count,
+                "proposal_count": run.proposal_count,
+                "coverage_gaps": run.coverage_gaps,
+            }
+            execution = service.record_schedule_execution(
+                context,
+                schedule_id=str(schedule["id"]),
+                run_id=run_id,
+                status="succeeded",
+                started_at=started_at,
+                finished_at=datetime.utcnow(),
+                summary=summary,
+            )
+            if enqueue_notifications:
+                notification_events.extend(
+                    _source_intel_notification_events(
+                        notification_service=notification_service,
+                        context=context,
+                        schedule=schedule,
+                        run_id=run_id,
+                        summary=summary,
+                        channels=channels,
+                    )
+                )
+        except Exception as exc:
+            execution = service.record_schedule_execution(
+                context,
+                schedule_id=str(schedule["id"]),
+                run_id=run_id,
+                status="failed",
+                started_at=started_at,
+                finished_at=datetime.utcnow(),
+                summary={"schedule_name": schedule["name"], "query": schedule["query"]},
+                error=str(exc),
+            )
+        executions.append(execution)
+
+    payload = {
+        "scheduled_count": len(schedules),
+        "executions": executions,
+        "notification_events": notification_events,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Schedules executed:[/bold] {len(executions)}")
+    for execution in executions:
+        console.print(f"  {execution['schedule_id']}: {execution['status']}")
+
+
+@source_intel_app.command("export-packet")
+def source_intel_export_packet(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    output_path: str | None = typer.Option(None, "--output", help="Optional JSON output path"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Export a source-intelligence review/audit packet for human review."""
+    context = _local_cli_context(role="compliance_manager")
+    packet = SourceIntelService(LocalRepository(db_path)).export_review_packet(context)
+    if output_path:
+        Path(output_path).write_text(
+            json.dumps(packet, indent=2, default=str),
+            encoding="utf-8",
+        )
+    payload = {"packet": packet, "output": output_path}
+    if json_output:
+        _print_json(payload)
+        return
+    console.print(f"[bold]Source-intelligence proposals:[/bold] {packet['proposal_count']}")
+    if output_path:
+        console.print(f"[bold]Packet written:[/bold] {output_path}")
+
+
 @admin_app.command("roles")
 def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output raw JSON")):
     """Show default roles and permissions."""
@@ -918,6 +1617,191 @@ def security_evidence(
     console.print(f"[bold]Security evidence period:[/bold] {result.period}")
     console.print(f"[bold]Posture:[/bold] {result.posture}")
     console.print(f"[bold]Summary:[/bold] {result.summary}")
+
+
+@notifications_app.command("list")
+def notifications_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    limit: int = typer.Option(50, "--limit", help="Maximum pending deliveries to list"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List pending notification outbox deliveries without exposing webhook URLs."""
+    context = _local_cli_context(role="compliance_manager")
+    deliveries = NotificationOutboxService(LocalRepository(db_path)).list_pending_deliveries(
+        context,
+        limit=limit,
+    )
+    payload = {"pending_count": len(deliveries), "deliveries": deliveries}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Outbox")
+    table.add_column("Delivery")
+    table.add_column("Channel")
+    table.add_column("Event")
+    table.add_column("Status")
+    for delivery in deliveries:
+        event = delivery.get("event") or {}
+        table.add_row(
+            str(delivery["id"]),
+            str(delivery["channel"]),
+            str(event.get("event_type", "unknown")),
+            str(delivery["status"]),
+        )
+    console.print(table)
+
+
+@notifications_app.command("preferences")
+def notifications_preferences(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List tenant notification preferences and kill switches."""
+    context = _local_cli_context(role="compliance_manager")
+    preferences = NotificationOutboxService(LocalRepository(db_path)).list_preferences(context)
+    payload = {"preferences": preferences}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Preferences")
+    table.add_column("Channel")
+    table.add_column("Event")
+    table.add_column("Enabled")
+    table.add_column("Reason")
+    for preference in preferences:
+        table.add_row(
+            str(preference["channel"]),
+            str(preference["event_type"]),
+            "yes" if preference["enabled"] else "no",
+            str(preference.get("reason") or ""),
+        )
+    console.print(table)
+
+
+@notifications_app.command("preference-set")
+def notifications_preference_set(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    channel: str = typer.Option(..., "--channel", help="Channel name or '*'"),
+    event_type: str = typer.Option("*", "--event-type", help="Event type or '*'"),
+    enabled: bool = typer.Option(
+        True,
+        "--enabled/--disabled",
+        help="Enable or disable this channel/event route",
+    ),
+    reason: str | None = typer.Option(None, "--reason", help="Human-readable change reason"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Set a channel/event notification preference for the current tenant."""
+    context = _local_cli_context(role="compliance_manager")
+    preference = NotificationOutboxService(LocalRepository(db_path)).set_preference(
+        context,
+        channel=channel,
+        event_type=event_type,
+        enabled=enabled,
+        reason=reason,
+    )
+    if json_output:
+        _print_json(preference)
+        return
+    console.print(
+        f"[green]Notification preference saved:[/green] "
+        f"{preference['channel']} / {preference['event_type']} "
+        f"{'enabled' if preference['enabled'] else 'disabled'}"
+    )
+
+
+@notifications_app.command("drain")
+def notifications_drain(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--send",
+        help="Preview by default; use --send to perform outbound webhook calls",
+    ),
+    limit: int = typer.Option(50, "--limit", help="Maximum pending deliveries to drain"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Drain pending notification deliveries through configured hook channels."""
+    context = _local_cli_context(role="compliance_manager")
+    service = NotificationOutboxService(LocalRepository(db_path))
+    deliveries = service.list_pending_deliveries(context, limit=limit)
+    results: list[dict[str, Any]] = []
+
+    async def _send_all() -> list[dict[str, Any]]:
+        webhook_sender = _get_outbox_sender()
+        email_sender = _get_email_outbox_sender()
+        sent_results: list[dict[str, Any]] = []
+        for delivery in deliveries:
+            try:
+                sender = (
+                    email_sender
+                    if str(delivery["channel"]).lower() == "email"
+                    else webhook_sender
+                )
+                result = await sender.send_delivery(delivery)
+            except Exception as exc:
+                marked = service.mark_delivery_failed(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(exc),
+                )
+                sent_results.append({"delivery": marked, "status": marked["status"]})
+                continue
+
+            if result.get("skipped"):
+                marked = service.mark_delivery_skipped(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(result["error"]),
+                )
+            elif not result.get("sent"):
+                marked = service.mark_delivery_failed(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(result.get("error", "notification delivery failed")),
+                )
+            else:
+                marked = service.mark_delivery_sent(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    response_metadata={
+                        "status_code": result.get("status_code"),
+                        "recipient_count": result.get("recipient_count"),
+                    },
+                )
+            sent_results.append({"delivery": marked, "status": marked["status"]})
+        return sent_results
+
+    if dry_run:
+        results = [
+            {
+                "delivery": delivery,
+                "status": "would_send",
+            }
+            for delivery in deliveries
+        ]
+    else:
+        results = asyncio.run(_send_all())
+
+    payload = {
+        "dry_run": dry_run,
+        "pending_count": len(deliveries),
+        "deliveries": results,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Drain")
+    table.add_column("Delivery")
+    table.add_column("Channel")
+    table.add_column("Status")
+    for item in results:
+        delivery = item["delivery"]
+        table.add_row(str(delivery["id"]), str(delivery["channel"]), str(item["status"]))
+    console.print(table)
 
 
 @governance_app.command("packet")
@@ -1122,13 +2006,43 @@ def privacy_retention_run(
     console.print(f"[bold]Deleted:[/bold] {result.deleted_counts}")
 
 
+@app.command("deployment-check")
+def deployment_check(
+    root: str = typer.Option(".", "--root", help="Repository root to inspect"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run deployment/observability checks for release hardening."""
+    checklist = build_deployment_checklist(Path(root))
+    payload = {
+        "ready": all(item["ok"] for item in checklist),
+        "checks": checklist,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Deployment Hardening Checks")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Message")
+    for item in checklist:
+        table.add_row(
+            item["label"],
+            "ok" if item["ok"] else "missing",
+            item["message"],
+        )
+    console.print(table)
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(ai_app, name="ai")
+app.add_typer(source_intel_app, name="source-intel")
 app.add_typer(admin_app, name="admin")
 app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")
+app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
 
 

@@ -37,6 +37,10 @@ PERM_PRIVACY_EXPORT = "privacy:export"
 PERM_PRIVACY_DELETE = "privacy:delete"
 PERM_PRIVACY_RETENTION_MANAGE = "privacy:retention:manage"
 PERM_LEGAL_HOLD_MANAGE = "legal_hold:manage"
+PERM_SOURCE_INTEL_READ = "source_intel:read"
+PERM_SOURCE_INTEL_RUN = "source_intel:run"
+PERM_SOURCE_INTEL_DECIDE = "source_intel:decide"
+PERM_NOTIFICATIONS_MANAGE = "notifications:manage"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
@@ -66,6 +70,10 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_PRIVACY_DELETE,
         PERM_PRIVACY_RETENTION_MANAGE,
         PERM_LEGAL_HOLD_MANAGE,
+        PERM_SOURCE_INTEL_READ,
+        PERM_SOURCE_INTEL_RUN,
+        PERM_SOURCE_INTEL_DECIDE,
+        PERM_NOTIFICATIONS_MANAGE,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -93,6 +101,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_PRIVACY_REQUEST,
             PERM_PRIVACY_APPROVE,
             PERM_PRIVACY_EXPORT,
+            PERM_SOURCE_INTEL_READ,
+            PERM_SOURCE_INTEL_RUN,
+            PERM_SOURCE_INTEL_DECIDE,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
     "privacy_admin": frozenset(
@@ -105,6 +117,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_PRIVACY_DELETE,
             PERM_PRIVACY_RETENTION_MANAGE,
             PERM_LEGAL_HOLD_MANAGE,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
     "importer": frozenset({PERM_IMPORT_PREVIEW, PERM_IMPORT_DECIDE, PERM_EVIDENCE_READ}),
@@ -119,6 +132,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_READINESS_READ,
             PERM_SECURITY_EVIDENCE_READ,
             PERM_GOVERNANCE_READ,
+            PERM_SOURCE_INTEL_READ,
         }
     ),
     "agent_service_account": frozenset(
@@ -132,9 +146,14 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_CONNECTORS_READ,
             PERM_AI_PROPOSE,
             PERM_READINESS_READ,
+            PERM_SOURCE_INTEL_READ,
+            PERM_SOURCE_INTEL_RUN,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
-    "read_only": frozenset({PERM_AUDIT_READ, PERM_EVIDENCE_READ, PERM_READINESS_READ}),
+    "read_only": frozenset(
+        {PERM_AUDIT_READ, PERM_EVIDENCE_READ, PERM_READINESS_READ, PERM_SOURCE_INTEL_READ}
+    ),
 }
 
 

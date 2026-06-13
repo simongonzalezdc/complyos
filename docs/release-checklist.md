@@ -31,8 +31,11 @@ rm -rf dist && uv build && rm -rf dist
 - Run `complyos security evidence --period current --json` and attach real receipts separately.
 - Run `complyos governance packet --lane workforce --json` or `--lane campus` for the target buyer lane.
 - Dry-run retention before apply: `complyos privacy retention run --dry-run --json`.
+- Dry-run notification delivery before send: `complyos notifications drain --dry-run --json`.
+- Confirm notification preferences and kill switches are intentionally configured before noisy customer demos.
+- Confirm inbound hook secrets are configured before accepting third-party hook traffic.
 - Confirm no generated dashboard/report includes private production records before publishing it.
-- Confirm Slack, Teams, SMTP, OAuth, database, Forgejo, and tenant tokens are provided through environment variables or secret stores, not committed config.
+- Confirm email, Slack, Teams, webhook, SMTP, OAuth, database, Forgejo, and tenant tokens are provided through environment variables or secret stores, not committed config.
 
 ## Claim checks
 

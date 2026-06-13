@@ -9,6 +9,7 @@ import pytest
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import LearningRecord, LearningRecordStatus, User
 from complyos.services.context import default_local_context
+from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 
 
@@ -103,6 +104,51 @@ def test_privacy_request_is_tenant_scoped(tmp_path) -> None:
         service.export_subject(tenant_b, request.request_id)
 
 
+def test_privacy_workflows_enqueue_notification_events(tmp_path) -> None:
+    repo = LocalRepository(str(tmp_path / "privacy-notifications.db"))
+    _save_subject(repo)
+    service = PrivacyProgramService(repo)
+    context = default_local_context(surface="cli", role="privacy_admin")
+
+    request = service.create_request(
+        context,
+        subject_id="u-privacy",
+        request_type="deletion",
+        region="US-CA",
+    )
+    service.approve_request(context, request.request_id, approval_note="approved")
+    hold = service.create_legal_hold(
+        context,
+        subject_id="u-privacy",
+        scope="subject",
+        reason="investigation",
+    )
+    service.delete_subject(context, request.request_id)
+    service.release_legal_hold(context, hold.hold_id)
+    service.delete_subject(context, request.request_id)
+    service.configure_retention_policy(
+        context,
+        raw_import_days=30,
+        evidence_days=2555,
+        action_log_days=2555,
+        ai_proposal_days=180,
+        privacy_request_days=365,
+    )
+    service.run_retention_cleanup(context, dry_run=True)
+
+    deliveries = NotificationOutboxService(repo).list_pending_deliveries(context, limit=100)
+    event_types = {delivery["event"]["event_type"] for delivery in deliveries}
+    assert {
+        "privacy.request.created",
+        "privacy.request.approved",
+        "privacy.legal_hold.created",
+        "privacy.delete.blocked_by_legal_hold",
+        "privacy.legal_hold.released",
+        "privacy.delete.completed",
+        "privacy.retention.run",
+    } <= event_types
+
+
 def test_retention_policy_is_tenant_scoped_and_records_audit_log(tmp_path) -> None:
     repo = LocalRepository(str(tmp_path / "retention.db"))
     service = PrivacyProgramService(repo)
@@ -176,7 +222,10 @@ def test_retention_cleanup_dry_run_then_apply_removes_closed_privacy_cases(tmp_p
     assert applied.deleted_counts["privacy_requests"] == 1
     assert repo.get_privacy_request("old-closed") is None
     assert repo.get_privacy_request("recent-closed") is not None
-    assert repo.list_action_logs(tenant_id="tenant-a")[0]["action"] == "privacy.retention.run"
+    assert any(
+        item["action"] == "privacy.retention.run"
+        for item in repo.list_action_logs(tenant_id="tenant-a")
+    )
 
 
 def test_retention_cleanup_purges_old_raw_import_rows_and_rejected_ai_proposals(

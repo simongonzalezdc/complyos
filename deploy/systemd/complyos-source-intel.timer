@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ComplyOS source intelligence schedules hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=complyos-source-intel.service
+
+[Install]
+WantedBy=timers.target

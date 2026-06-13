@@ -160,14 +160,35 @@ Mutating workflows also write action logs. The combination gives auditors, buyer
 
 ## Operations and Scalability Notes
 
-The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/API/MCP audit paths, and Slack/Teams notifications consume audit output rather than introducing a separate workflow engine.
+The operator-ready path keeps ComplyOS local-first: SQLite remains the default
+store, scheduled audit runs invoke the same CLI/API/MCP audit paths, and Source
+Intelligence schedules record DB job executions, action logs, review decisions,
+and export packets before any downstream rule/module work. Email, Slack, Teams,
+and generic webhook notifications consume audit output through the shared outbox
+rather than introducing a separate workflow engine.
+
+Notifications use an outbox pattern. Jobs enqueue tenant-scoped
+`notification_events` and `notification_deliveries`; a separate
+`complyos notifications drain` worker sends configured email, Slack, Teams, or
+generic customer webhooks. `notification_preferences` provides channel/event
+kill switches before deliveries are created. Outbound hook payloads include
+event IDs, idempotency keys, payload hashes, and optional HMAC signatures, while
+delivery rows keep retry, skip, sent, and dead-letter evidence without storing
+webhook URLs in packets.
+
+Inbound hooks are provider-neutral receipts first, not LMS-specific automation.
+`POST /api/v1/hooks/inbound/{source}` validates the API token, optionally
+verifies `COMPLYOS_INBOUND_WEBHOOK_SECRET`, redacts sensitive fields, stores the
+payload hash in `inbound_webhook_events`, and records an action log. Canvas,
+Workday, SuccessFactors, Cornerstone, or customer-specific parsers can sit on top
+later without changing the receipt/audit foundation.
 
 PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 
 The current SQLite-backed architecture handles ~10K users comfortably. For larger deployments:
 
 1. Add connector pagination beyond the first normalized response page
-2. Add webhook/event support for near-real-time updates
+2. Add provider-specific parsers on top of the generic inbound hook receipt API
 3. Cache enrollment maps in Redis for sub-second audits
 4. Run audits as background jobs with Celery/ARQ
 
@@ -178,6 +199,6 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 - [x] Phase 1 — Core auditing, MCP server, CLI, Workday connector
 - [x] Phase 2 — SQLite cache, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
-- [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 - [x] Enterprise readiness layer — privacy/DSR services, retention cleanup, tenant-scoped evidence, security evidence packet, governance packet, and API/MCP/CLI parity

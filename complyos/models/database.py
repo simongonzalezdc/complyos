@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -321,6 +322,154 @@ class DBRetentionPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class DBSourceIntelRun(Base):
+    __tablename__ = "source_intel_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    proposal_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coverage_gaps: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBSourceIntelProposal(Base):
+    __tablename__ = "source_intel_proposals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    run_id: Mapped[str] = mapped_column(String, nullable=False)
+    adapter_name: Mapped[str] = mapped_column(String, nullable=False)
+    signal_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_url: Mapped[str] = mapped_column(String, nullable=False)
+    source_hash: Mapped[str] = mapped_column(String, nullable=False)
+    approval_state: Mapped[str] = mapped_column(String, default="needs_review", nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBSourceIntelSchedule(Base):
+    __tablename__ = "source_intel_schedules"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_source_intel_schedule_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    mode: Mapped[str] = mapped_column(String, default="fixture", nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBSourceIntelJobExecution(Base):
+    __tablename__ = "source_intel_job_executions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    schedule_id: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class DBSchemaMigration(Base):
+    __tablename__ = "schema_migrations"
+
+    migration_id: Mapped[str] = mapped_column(String, primary_key=True)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBNotificationEvent(Base):
+    __tablename__ = "notification_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, default="complyos", nullable=False)
+    object_type: Mapped[str] = mapped_column(String, nullable=False)
+    object_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    payload_hash: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="queued", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBNotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    event_id: Mapped[str] = mapped_column(String, nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    destination_ref: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    response_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBNotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "channel",
+            "event_type",
+            name="uq_notification_preference_scope",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, default="*", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBInboundWebhookEvent(Base):
+    __tablename__ = "inbound_webhook_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    object_type: Mapped[str] = mapped_column(String, default="inbound_event", nullable=False)
+    object_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    payload_hash: Mapped[str] = mapped_column(String, nullable=False)
+    signature_valid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="received", nullable=False)
+    header_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    received_by: Mapped[str] = mapped_column(String, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 def resolve_database_url(database: str | None = None) -> str:
     """Resolve a SQLAlchemy database URL from env, URL, or SQLite path."""
     env_url = os.getenv("COMPLYOS_DATABASE_URL")
@@ -337,6 +486,9 @@ def init_db(db_path: str = "complyos.db") -> sessionmaker:
     engine = create_engine(resolve_database_url(db_path))
     Base.metadata.create_all(engine)
     _ensure_sqlite_schema(engine)
+    from complyos.core.migrations import apply_schema_migrations
+
+    apply_schema_migrations(engine)
     maker = sessionmaker(bind=engine)
     with maker() as session:
         if session.get(DBTenant, "local-default") is None:

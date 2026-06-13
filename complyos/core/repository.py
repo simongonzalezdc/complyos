@@ -21,14 +21,23 @@ from complyos.models.database import (
     DBImportBatch,
     DBImportDecision,
     DBImportRow,
+    DBInboundWebhookEvent,
     DBLearningRecord,
     DBLegalHold,
+    DBNotificationDelivery,
+    DBNotificationEvent,
+    DBNotificationPreference,
     DBPrivacyRequest,
     DBRetentionPolicy,
+    DBSourceIntelJobExecution,
+    DBSourceIntelProposal,
+    DBSourceIntelRun,
+    DBSourceIntelSchedule,
     DBUser,
     init_db,
 )
 from complyos.models.domain import Course, Enrollment, LearningRecord, LearningRecordStatus, User
+from complyos.source_intel.monitor import SourceMonitorRun
 
 
 class LocalRepository:
@@ -440,6 +449,466 @@ class LocalRepository:
                 .all()
             )
             return [self._to_action_log_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Source intelligence review persistence
+    # ------------------------------------------------------------------
+    def save_source_intel_run(
+        self,
+        *,
+        tenant_id: str,
+        query: str,
+        run: SourceMonitorRun,
+        created_by: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        run_id = str(uuid.uuid4())
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            session.add(
+                DBSourceIntelRun(
+                    id=run_id,
+                    tenant_id=tenant_id,
+                    query=query,
+                    source_count=run.source_count,
+                    snapshot_count=run.snapshot_count,
+                    proposal_count=run.proposal_count,
+                    coverage_gaps=run.coverage_gaps,
+                    created_by=created_by,
+                    created_at=timestamp,
+                )
+            )
+            for proposal in run.proposals:
+                payload = proposal.model_dump(mode="json")
+                session.merge(
+                    DBSourceIntelProposal(
+                        id=proposal.id,
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        adapter_name=proposal.adapter_name,
+                        signal_type=proposal.signal.signal_type,
+                        source_id=proposal.signal.source_id,
+                        source_url=proposal.source_url,
+                        source_hash=proposal.source_hash,
+                        approval_state=proposal.approval_state,
+                        payload=payload,
+                        created_at=timestamp,
+                    )
+                )
+            session.commit()
+        return {
+            "run_id": run_id,
+            "tenant_id": tenant_id,
+            "source_count": run.source_count,
+            "snapshot_count": run.snapshot_count,
+            "proposal_count": run.proposal_count,
+            "coverage_gaps": run.coverage_gaps,
+        }
+
+    def list_source_intel_proposals(
+        self,
+        *,
+        tenant_id: str,
+        state: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelProposal).where(
+                DBSourceIntelProposal.tenant_id == tenant_id
+            )
+            if state:
+                query = query.where(DBSourceIntelProposal.approval_state == state)
+            rows = (
+                query.order_by(DBSourceIntelProposal.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_source_intel_proposal_dict(row) for row in rows]
+
+    def decide_source_intel_proposal(
+        self,
+        *,
+        tenant_id: str,
+        proposal_id: str,
+        state: str,
+        decided_by: str,
+        decided_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            proposal = (
+                session.query(DBSourceIntelProposal)
+                .where(
+                    DBSourceIntelProposal.tenant_id == tenant_id,
+                    DBSourceIntelProposal.id == proposal_id,
+                )
+                .first()
+            )
+            if proposal is None:
+                raise ValueError(f"unknown source-intelligence proposal: {proposal_id}")
+            proposal.approval_state = state
+            proposal.decided_by = decided_by
+            proposal.decided_at = decided_at or datetime.utcnow()
+            payload = dict(proposal.payload or {})
+            payload["approval_state"] = state
+            proposal.payload = payload
+            session.commit()
+            session.refresh(proposal)
+            return self._to_source_intel_proposal_dict(proposal)
+
+    def save_source_intel_schedule(
+        self,
+        *,
+        tenant_id: str,
+        name: str,
+        query: str,
+        source_ids: list[str],
+        interval_hours: int,
+        mode: str,
+        status: str,
+        created_by: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            schedule = (
+                session.query(DBSourceIntelSchedule)
+                .where(
+                    DBSourceIntelSchedule.tenant_id == tenant_id,
+                    DBSourceIntelSchedule.name == name,
+                )
+                .first()
+            )
+            if schedule is None:
+                schedule = DBSourceIntelSchedule(
+                    id=str(uuid.uuid4()),
+                    tenant_id=tenant_id,
+                    name=name,
+                    query=query,
+                    source_ids=source_ids,
+                    interval_hours=interval_hours,
+                    mode=mode,
+                    status=status,
+                    created_by=created_by,
+                    created_at=timestamp,
+                )
+                session.add(schedule)
+            else:
+                schedule.query = query
+                schedule.source_ids = source_ids
+                schedule.interval_hours = interval_hours
+                schedule.mode = mode
+                schedule.status = status
+            session.commit()
+            session.refresh(schedule)
+            return self._to_source_intel_schedule_dict(schedule)
+
+    def list_source_intel_schedules(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelSchedule).where(
+                DBSourceIntelSchedule.tenant_id == tenant_id
+            )
+            if status:
+                query = query.where(DBSourceIntelSchedule.status == status)
+            rows = query.order_by(DBSourceIntelSchedule.created_at.desc()).limit(limit).all()
+            return [self._to_source_intel_schedule_dict(row) for row in rows]
+
+    def record_source_intel_job_execution(
+        self,
+        *,
+        tenant_id: str,
+        schedule_id: str,
+        run_id: str | None,
+        status: str,
+        started_at: datetime,
+        finished_at: datetime | None,
+        summary: dict[str, Any],
+        error: str | None,
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            schedule = (
+                session.query(DBSourceIntelSchedule)
+                .where(
+                    DBSourceIntelSchedule.tenant_id == tenant_id,
+                    DBSourceIntelSchedule.id == schedule_id,
+                )
+                .first()
+            )
+            if schedule is None:
+                raise ValueError(f"unknown source-intelligence schedule: {schedule_id}")
+            execution = DBSourceIntelJobExecution(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                schedule_id=schedule_id,
+                run_id=run_id,
+                status=status,
+                started_at=started_at,
+                finished_at=finished_at,
+                summary=summary,
+                error=error,
+                created_by=created_by,
+            )
+            session.add(execution)
+            if status == "succeeded":
+                schedule.last_run_at = finished_at or started_at
+            session.commit()
+            session.refresh(execution)
+            return self._to_source_intel_job_execution_dict(execution)
+
+    def list_source_intel_job_executions(
+        self,
+        *,
+        tenant_id: str,
+        schedule_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelJobExecution).where(
+                DBSourceIntelJobExecution.tenant_id == tenant_id
+            )
+            if schedule_id:
+                query = query.where(DBSourceIntelJobExecution.schedule_id == schedule_id)
+            rows = (
+                query.order_by(DBSourceIntelJobExecution.started_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_source_intel_job_execution_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Notification outbox persistence
+    # ------------------------------------------------------------------
+    def save_notification_event(
+        self,
+        *,
+        tenant_id: str,
+        event_type: str,
+        source: str,
+        object_type: str,
+        object_id: str | None,
+        payload: dict[str, Any],
+        payload_hash: str,
+        channels: list[str],
+        created_by: str,
+        status: str = "queued",
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        event_id = str(uuid.uuid4())
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            event = DBNotificationEvent(
+                id=event_id,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                source=source,
+                object_type=object_type,
+                object_id=object_id,
+                payload=payload,
+                payload_hash=payload_hash,
+                status=status,
+                created_by=created_by,
+                created_at=timestamp,
+            )
+            session.add(event)
+            for channel in channels:
+                session.add(
+                    DBNotificationDelivery(
+                        id=str(uuid.uuid4()),
+                        tenant_id=tenant_id,
+                        event_id=event_id,
+                        channel=channel,
+                        destination_ref=channel,
+                        status="pending",
+                        attempts=0,
+                        max_attempts=3,
+                        response_metadata={},
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                    )
+                )
+            session.commit()
+            session.refresh(event)
+            return self._to_notification_event_dict(event, delivery_count=len(channels))
+
+    def save_notification_preference(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        event_type: str,
+        enabled: bool,
+        reason: str | None,
+        updated_by: str,
+        updated_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = updated_at or datetime.utcnow()
+        with self._session() as session:
+            preference = (
+                session.query(DBNotificationPreference)
+                .where(
+                    DBNotificationPreference.tenant_id == tenant_id,
+                    DBNotificationPreference.channel == channel,
+                    DBNotificationPreference.event_type == event_type,
+                )
+                .first()
+            )
+            if preference is None:
+                preference = DBNotificationPreference(
+                    id=str(uuid.uuid4()),
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    event_type=event_type,
+                    enabled=enabled,
+                    reason=reason,
+                    updated_by=updated_by,
+                    updated_at=timestamp,
+                )
+                session.add(preference)
+            else:
+                preference.enabled = enabled
+                preference.reason = reason
+                preference.updated_by = updated_by
+                preference.updated_at = timestamp
+            session.commit()
+            session.refresh(preference)
+            return self._to_notification_preference_dict(preference)
+
+    def list_notification_preferences(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        with self._session() as session:
+            rows = (
+                session.query(DBNotificationPreference)
+                .where(DBNotificationPreference.tenant_id == tenant_id)
+                .order_by(
+                    DBNotificationPreference.event_type.asc(),
+                    DBNotificationPreference.channel.asc(),
+                )
+                .all()
+            )
+            return [self._to_notification_preference_dict(row) for row in rows]
+
+    def save_inbound_webhook_event(
+        self,
+        *,
+        tenant_id: str,
+        source: str,
+        event_type: str,
+        object_type: str,
+        object_id: str | None,
+        payload: dict[str, Any],
+        payload_hash: str,
+        signature_valid: bool,
+        status: str,
+        header_metadata: dict[str, Any],
+        received_by: str,
+        received_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = received_at or datetime.utcnow()
+        with self._session() as session:
+            event = DBInboundWebhookEvent(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                source=source,
+                event_type=event_type,
+                object_type=object_type,
+                object_id=object_id,
+                payload=payload,
+                payload_hash=payload_hash,
+                signature_valid=signature_valid,
+                status=status,
+                header_metadata=header_metadata,
+                received_by=received_by,
+                received_at=timestamp,
+            )
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            return self._to_inbound_webhook_event_dict(event)
+
+    def list_inbound_webhook_events(
+        self,
+        *,
+        tenant_id: str,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBInboundWebhookEvent).where(
+                DBInboundWebhookEvent.tenant_id == tenant_id
+            )
+            if source:
+                query = query.where(DBInboundWebhookEvent.source == source)
+            rows = (
+                query.order_by(DBInboundWebhookEvent.received_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_inbound_webhook_event_dict(row) for row in rows]
+
+    def list_notification_deliveries(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None = "pending",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBNotificationDelivery).where(
+                DBNotificationDelivery.tenant_id == tenant_id
+            )
+            if status:
+                query = query.where(DBNotificationDelivery.status == status)
+            rows = (
+                query.order_by(DBNotificationDelivery.created_at.asc())
+                .limit(limit)
+                .all()
+            )
+            deliveries: list[dict[str, Any]] = []
+            for row in rows:
+                event = session.get(DBNotificationEvent, row.event_id)
+                deliveries.append(self._to_notification_delivery_dict(row, event))
+            return deliveries
+
+    def mark_notification_delivery(
+        self,
+        *,
+        tenant_id: str,
+        delivery_id: str,
+        status: str,
+        increment_attempts: bool,
+        response_metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+        next_attempt_at: datetime | None = None,
+        sent_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            delivery = (
+                session.query(DBNotificationDelivery)
+                .where(
+                    DBNotificationDelivery.tenant_id == tenant_id,
+                    DBNotificationDelivery.id == delivery_id,
+                )
+                .first()
+            )
+            if delivery is None:
+                raise ValueError(f"unknown notification delivery: {delivery_id}")
+            if increment_attempts:
+                delivery.attempts += 1
+            delivery.status = status
+            delivery.response_metadata = response_metadata or {}
+            delivery.last_error = error
+            delivery.next_attempt_at = next_attempt_at
+            delivery.sent_at = sent_at
+            delivery.updated_at = datetime.utcnow()
+            session.commit()
+            session.refresh(delivery)
+            event = session.get(DBNotificationEvent, delivery.event_id)
+            return self._to_notification_delivery_dict(delivery, event)
 
     @staticmethod
     def _to_snapshot_dict(snapshot: DBAuditSnapshot) -> dict[str, Any]:
@@ -1260,6 +1729,143 @@ class LocalRepository:
             "approved_at": proposal.approved_at,
             "output": proposal.output or {},
             "provenance": provenance.usage_metadata if provenance else {},
+        }
+
+    @staticmethod
+    def _to_source_intel_proposal_dict(db: DBSourceIntelProposal) -> dict[str, Any]:
+        payload = dict(db.payload or {})
+        raw_signal = payload.get("signal")
+        signal: dict[str, Any] = raw_signal if isinstance(raw_signal, dict) else {}
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "run_id": db.run_id,
+            "adapter_name": db.adapter_name,
+            "signal_type": db.signal_type,
+            "source_id": db.source_id,
+            "source_url": db.source_url,
+            "source_hash": db.source_hash,
+            "approval_state": db.approval_state,
+            "decided_by": db.decided_by,
+            "decided_at": db.decided_at,
+            "created_at": db.created_at,
+            "title": signal.get("title"),
+            "summary": signal.get("summary"),
+            "score": signal.get("score"),
+            "payload": payload,
+        }
+
+    @staticmethod
+    def _to_source_intel_schedule_dict(db: DBSourceIntelSchedule) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "name": db.name,
+            "query": db.query,
+            "source_ids": db.source_ids or [],
+            "interval_hours": db.interval_hours,
+            "mode": db.mode,
+            "status": db.status,
+            "created_by": db.created_by,
+            "last_run_at": db.last_run_at,
+            "created_at": db.created_at,
+        }
+
+    @staticmethod
+    def _to_source_intel_job_execution_dict(db: DBSourceIntelJobExecution) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "schedule_id": db.schedule_id,
+            "run_id": db.run_id,
+            "status": db.status,
+            "started_at": db.started_at,
+            "finished_at": db.finished_at,
+            "summary": db.summary or {},
+            "error": db.error,
+            "created_by": db.created_by,
+        }
+
+    @staticmethod
+    def _to_notification_event_dict(
+        db: DBNotificationEvent,
+        *,
+        delivery_count: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "event_type": db.event_type,
+            "source": db.source,
+            "object_type": db.object_type,
+            "object_id": db.object_id,
+            "payload": db.payload or {},
+            "payload_hash": db.payload_hash,
+            "status": db.status,
+            "created_by": db.created_by,
+            "created_at": db.created_at,
+            "delivery_count": delivery_count,
+        }
+
+    @staticmethod
+    def _to_notification_delivery_dict(
+        db: DBNotificationDelivery,
+        event: DBNotificationEvent | None,
+    ) -> dict[str, Any]:
+        event_payload = (
+            LocalRepository._to_notification_event_dict(event)
+            if event is not None
+            else None
+        )
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "event_id": db.event_id,
+            "channel": db.channel,
+            "destination_ref": db.destination_ref,
+            "status": db.status,
+            "attempts": db.attempts,
+            "max_attempts": db.max_attempts,
+            "next_attempt_at": db.next_attempt_at,
+            "last_error": db.last_error,
+            "response_metadata": db.response_metadata or {},
+            "sent_at": db.sent_at,
+            "created_at": db.created_at,
+            "updated_at": db.updated_at,
+            "event": event_payload,
+        }
+
+    @staticmethod
+    def _to_notification_preference_dict(
+        db: DBNotificationPreference,
+    ) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "channel": db.channel,
+            "event_type": db.event_type,
+            "enabled": db.enabled,
+            "reason": db.reason,
+            "updated_by": db.updated_by,
+            "updated_at": db.updated_at,
+        }
+
+    @staticmethod
+    def _to_inbound_webhook_event_dict(db: DBInboundWebhookEvent) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "source": db.source,
+            "event_type": db.event_type,
+            "object_type": db.object_type,
+            "object_id": db.object_id,
+            "payload": db.payload or {},
+            "payload_hash": db.payload_hash,
+            "signature_valid": db.signature_valid,
+            "status": db.status,
+            "header_metadata": db.header_metadata or {},
+            "received_by": db.received_by,
+            "received_at": db.received_at,
         }
 
     @staticmethod

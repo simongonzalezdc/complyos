@@ -53,6 +53,95 @@ def build_release_checklist(root: Path | str = ".") -> list[ReleaseCheck]:
     return checks
 
 
+def build_deployment_checklist(root: Path | str = ".") -> list[ReleaseCheck]:
+    """Return deployment hardening checks for source-intelligence operations."""
+    base = Path(root)
+    checks = build_release_checklist(base)
+    deployment_checks = [
+        (
+            "source_intel_docs",
+            "Source intelligence hardening docs",
+            "docs/source-intelligence-engine-v0.md",
+            "production hardening",
+        ),
+        (
+            "external_api_list",
+            "External API research list",
+            "docs/external-api-research-list.md",
+            "list-only",
+        ),
+        (
+            "source_intel_review_ui",
+            "Source intelligence review UI",
+            "complyos/web/dashboard.py",
+            "/source-intel/review",
+        ),
+        (
+            "source_intel_api_endpoints",
+            "Source intelligence API endpoints",
+            "complyos/web/api_v1.py",
+            "/source-intel/export-packet",
+        ),
+        (
+            "migration_strategy",
+            "Schema migration strategy",
+            "complyos/core/migrations.py",
+            "20260612_source_intel_hardening",
+        ),
+        (
+            "observability_action_logs",
+            "Source intelligence action logging",
+            "complyos/services/source_intel.py",
+            "source_intel.schedule.execute",
+        ),
+        (
+            "notification_outbox",
+            "Notification outbox",
+            "complyos/services/notifications.py",
+            "notification.event.enqueue",
+        ),
+        (
+            "signed_hook_sender",
+            "Signed hook sender",
+            "complyos/notification/outbox.py",
+            "X-ComplyOS-Signature",
+        ),
+        (
+            "email_outbox_sender",
+            "Email outbox sender",
+            "complyos/notification/outbox.py",
+            "EmailEventSender",
+        ),
+        (
+            "inbound_hook_api",
+            "Inbound hook API",
+            "complyos/web/api_v1.py",
+            "/hooks/inbound/{source}",
+        ),
+        (
+            "notification_preferences",
+            "Notification preferences and kill switches",
+            "complyos/services/notifications.py",
+            "notification.preference.set",
+        ),
+        (
+            "notification_worker_templates",
+            "Notification worker templates",
+            "deploy/systemd/complyos-notification-drain.service",
+            "complyos notifications drain",
+        ),
+    ]
+    for check_id, label, relative_path, required_text in deployment_checks:
+        ok = _file_contains(base, relative_path, required_text)
+        message = (
+            f"{relative_path} contains {required_text}"
+            if ok
+            else f"{relative_path} missing required deployment text: {required_text}"
+        )
+        checks.append({"id": check_id, "label": label, "ok": ok, "message": message})
+    return checks
+
+
 def release_ready(root: Path | str = ".") -> bool:
     """Return True when every release check passes."""
     return all(item["ok"] for item in build_release_checklist(root))

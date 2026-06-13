@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import complyos.core.release as release
 from complyos.core.release import build_release_checklist
 
 
@@ -29,3 +30,22 @@ def test_release_checklist_flags_missing_security_policy(tmp_path: Path) -> None
 
     assert checks["security_policy"]["ok"] is False
     assert "SECURITY.md" in checks["security_policy"]["message"]
+
+
+def test_deployment_checklist_covers_source_intel_hardening() -> None:
+    assert hasattr(release, "build_deployment_checklist")
+    checklist = release.build_deployment_checklist(Path.cwd())
+    checks = {item["id"]: item for item in checklist}
+
+    assert checks["source_intel_docs"]["ok"] is True
+    assert checks["external_api_list"]["ok"] is True
+    assert checks["source_intel_review_ui"]["ok"] is True
+    assert checks["source_intel_api_endpoints"]["ok"] is True
+    assert checks["migration_strategy"]["ok"] is True
+    assert checks["observability_action_logs"]["ok"] is True
+    assert checks["notification_outbox"]["ok"] is True
+    assert checks["signed_hook_sender"]["ok"] is True
+    assert checks["email_outbox_sender"]["ok"] is True
+    assert checks["inbound_hook_api"]["ok"] is True
+    assert checks["notification_preferences"]["ok"] is True
+    assert checks["notification_worker_templates"]["ok"] is True

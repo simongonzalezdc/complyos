@@ -1,0 +1,24 @@
+name: complyos-notification-worker
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  drain-notification-outbox:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install project
+        run: uv sync --extra dev
+      - name: Drain notification outbox
+        env:
+          COMPLYOS_DATABASE_URL: ${{ secrets.COMPLYOS_DATABASE_URL }}
+          COMPLYOS_WEBHOOK_URL: ${{ secrets.COMPLYOS_WEBHOOK_URL }}
+          COMPLYOS_WEBHOOK_SECRET: ${{ secrets.COMPLYOS_WEBHOOK_SECRET }}
+          COMPLYOS_SMTP_HOST: ${{ secrets.COMPLYOS_SMTP_HOST }}
+          COMPLYOS_SMTP_USERNAME: ${{ secrets.COMPLYOS_SMTP_USERNAME }}
+          COMPLYOS_SMTP_PASSWORD: ${{ secrets.COMPLYOS_SMTP_PASSWORD }}
+          COMPLYOS_NOTIFICATION_EMAIL_TO: ${{ secrets.COMPLYOS_NOTIFICATION_EMAIL_TO }}
+        run: uv run complyos notifications drain --send --limit 100 --json

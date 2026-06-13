@@ -1229,8 +1229,9 @@
           <h2 id="suite-title">LearningOps Suite is modular on purpose.</h2>
           <p>
             The suite is not a pile of fake modules. It is a labeled operating model:
-            ComplyOS is live, RegWatch has a proposal-only contract, and the broader
-            training-ops modules are synthetic demos or roadmap until buyer pull proves them.
+            ComplyOS is live, Source Intelligence is the shared tested spine, RegWatch
+            has a proposal-only contract, and the broader training-ops modules are
+            synthetic demos or roadmap until buyer pull proves them.
           </p>
         </div>
         <div class="suite-board" aria-label="LearningOps Suite module maturity board">
@@ -1246,14 +1247,38 @@
               <span>Gap reports</span>
               <span>Evidence packets</span>
               <span>CLI/API/MCP</span>
+              <span>Source Intel</span>
+              <span>Notification outbox</span>
+            </div>
+          </article>
+          <article class="suite-card live">
+            <span class="maturity">Live</span>
+            <h3>Source Intelligence</h3>
+            <p>
+              Shared registry, source snapshots, content hashes, signals, and
+              review proposals that feed RegWatch and MicroLearn Radar, now with
+              DB schedules, execution receipts, email/webhook outbox events,
+              inbound hook receipts, preferences, review UI, and export packets.
+            </p>
+            <div class="module-list" aria-label="Live Source Intelligence primitives">
+              <span>Source snapshots</span>
+              <span>Content hash</span>
+              <span>Adapter fan-out</span>
+              <span>Review proposals</span>
+              <span>Scheduled receipts</span>
+              <span>Email + hook events</span>
+              <span>Inbound receipts</span>
+              <span>Kill switches</span>
+              <span>Export packet</span>
             </div>
           </article>
           <article class="suite-card contract">
             <span class="maturity">Contract</span>
             <h3>RegWatch</h3>
             <p>
-              Official-source regulatory signals, coverage disclosures, relevance
-              rationale, and human-reviewed proposals before rules or training change.
+              Official-source regulatory signals over the shared Source Intelligence
+              spine, with coverage disclosures and human-reviewed proposals before
+              rules or training change.
             </p>
             <div class="module-list" aria-label="RegWatch contract artifacts">
               <span>Source registry</span>
@@ -1280,8 +1305,9 @@
             <span class="maturity">Roadmap</span>
             <h3>Instructional engine</h3>
             <p>
-              MicroLearn Radar, JobAid Studio, TrainTheTrainer, SessionCommand, and
-              SkillsCheck stay roadmap until implementation and review gates exist.
+              MicroLearn Radar now has a tested proposal adapter under the shared spine;
+              JobAid Studio, TrainTheTrainer, SessionCommand, and SkillsCheck stay
+              roadmap until implementation and review gates exist.
             </p>
             <div class="module-list" aria-label="Roadmap instructional modules">
               <span>MicroLearn</span>
@@ -1405,7 +1431,8 @@
             <h2 id="connector-title">Meet teams where their records already live.</h2>
             <p>
               Enterprise buyers do not all get API access on day one. ComplyOS starts with plain exports,
-              then points each profile toward the systems the buyer already recognizes.
+              source uploads, and local scheduled receipts, then points each profile toward the systems
+              the buyer already recognizes when API access is approved.
             </p>
             <ul class="connector-list">
               <li>CSV fallback for locked-down enterprises and schools.</li>

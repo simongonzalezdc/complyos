@@ -19,7 +19,9 @@ interfaces, synthetic demos, and roadmap modules are not blended.
 Regulatory awareness is defined as [RegWatch v0](docs/regwatch-v0.md): official
 source monitoring, source provenance, coverage-gap disclosure, and
 human-approved proposals before any rule, training, or notification changes
-state.
+state. The Source Intelligence spine now includes DB-backed schedules, job
+execution receipts, review UI, API/CLI export packets, and local fallbacks so
+external API procurement does not block hardening.
 
 LearningOps demo packets are synthetic and explicitly labeled:
 
@@ -38,6 +40,8 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 - **Import governance** — Preview/quarantine/promote CSV rows instead of letting bad exports mutate truth.
 - **Privacy workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and dry-run retention cleanup.
 - **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
+- **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream rule or module changes.
+- **Notification outbox, email, and signed hooks** — Queue email, Slack, Teams, or customer webhook deliveries with payload hashes, retry state, dry-run drain, channel/event kill switches, and HMAC headers instead of coupling jobs to network uptime.
 - **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, and MCP tools.
 - **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
 
@@ -116,6 +120,12 @@ complyos serve-dashboard --host 127.0.0.1 --port 8000
 # Run configured scheduled audits once from cron/systemd/Forgejo Actions
 complyos run-schedule --config complyos.yaml
 
+# Queue and drain notification outbox events without inline network coupling
+complyos notifications list --db complyos.db --json
+complyos notifications preference-set --db complyos.db --channel email --event-type audit.completed --disabled --reason "quiet hours" --json
+complyos notifications drain --db complyos.db --dry-run --json
+complyos notifications drain --db complyos.db --send --json
+
 # Check release-readiness artifacts
 complyos release-check --json
 
@@ -148,6 +158,32 @@ complyos health
 # Send reminders / manager notifications for current gaps
 complyos remediate --dry-run
 ```
+
+### Notification and Hook Operations
+
+ComplyOS now treats notifications and hooks as durable infrastructure, not inline
+side effects. Audit, privacy, retention, and source-intelligence workflows enqueue
+tenant-scoped `notification_events`; a separate worker drains `email`, `slack`,
+`teams`, or generic `webhook` deliveries.
+
+Provider-neutral controls that are implemented now:
+
+- durable outbox tables for events and deliveries;
+- retry, skip, sent, and dead-letter delivery states;
+- SMTP-backed email delivery via `COMPLYOS_SMTP_*` and
+  `COMPLYOS_NOTIFICATION_EMAIL_TO`;
+- Slack, Teams, and generic webhook delivery via `COMPLYOS_SLACK_WEBHOOK_URL`,
+  `COMPLYOS_TEAMS_WEBHOOK_URL`, and `COMPLYOS_WEBHOOK_URL`;
+- optional outbound HMAC signing via `COMPLYOS_WEBHOOK_SECRET`;
+- channel/event preferences and tenant kill switches through
+  `complyos notifications preference-set` and
+  `/api/v1/notifications/preferences`;
+- generic inbound hook receipts through `POST /api/v1/hooks/inbound/{source}`;
+- optional inbound HMAC validation via `COMPLYOS_INBOUND_WEBHOOK_SECRET`;
+- systemd, cron, and Forgejo Action worker templates under `deploy/`.
+
+Still intentionally deferred: real customer webhook URLs, real SMTP credentials,
+paid regulatory APIs, and provider-specific LMS/HRIS parsers.
 
 ### MCP Server
 
@@ -258,11 +294,13 @@ Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes fo
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
-- [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 - [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
+- [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only
+- [x] Notification outbox hooks — DB-backed events/deliveries/preferences, source-intel/audit/privacy event enqueue, email/webhook drain, signed outbound and inbound hook payloads, worker templates, and no-secret logs
 
-Remaining work is mostly outside application code: counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
+Remaining work is mostly outside application code: real webhook URLs/SMTP credentials, paid regulatory APIs, provider-specific LMS/HRIS event parsers, counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
 
 ---
 
