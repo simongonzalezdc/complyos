@@ -296,6 +296,36 @@ class ImportService:
             )
 
         rows = self.repository.list_import_rows(batch_id)
+        if not rows:
+            # An empty/partial load (PARTIAL_LOAD at preview) has no rows to gate,
+            # so the per-row blocking check below would let it "promote" zero
+            # records as complete. Plan §6.4/§6.5: a partial load may not be marked
+            # complete without an explicit operator decision. Fail closed instead.
+            self.repository.update_import_batch_status(batch_id, "QUARANTINED")
+            self.repository.save_action_log(
+                tenant_id=context.tenant_id,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                action="import.promote",
+                object_type="import_batch",
+                object_id=batch_id,
+                result="blocked",
+                request_id=context.request_id,
+                metadata={"reason": "partial_load_no_rows"},
+            )
+            return ImportPromotionResult(
+                batch_id=batch_id,
+                status="QUARANTINED",
+                promoted_rows=0,
+                blocked_rows=0,
+                issues=[
+                    ImportIssue(
+                        code="PARTIAL_LOAD",
+                        severity="blocker",
+                        message="import has no data rows; cannot promote a partial load",
+                    )
+                ],
+            )
         blocking_rows = [row for row in rows if row["validation_status"] in BLOCKING_ROW_STATES]
         if blocking_rows:
             self.repository.update_import_batch_status(batch_id, "QUARANTINED")
@@ -510,9 +540,11 @@ class ImportService:
             else:
                 seen_keys.add(duplicate_key)
 
+            row_issues.extend(self._backdated_date_issues(mapped, index))
+
             has_blocker = any(issue.severity == "blocker" for issue in row_issues)
             has_decision_warning = file_decision_warning or any(
-                issue.code == "DUPLICATE_ROW" for issue in row_issues
+                issue.code in {"DUPLICATE_ROW", "BACKDATED_DATE"} for issue in row_issues
             )
             if has_blocker:
                 status = "REJECTED"
@@ -542,6 +574,44 @@ class ImportService:
             for issue in (ImportIssue(**item) for item in row["issues"])
         ]
         return rows, issues, unexpected_columns
+
+    @staticmethod
+    def _backdated_date_issues(mapped: dict[str, Any], row_number: int) -> list[ImportIssue]:
+        """Flag backdated due/expiry dates that could hide a real compliance gap.
+
+        A due date already in the past, or an expiry that precedes the row's own
+        assigned date, is an anomaly: it can mask an open gap as "complete" or
+        "already expired" at import time. We route the row to NEEDS_DECISION
+        (warning, same gating as DUPLICATE_ROW) so a reviewer must accept it
+        explicitly rather than letting it promote silently.
+        """
+        issues: list[ImportIssue] = []
+        today = datetime.now(UTC).date()
+        due_date = _parse_date(mapped.get("due_date"))
+        if due_date is not None and due_date < today:
+            issues.append(
+                ImportIssue(
+                    code="BACKDATED_DATE",
+                    severity="warning",
+                    row_number=row_number,
+                    column="due_date",
+                    message="due date is in the past; reviewer decision required",
+                )
+            )
+        expires_at = _parse_date(mapped.get("expires_at"))
+        assigned = _parse_datetime(mapped.get("assigned_date"))
+        assigned_date = assigned.date() if assigned is not None else None
+        if expires_at is not None and assigned_date is not None and expires_at < assigned_date:
+            issues.append(
+                ImportIssue(
+                    code="BACKDATED_DATE",
+                    severity="warning",
+                    row_number=row_number,
+                    column="expires_at",
+                    message="expiry precedes assignment date; reviewer decision required",
+                )
+            )
+        return issues
 
     @staticmethod
     def _allowed_headers() -> set[str]:
