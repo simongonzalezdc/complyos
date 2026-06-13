@@ -149,3 +149,59 @@ def test_source_intel_cli_can_persist_and_review_db_queue(tmp_path: Path) -> Non
     )
     assert decided.exit_code == 0
     assert json.loads(decided.output)["proposal"]["approval_state"] == "approved_for_brief"
+
+
+def test_source_intel_cli_schedules_runs_and_exports_packet(tmp_path: Path) -> None:
+    db_path = tmp_path / "source-intel-scheduled.db"
+    packet_path = tmp_path / "review-packet.json"
+
+    created = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "schedule-add",
+            "--db",
+            str(db_path),
+            "--name",
+            "daily-training-watch",
+            "--query",
+            "training",
+            "--interval-hours",
+            "24",
+            "--json",
+        ],
+    )
+    assert created.exit_code == 0
+    assert json.loads(created.output)["schedule"]["name"] == "daily-training-watch"
+
+    listed = runner.invoke(app, ["source-intel", "schedule-list", "--db", str(db_path), "--json"])
+    assert listed.exit_code == 0
+    assert json.loads(listed.output)["schedules"][0]["name"] == "daily-training-watch"
+
+    run = runner.invoke(
+        app,
+        ["source-intel", "run-scheduled", "--db", str(db_path), "--force", "--json"],
+    )
+    assert run.exit_code == 0
+    run_payload = json.loads(run.output)
+    assert run_payload["executions"][0]["status"] == "succeeded"
+    assert run_payload["executions"][0]["summary"]["proposal_count"] == 2
+
+    exported = runner.invoke(
+        app,
+        [
+            "source-intel",
+            "export-packet",
+            "--db",
+            str(db_path),
+            "--output",
+            str(packet_path),
+            "--json",
+        ],
+    )
+    assert exported.exit_code == 0
+    export_payload = json.loads(exported.output)
+    assert export_payload["packet"]["proposal_count"] == 2
+    assert export_payload["output"] == str(packet_path)
+    assert packet_path.exists()
+    assert json.loads(packet_path.read_text(encoding="utf-8"))["proposal_count"] == 2

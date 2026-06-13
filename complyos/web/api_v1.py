@@ -272,6 +272,15 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 
+    @router.get("/source-intel/export-packet")
+    async def export_source_intel_review_packet(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return SourceIntelService(repo).export_review_packet(context)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
     @router.post("/source-intel/proposals/{proposal_id}/decision")
     async def decide_source_intel_proposal(
         proposal_id: str,

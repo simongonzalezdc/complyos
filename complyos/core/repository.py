@@ -25,8 +25,10 @@ from complyos.models.database import (
     DBLegalHold,
     DBPrivacyRequest,
     DBRetentionPolicy,
+    DBSourceIntelJobExecution,
     DBSourceIntelProposal,
     DBSourceIntelRun,
+    DBSourceIntelSchedule,
     DBUser,
     init_db,
 )
@@ -548,6 +550,132 @@ class LocalRepository:
             session.commit()
             session.refresh(proposal)
             return self._to_source_intel_proposal_dict(proposal)
+
+    def save_source_intel_schedule(
+        self,
+        *,
+        tenant_id: str,
+        name: str,
+        query: str,
+        source_ids: list[str],
+        interval_hours: int,
+        mode: str,
+        status: str,
+        created_by: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = created_at or datetime.utcnow()
+        with self._session() as session:
+            schedule = (
+                session.query(DBSourceIntelSchedule)
+                .where(
+                    DBSourceIntelSchedule.tenant_id == tenant_id,
+                    DBSourceIntelSchedule.name == name,
+                )
+                .first()
+            )
+            if schedule is None:
+                schedule = DBSourceIntelSchedule(
+                    id=str(uuid.uuid4()),
+                    tenant_id=tenant_id,
+                    name=name,
+                    query=query,
+                    source_ids=source_ids,
+                    interval_hours=interval_hours,
+                    mode=mode,
+                    status=status,
+                    created_by=created_by,
+                    created_at=timestamp,
+                )
+                session.add(schedule)
+            else:
+                schedule.query = query
+                schedule.source_ids = source_ids
+                schedule.interval_hours = interval_hours
+                schedule.mode = mode
+                schedule.status = status
+            session.commit()
+            session.refresh(schedule)
+            return self._to_source_intel_schedule_dict(schedule)
+
+    def list_source_intel_schedules(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelSchedule).where(
+                DBSourceIntelSchedule.tenant_id == tenant_id
+            )
+            if status:
+                query = query.where(DBSourceIntelSchedule.status == status)
+            rows = query.order_by(DBSourceIntelSchedule.created_at.desc()).limit(limit).all()
+            return [self._to_source_intel_schedule_dict(row) for row in rows]
+
+    def record_source_intel_job_execution(
+        self,
+        *,
+        tenant_id: str,
+        schedule_id: str,
+        run_id: str | None,
+        status: str,
+        started_at: datetime,
+        finished_at: datetime | None,
+        summary: dict[str, Any],
+        error: str | None,
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._session() as session:
+            schedule = (
+                session.query(DBSourceIntelSchedule)
+                .where(
+                    DBSourceIntelSchedule.tenant_id == tenant_id,
+                    DBSourceIntelSchedule.id == schedule_id,
+                )
+                .first()
+            )
+            if schedule is None:
+                raise ValueError(f"unknown source-intelligence schedule: {schedule_id}")
+            execution = DBSourceIntelJobExecution(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                schedule_id=schedule_id,
+                run_id=run_id,
+                status=status,
+                started_at=started_at,
+                finished_at=finished_at,
+                summary=summary,
+                error=error,
+                created_by=created_by,
+            )
+            session.add(execution)
+            if status == "succeeded":
+                schedule.last_run_at = finished_at or started_at
+            session.commit()
+            session.refresh(execution)
+            return self._to_source_intel_job_execution_dict(execution)
+
+    def list_source_intel_job_executions(
+        self,
+        *,
+        tenant_id: str,
+        schedule_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBSourceIntelJobExecution).where(
+                DBSourceIntelJobExecution.tenant_id == tenant_id
+            )
+            if schedule_id:
+                query = query.where(DBSourceIntelJobExecution.schedule_id == schedule_id)
+            rows = (
+                query.order_by(DBSourceIntelJobExecution.started_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_source_intel_job_execution_dict(row) for row in rows]
 
     @staticmethod
     def _to_snapshot_dict(snapshot: DBAuditSnapshot) -> dict[str, Any]:
@@ -1392,6 +1520,37 @@ class LocalRepository:
             "summary": signal.get("summary"),
             "score": signal.get("score"),
             "payload": payload,
+        }
+
+    @staticmethod
+    def _to_source_intel_schedule_dict(db: DBSourceIntelSchedule) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "name": db.name,
+            "query": db.query,
+            "source_ids": db.source_ids or [],
+            "interval_hours": db.interval_hours,
+            "mode": db.mode,
+            "status": db.status,
+            "created_by": db.created_by,
+            "last_run_at": db.last_run_at,
+            "created_at": db.created_at,
+        }
+
+    @staticmethod
+    def _to_source_intel_job_execution_dict(db: DBSourceIntelJobExecution) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "schedule_id": db.schedule_id,
+            "run_id": db.run_id,
+            "status": db.status,
+            "started_at": db.started_at,
+            "finished_at": db.finished_at,
+            "summary": db.summary or {},
+            "error": db.error,
+            "created_by": db.created_by,
         }
 
     @staticmethod

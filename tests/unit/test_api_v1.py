@@ -263,3 +263,8 @@ def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) ->
         headers={**headers, "X-Actor-Role": "read_only"},
     )
     assert denied.status_code == 403
+
+    packet = client.get("/api/v1/source-intel/export-packet", headers=headers)
+    assert packet.status_code == 200
+    assert packet.json()["proposal_count"] == 2
+    assert packet.json()["decided_count"] == 1

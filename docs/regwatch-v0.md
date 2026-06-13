@@ -140,6 +140,10 @@ RegWatch can now use the shared source-intelligence runtime without paid APIs:
 - `complyos source-intel run-public --dry-run --json` previews implemented public API calls.
 - `complyos source-intel run-upload <file> --json` processes approved local source text when APIs are blocked.
 - `complyos source-intel review --json` lists or decides local JSONL review proposals.
+- `complyos source-intel schedule-add --db complyos.db --name daily-training-watch --json` creates a local schedule.
+- `complyos source-intel run-scheduled --db complyos.db --force --json` records durable job executions.
+- `complyos source-intel export-packet --db complyos.db --output packet.json --json` exports review/audit evidence.
+- `/source-intel/review` shows the human review queue in the dashboard app.
 
 The implemented clients cover Federal Register and eCFR contracts. OSHA, California,
 state agency pages, Regulations.gov, and EUR-Lex remain parser/API-registration work.

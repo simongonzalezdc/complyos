@@ -160,7 +160,12 @@ Mutating workflows also write action logs. The combination gives auditors, buyer
 
 ## Operations and Scalability Notes
 
-The operator-ready path keeps ComplyOS local-first: SQLite remains the default store, scheduled runs invoke the same CLI/API/MCP audit paths, and Slack/Teams notifications consume audit output rather than introducing a separate workflow engine.
+The operator-ready path keeps ComplyOS local-first: SQLite remains the default
+store, scheduled audit runs invoke the same CLI/API/MCP audit paths, and Source
+Intelligence schedules record DB job executions, action logs, review decisions,
+and export packets before any downstream rule/module work. Slack/Teams
+notifications consume audit output rather than introducing a separate workflow
+engine.
 
 PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 

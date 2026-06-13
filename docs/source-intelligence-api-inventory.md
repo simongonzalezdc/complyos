@@ -11,6 +11,7 @@ key, registration, parser work, vendor approval, or later budget.
 | Federal Register API | `FederalRegisterClient` | Public/free; no key in current implementation. | Proposed/final rules, notices, agency metadata, document URLs, publication dates. | Tune agency/topic filters; add pagination; add exact effective/comment date extraction. |
 | eCFR API | `ECFRClient` | Public/free; no key in current implementation. | Current/historical CFR search results, title/part/section metadata, text excerpts. | Validate endpoint parameters against production traffic; add full section fetch; add point-in-time diffing. |
 | Local fixture/upload path | `source-intel run-fixture`, `source-intel run-upload`, and `SourceReviewStore` | Free/local. | Human-approved excerpts, text uploads, CSV/manual workflows, demo/proof runs when enterprise internet/API access is blocked. | Add structured CSV batch command for many approved source excerpts. |
+| DB review/schedule path | `source-intel schedule-add`, `source-intel run-scheduled`, `source-intel export-packet`, API v1, and `/source-intel/review` | Free/local. | Durable schedules, execution receipts, review decisions, action logs, and export packets without external API credentials. | Add customer-specific cadence, notification hooks, and hosted auth when deployment target is chosen. |
 
 ## Free but not implemented yet
 
@@ -68,6 +69,13 @@ complyos source-intel run-upload approved-guidance.txt --topic 'manager feedback
 # Review or update the local proposal queue
 complyos source-intel review --store source-intel-reviews.jsonl --json
 complyos source-intel review --store source-intel-reviews.jsonl --proposal-id <id> --state approved_for_brief --json
+
+# Use the production-hardening DB path without paid/keyed APIs
+complyos source-intel run-fixture --db complyos.db --json
+complyos source-intel schedule-add --db complyos.db --name daily-training-watch --query training --interval-hours 24 --json
+complyos source-intel run-scheduled --db complyos.db --force --json
+complyos source-intel export-packet --db complyos.db --output source-intel-packet.json --json
+complyos deployment-check --json
 ```
 
 ## Guardrails
@@ -76,4 +84,5 @@ complyos source-intel review --store source-intel-reviews.jsonl --proposal-id <i
 - No adapter mutates ComplyOS rules.
 - Every proposal stays in a human-review queue first.
 - Coverage gaps must be shown when a source has no parser, no results, or a failed fetch.
-- Live crawler claims require scheduler/parser tests and operational evidence.
+- Live crawler claims require source-specific parser tests and operational evidence.
+- The local scheduler/job table proves operational plumbing, not coverage of every external source.

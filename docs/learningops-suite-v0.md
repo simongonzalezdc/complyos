@@ -90,8 +90,11 @@ source-intelligence spine:
 5. human approval gate.
 
 The implemented v0 slice is deterministic and test-covered. It does not include
-live network crawling, scheduled monitoring, source-specific parsers, or
-auto-publication. See [Source Intelligence Engine v0](./source-intelligence-engine-v0.md).
+paid/keyed integrations, source-specific parsers, autonomous publication, or
+claims that every jurisdiction is monitored. It now does include local
+DB-backed schedules, execution receipts, review UI, and export packets, so the
+production plumbing can be hardened before external API procurement. See
+[Source Intelligence Engine v0](./source-intelligence-engine-v0.md).
 
 ## RegWatch placement
 

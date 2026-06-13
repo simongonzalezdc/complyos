@@ -353,6 +353,48 @@ class DBSourceIntelProposal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class DBSourceIntelSchedule(Base):
+    __tablename__ = "source_intel_schedules"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_source_intel_schedule_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    mode: Mapped[str] = mapped_column(String, default="fixture", nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBSourceIntelJobExecution(Base):
+    __tablename__ = "source_intel_job_executions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    schedule_id: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class DBSchemaMigration(Base):
+    __tablename__ = "schema_migrations"
+
+    migration_id: Mapped[str] = mapped_column(String, primary_key=True)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 def resolve_database_url(database: str | None = None) -> str:
     """Resolve a SQLAlchemy database URL from env, URL, or SQLite path."""
     env_url = os.getenv("COMPLYOS_DATABASE_URL")
@@ -369,6 +411,9 @@ def init_db(db_path: str = "complyos.db") -> sessionmaker:
     engine = create_engine(resolve_database_url(db_path))
     Base.metadata.create_all(engine)
     _ensure_sqlite_schema(engine)
+    from complyos.core.migrations import apply_schema_migrations
+
+    apply_schema_migrations(engine)
     maker = sessionmaker(bind=engine)
     with maker() as session:
         if session.get(DBTenant, "local-default") is None:

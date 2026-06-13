@@ -19,7 +19,9 @@ interfaces, synthetic demos, and roadmap modules are not blended.
 Regulatory awareness is defined as [RegWatch v0](docs/regwatch-v0.md): official
 source monitoring, source provenance, coverage-gap disclosure, and
 human-approved proposals before any rule, training, or notification changes
-state.
+state. The Source Intelligence spine now includes DB-backed schedules, job
+execution receipts, review UI, API/CLI export packets, and local fallbacks so
+external API procurement does not block hardening.
 
 LearningOps demo packets are synthetic and explicitly labeled:
 
@@ -38,6 +40,7 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 - **Import governance** — Preview/quarantine/promote CSV rows instead of letting bad exports mutate truth.
 - **Privacy workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and dry-run retention cleanup.
 - **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
+- **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream rule or module changes.
 - **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, and MCP tools.
 - **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
 
@@ -261,6 +264,7 @@ Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes fo
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 - [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
+- [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only
 
 Remaining work is mostly outside application code: counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
 

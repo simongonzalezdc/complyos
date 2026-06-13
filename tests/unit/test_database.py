@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from sqlalchemy import inspect, text
+
 from complyos.models.database import (
     DBCourse,
     DBEnrollment,
@@ -23,6 +25,20 @@ class TestDatabaseInit:
         # Verify we can create a session
         session = sessionmaker()
         assert session is not None
+        session.close()
+
+    def test_init_db_records_schema_migrations_and_source_intel_job_tables(self, tmp_path):
+        sessionmaker = init_db(str(tmp_path / "migrated.db"))
+        session = sessionmaker()
+        assert session.bind is not None
+        table_names = set(inspect(session.bind).get_table_names())
+
+        assert "schema_migrations" in table_names
+        assert "source_intel_schedules" in table_names
+        assert "source_intel_job_executions" in table_names
+
+        rows = session.execute(text("SELECT migration_id FROM schema_migrations")).scalars().all()
+        assert "20260612_source_intel_hardening" in rows
         session.close()
 
 

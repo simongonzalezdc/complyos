@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -21,6 +22,7 @@ from complyos.api.mcp_server import (
     get_user_compliance_status,
 )
 from complyos.config import ComplyOSConfig
+from complyos.core.release import build_deployment_checklist
 from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
@@ -933,6 +935,16 @@ def _fixture_source() -> SourceDefinition:
     )
 
 
+def _run_fixture_source_monitor(query: str):
+    source = _fixture_source()
+    monitor = SourceMonitor(
+        sources=[source],
+        clients={source.id: _FixtureSourceClient()},
+        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
+    )
+    return monitor.run(query=query)
+
+
 @source_intel_app.command("sources")
 def source_intel_sources(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
@@ -973,13 +985,7 @@ def source_intel_run_fixture(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Run a no-network fixture through RegWatch and MicroLearn adapters."""
-    source = _fixture_source()
-    monitor = SourceMonitor(
-        sources=[source],
-        clients={source.id: _FixtureSourceClient()},
-        engine=SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]),
-    )
-    run = monitor.run(query=query)
+    run = _run_fixture_source_monitor(query)
     SourceReviewStore(store_path).save_many(run.proposals)
     db_receipt = None
     if db_path:
@@ -1241,6 +1247,153 @@ def source_intel_review(
     console.print(table)
 
 
+@source_intel_app.command("schedule-add")
+def source_intel_schedule_add(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    name: str = typer.Option(..., "--name", help="Stable schedule name"),
+    query: str = typer.Option("training", "--query", help="Source-monitoring query label"),
+    interval_hours: int = typer.Option(24, "--interval-hours", help="Run cadence in hours"),
+    mode: str = typer.Option("fixture", "--mode", help="Execution mode; fixture is local-only"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create/update a local source-intelligence schedule without external API setup."""
+    context = _local_cli_context(role="compliance_manager")
+    try:
+        schedule = SourceIntelService(LocalRepository(db_path)).create_schedule(
+            context,
+            name=name,
+            query=query,
+            interval_hours=interval_hours,
+            source_ids=["fixture-official-training-source"],
+            mode=mode,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    payload = {"schedule": schedule}
+    if json_output:
+        _print_json(payload)
+        return
+    console.print(f"[green]Schedule saved:[/green] {schedule['name']}")
+    console.print(f"[bold]Interval hours:[/bold] {schedule['interval_hours']}")
+
+
+@source_intel_app.command("schedule-list")
+def source_intel_schedule_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List local source-intelligence schedules."""
+    context = _local_cli_context(role="compliance_manager")
+    schedules = SourceIntelService(LocalRepository(db_path)).list_schedules(context)
+    payload = {"schedules": schedules}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Source Intelligence Schedules")
+    table.add_column("Name")
+    table.add_column("Query")
+    table.add_column("Mode")
+    table.add_column("Interval")
+    table.add_column("Status")
+    for schedule in schedules:
+        table.add_row(
+            str(schedule["name"]),
+            str(schedule["query"]),
+            str(schedule["mode"]),
+            f"{schedule['interval_hours']}h",
+            str(schedule["status"]),
+        )
+    console.print(table)
+
+
+@source_intel_app.command("run-scheduled")
+def source_intel_run_scheduled(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    force: bool = typer.Option(False, "--force", help="Run schedules even when not due"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Execute due local source-intelligence schedules and record job receipts."""
+    context = _local_cli_context(role="compliance_manager")
+    service = SourceIntelService(LocalRepository(db_path))
+    schedules = service.due_schedules(context, force=force)
+    executions = []
+    for schedule in schedules:
+        started_at = datetime.utcnow()
+        run_id = None
+        try:
+            if schedule["mode"] != "fixture":
+                raise ValueError(f"unsupported schedule mode: {schedule['mode']}")
+            run = _run_fixture_source_monitor(str(schedule["query"]))
+            receipt = service.record_run(context, query=str(schedule["query"]), run=run)
+            run_id = str(receipt["run_id"])
+            summary = {
+                "schedule_name": schedule["name"],
+                "query": schedule["query"],
+                "source_count": run.source_count,
+                "snapshot_count": run.snapshot_count,
+                "proposal_count": run.proposal_count,
+                "coverage_gaps": run.coverage_gaps,
+            }
+            execution = service.record_schedule_execution(
+                context,
+                schedule_id=str(schedule["id"]),
+                run_id=run_id,
+                status="succeeded",
+                started_at=started_at,
+                finished_at=datetime.utcnow(),
+                summary=summary,
+            )
+        except Exception as exc:
+            execution = service.record_schedule_execution(
+                context,
+                schedule_id=str(schedule["id"]),
+                run_id=run_id,
+                status="failed",
+                started_at=started_at,
+                finished_at=datetime.utcnow(),
+                summary={"schedule_name": schedule["name"], "query": schedule["query"]},
+                error=str(exc),
+            )
+        executions.append(execution)
+
+    payload = {
+        "scheduled_count": len(schedules),
+        "executions": executions,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    console.print(f"[bold]Schedules executed:[/bold] {len(executions)}")
+    for execution in executions:
+        console.print(f"  {execution['schedule_id']}: {execution['status']}")
+
+
+@source_intel_app.command("export-packet")
+def source_intel_export_packet(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    output_path: str | None = typer.Option(None, "--output", help="Optional JSON output path"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Export a source-intelligence review/audit packet for human review."""
+    context = _local_cli_context(role="compliance_manager")
+    packet = SourceIntelService(LocalRepository(db_path)).export_review_packet(context)
+    if output_path:
+        Path(output_path).write_text(
+            json.dumps(packet, indent=2, default=str),
+            encoding="utf-8",
+        )
+    payload = {"packet": packet, "output": output_path}
+    if json_output:
+        _print_json(payload)
+        return
+    console.print(f"[bold]Source-intelligence proposals:[/bold] {packet['proposal_count']}")
+    if output_path:
+        console.print(f"[bold]Packet written:[/bold] {output_path}")
+
+
 @admin_app.command("roles")
 def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output raw JSON")):
     """Show default roles and permissions."""
@@ -1478,6 +1631,34 @@ def privacy_retention_run(
     console.print(f"[bold]Retention run:[/bold] {mode}")
     console.print(f"[bold]Eligible:[/bold] {result.eligible_counts}")
     console.print(f"[bold]Deleted:[/bold] {result.deleted_counts}")
+
+
+@app.command("deployment-check")
+def deployment_check(
+    root: str = typer.Option(".", "--root", help="Repository root to inspect"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Run deployment/observability checks for release hardening."""
+    checklist = build_deployment_checklist(Path(root))
+    payload = {
+        "ready": all(item["ok"] for item in checklist),
+        "checks": checklist,
+    }
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Deployment Hardening Checks")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Message")
+    for item in checklist:
+        table.add_row(
+            item["label"],
+            "ok" if item["ok"] else "missing",
+            item["message"],
+        )
+    console.print(table)
 
 
 privacy_app.add_typer(privacy_retention_app, name="retention")

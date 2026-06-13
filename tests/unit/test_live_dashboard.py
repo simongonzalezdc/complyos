@@ -6,7 +6,14 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
+from complyos.core.repository import LocalRepository
+from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AuditReport
+from complyos.regwatch import RegWatchAdapter
+from complyos.services.context import default_local_context
+from complyos.services.source_intel import SourceIntelService
+from complyos.source_intel import SourceDefinition, SourceIntelEngine, SourceSnapshot, SourceType
+from complyos.source_intel.monitor import SourceMonitorRun
 from complyos.web.dashboard import create_dashboard_app
 
 
@@ -58,3 +65,48 @@ def test_live_dashboard_html_endpoint() -> None:
     assert "text/html" in response.headers["content-type"]
     assert "ComplyOS Dashboard" in response.text
     assert "hash-live" in response.text
+
+
+def test_live_dashboard_source_intel_review_page(tmp_path) -> None:
+    repo = LocalRepository(str(tmp_path / "dashboard-source-intel.db"))
+    source = SourceDefinition(
+        id="official-source",
+        name="Official Source",
+        url="https://example.gov/rule",
+        source_type=SourceType.OFFICIAL_REGULATOR,
+        authority="official",
+        jurisdictions=["US"],
+        topics=["safety training", "manager feedback"],
+    )
+    snapshot = SourceSnapshot.from_text(
+        source_id=source.id,
+        url=source.url,
+        title="Final rule and practice guide",
+        text=(
+            "A final rule says covered employers must train workers. "
+            "Managers can use scenario practice, examples, and a checklist."
+        ),
+    )
+    proposals = SourceIntelEngine(adapters=[RegWatchAdapter(), MicrolearningAdapter()]).evaluate(
+        [source], [snapshot]
+    )
+    SourceIntelService(repo).record_run(
+        default_local_context(role="compliance_manager", surface="dashboard"),
+        query="training",
+        run=SourceMonitorRun(
+            source_count=1,
+            snapshot_count=1,
+            proposal_count=len(proposals),
+            proposals=proposals,
+            coverage_gaps=[],
+        ),
+    )
+    client = TestClient(create_dashboard_app(auditor=FakeAuditor(), repository=repo))
+
+    response = client.get("/source-intel/review")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Source Intelligence Review Queue" in response.text
+    assert "Final rule and practice guide" in response.text
+    assert "needs_review" in response.text

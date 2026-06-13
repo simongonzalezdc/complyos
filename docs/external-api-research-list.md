@@ -4,6 +4,9 @@ We are **not** building against these external APIs right now. This file is only
 the research/acquisition list so access decisions do not block production
 hardening.
 
+Status: **list-only**. No paid/keyed external API integration is required for
+the current production-hardening work.
+
 ## Regulatory/source intelligence APIs
 
 | Priority | API/source | Access question to research | Why we may need it | Official starting point |

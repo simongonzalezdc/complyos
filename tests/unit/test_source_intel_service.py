@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from complyos.core.repository import LocalRepository
@@ -83,3 +85,53 @@ def test_source_intel_service_validates_review_state_and_permission(tmp_path) ->
     read_only = default_local_context(tenant_id="tenant-a", role="read_only")
     with pytest.raises(AuthorizationError):
         service.decide_proposal(read_only, proposal_id=proposal_id, state="rejected")
+
+
+def test_source_intel_service_schedules_executions_and_exports_review_packet(
+    tmp_path,
+) -> None:
+    repo = LocalRepository(str(tmp_path / "source-intel-hardening.db"))
+    service = SourceIntelService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+    now = datetime(2026, 6, 12, 12, 0, 0)
+
+    schedule = service.create_schedule(
+        context,
+        name="daily-training-watch",
+        query="training",
+        interval_hours=24,
+        source_ids=["fixture-official-training-source"],
+        mode="fixture",
+    )
+
+    assert schedule["name"] == "daily-training-watch"
+    assert schedule["status"] == "active"
+    assert service.due_schedules(context, now=now)[0]["id"] == schedule["id"]
+
+    receipt = service.record_run(context, query="training", run=_run_with_two_proposals())
+    execution = service.record_schedule_execution(
+        context,
+        schedule_id=schedule["id"],
+        run_id=receipt["run_id"],
+        status="succeeded",
+        started_at=now,
+        finished_at=now,
+        summary={"proposal_count": receipt["proposal_count"]},
+    )
+
+    assert execution["status"] == "succeeded"
+    assert execution["run_id"] == receipt["run_id"]
+    assert service.due_schedules(context, now=now) == []
+    assert service.due_schedules(context, now=now + timedelta(hours=25))[0]["id"] == schedule["id"]
+
+    proposal_id = service.list_proposals(context)[0]["id"]
+    service.decide_proposal(context, proposal_id=proposal_id, state="approved_for_brief")
+
+    packet = service.export_review_packet(context)
+
+    assert packet["tenant_id"] == "tenant-a"
+    assert packet["proposal_count"] == 2
+    assert packet["decided_count"] == 1
+    assert packet["schedules"][0]["name"] == "daily-training-watch"
+    assert packet["job_executions"][0]["status"] == "succeeded"
+    assert packet["proposals"][0]["run_id"] == receipt["run_id"]
