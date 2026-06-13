@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from complyos.api.mcp_server import (
     _get_connector,
     audit_compliance_gaps,
@@ -236,11 +238,78 @@ class TestRemediationMCPTool:
 
 
 class TestExportMCPTool:
-    async def test_export_audit_report_html(self, tmp_path):
+    """MCP export tools route through EvidenceService and require evidence:export.
+
+    WP13 (P5/P9): the default MCP role (agent_service_account) is proposal-only and
+    lacks evidence:export, so a default agent must be DENIED any PII report export.
+    The capability only works when COMPLYOS_MCP_ROLE is raised to a role that holds
+    evidence:export (e.g. compliance_manager). This is the intentionally tightened
+    least-privilege boundary; do not weaken it back to audit:read.
+    """
+
+    async def test_export_audit_report_html_denied_for_default_role(
+        self, monkeypatch, tmp_path
+    ):
+        from complyos.api.mcp_server import export_audit_report_html
+        from complyos.services.context import AuthorizationError
+
+        # Default MCP role (agent_service_account) lacks evidence:export.
+        monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+        output = str(tmp_path / "report.html")
+
+        with pytest.raises(AuthorizationError) as exc:
+            await export_audit_report_html(output_path=output)
+
+        assert exc.value.permission == "evidence:export"
+        # Fail closed: nothing is written when the actor is denied.
+        assert not (tmp_path / "report.html").exists()
+
+    async def test_export_audit_report_html_allowed_for_elevated_role(
+        self, monkeypatch, tmp_path
+    ):
         from complyos.api.mcp_server import export_audit_report_html
 
+        # Elevate to a role that holds evidence:export.
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "compliance_manager")
         output = str(tmp_path / "report.html")
+
         result = await export_audit_report_html(output_path=output)
+
         assert result["output_path"] == output
         assert result["gaps_found"] >= 2
         assert len(result["evidence_hash"]) == 64
+        assert (tmp_path / "report.html").exists()
+
+    async def test_export_compliance_dashboard_denied_for_default_role(
+        self, monkeypatch, tmp_path
+    ):
+        from complyos.api.mcp_server import export_compliance_dashboard
+        from complyos.services.context import AuthorizationError
+
+        monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+        output = str(tmp_path / "dashboard.html")
+
+        with pytest.raises(AuthorizationError) as exc:
+            await export_compliance_dashboard(
+                output_path=output, db_path=str(tmp_path / "dash.db")
+            )
+
+        assert exc.value.permission == "evidence:export"
+        assert not (tmp_path / "dashboard.html").exists()
+
+    async def test_export_compliance_dashboard_allowed_for_elevated_role(
+        self, monkeypatch, tmp_path
+    ):
+        from complyos.api.mcp_server import export_compliance_dashboard
+
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "compliance_manager")
+        output = str(tmp_path / "dashboard.html")
+
+        result = await export_compliance_dashboard(
+            output_path=output, db_path=str(tmp_path / "dash.db")
+        )
+
+        assert result["dashboard_path"] == output
+        assert result["gaps_found"] >= 2
+        assert len(result["evidence_hash"]) == 64
+        assert (tmp_path / "dashboard.html").exists()

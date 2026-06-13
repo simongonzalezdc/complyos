@@ -16,7 +16,6 @@ from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.auditor import ComplianceAuditor
-from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender, build_notifier_from_env
@@ -24,7 +23,7 @@ from complyos.services.ai_proposals import AIProposalService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
-    PERM_AUDIT_READ,
+    PERM_EVIDENCE_EXPORT,
     ROLE_PERMISSIONS,
     ActorContext,
     default_local_context,
@@ -351,16 +350,15 @@ async def export_audit_report_html(
     Returns:
         Path to the generated file and report summary.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_READ)
-    auditor = _get_auditor()
-    report = await auditor.generate_report(department=department, region=region)
-    path = export_html(report, output_path)
-    return {
-        "output_path": path,
-        "gaps_found": report.gaps_found,
-        "total_users": report.total_users_audited,
-        "evidence_hash": report.evidence_hash,
-    }
+    # Route through EvidenceService.export_report so the evidence:export choke-point
+    # gates this PII export. The default proposal-only MCP role lacks evidence:export
+    # and is therefore denied; raise COMPLYOS_MCP_ROLE to a role that holds it.
+    return await EvidenceService(_get_connector()).export_report(
+        _mcp_context(),
+        output_path=output_path,
+        department=department,
+        region=region,
+    )
 
 
 @mcp.tool()
@@ -385,7 +383,10 @@ async def export_compliance_dashboard(
     Returns:
         Path to the generated dashboard and summary stats.
     """
-    require_permission(_mcp_context(), PERM_AUDIT_READ)
+    # A dashboard is a PII-bearing report export, so it shares the report choke-point's
+    # evidence:export requirement (not audit:read). The default proposal-only MCP role
+    # is therefore denied; raise COMPLYOS_MCP_ROLE to a role that holds evidence:export.
+    require_permission(_mcp_context(), PERM_EVIDENCE_EXPORT)
     from complyos.core.dashboard import generate_dashboard
 
     auditor = _get_auditor()
