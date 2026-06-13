@@ -22,15 +22,19 @@ from fastapi import APIRouter, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from complyos.api.mcp_server import _get_connector
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import AuditReport
 from complyos.notification.signing import sign_payload, verify_signature
+from complyos.services.audit import AuditService
 from complyos.services.context import (
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
 )
+from complyos.services.evidence import EvidenceService
+from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.readiness import ReadinessService
 from complyos.services.source_intel import SourceIntelService
 from complyos.web.api_v1 import _truthy_env
@@ -43,17 +47,22 @@ SHELL_PREFIX = "/shell"
 STATIC_PREFIX = "/shell/static"
 SESSION_COOKIE = "complyos_shell"
 
-# Plan §10 — the eight enterprise modules. Only Overview is live this stage.
+# Plan §10 — the enterprise modules. Overview + Gaps/Imports/Evidence are live
+# (WP16a/16b); the rest remain "soon" and land in WP16c-d.
 MODULES: tuple[dict[str, object], ...] = (
     {"key": "overview", "label": "Overview", "href": SHELL_PREFIX, "live": True},
-    {"key": "audits", "label": "Audits", "href": "#", "live": False},
+    {"key": "gaps", "label": "Gaps", "href": f"{SHELL_PREFIX}/gaps", "live": True},
+    {"key": "imports", "label": "Imports", "href": f"{SHELL_PREFIX}/imports", "live": True},
+    {"key": "evidence", "label": "Evidence", "href": f"{SHELL_PREFIX}/evidence", "live": True},
     {"key": "remediation", "label": "Remediation", "href": "#", "live": False},
-    {"key": "imports", "label": "Imports", "href": "#", "live": False},
     {"key": "source_intel", "label": "Source intelligence", "href": "#", "live": False},
     {"key": "privacy", "label": "Privacy & retention", "href": "#", "live": False},
     {"key": "readiness", "label": "Readiness", "href": "#", "live": False},
     {"key": "admin", "label": "Administration", "href": "#", "live": False},
 )
+
+# Gap queue ordering: most severe first.
+SEVERITY_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
 class AuditReporter(Protocol):
@@ -161,6 +170,31 @@ def build_shell_router(
         base.update(ctx)
         return templates.TemplateResponse(request, name, base, status_code=status_code)
 
+    def _permission_panel(
+        request: Request,
+        *,
+        active: str,
+        context: ActorContext,
+        module_label: str,
+        error: AuthorizationError,
+    ) -> Response:
+        """Render the inline permission panel inside the shell (HTTP 200).
+
+        Mirrors the source-intel try/except in ``_overview_view``: a role that
+        lacks a module's permission keeps the shell chrome and sees a clear panel
+        naming the missing permission, rather than a 500 or a torn-down page.
+        """
+        return _render(
+            request,
+            "permission_denied.html",
+            {
+                "active": active,
+                "context": context,
+                "module_label": module_label,
+                "needed_permission": error.permission,
+            },
+        )
+
     def _login_error(request: Request, message: str) -> Response:
         local_mode = _session_secret() is None and _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL")
         return _render(
@@ -264,6 +298,113 @@ def build_shell_router(
     @router.get("/shell/overview", response_class=HTMLResponse)
     async def shell_overview(request: Request) -> Response:
         return await _overview_view(request)
+
+    @router.get("/shell/gaps", response_class=HTMLResponse)
+    async def shell_gaps(request: Request, severity: str | None = None) -> Response:
+        """Learner/worker compliance gap queue (plan §10), from live AuditService."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            gaps, _ledger = await AuditService(_get_connector(), repository).run_audit(
+                context
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request, active="gaps", context=context, module_label="Gaps", error=exc
+            )
+
+        severity_filter = severity.strip().lower() if severity else None
+        rows = [
+            {
+                "user_id": gap.user.id,
+                "department": gap.user.department,
+                "missing_courses": [course.title for course in gap.missing_courses],
+                "days_overdue": gap.days_overdue,
+                "severity": gap.severity,
+            }
+            for gap in gaps
+            if severity_filter is None or gap.severity == severity_filter
+        ]
+        rows.sort(key=lambda row: SEVERITY_RANK.get(str(row["severity"]), 99))
+        return _render(
+            request,
+            "gaps.html",
+            {
+                "active": "gaps",
+                "context": context,
+                "rows": rows,
+                "total_gaps": len(gaps),
+                "severity_filter": severity_filter,
+                "severities": ("critical", "high", "medium", "low"),
+            },
+        )
+
+    def _imports_render(
+        request: Request,
+        context: ActorContext,
+        *,
+        preview: object | None = None,
+    ) -> Response:
+        return _render(
+            request,
+            "imports.html",
+            {"active": "imports", "context": context, "preview": preview},
+        )
+
+    @router.get("/shell/imports", response_class=HTMLResponse)
+    async def shell_imports(request: Request) -> Response:
+        """Import lifecycle surface (plan §10): paste/upload form + last preview."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        return _imports_render(request, context)
+
+    @router.post("/shell/imports/preview", response_class=HTMLResponse)
+    async def shell_imports_preview(
+        request: Request, csv_text: str = Form(default="")
+    ) -> Response:
+        """Preview a pasted CSV through the live ImportService (import:preview)."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            preview = ImportService(repository).preview(
+                context, ImportPreviewRequest(csv_text=csv_text)
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="imports",
+                context=context,
+                module_label="Imports",
+                error=exc,
+            )
+        return _imports_render(request, context, preview=preview)
+
+    @router.get("/shell/evidence", response_class=HTMLResponse)
+    async def shell_evidence(request: Request, limit: int = 50) -> Response:
+        """Evidence ledger (plan §10), from the live EvidenceService."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            entries = EvidenceService(_get_connector(), repository).list_ledger(
+                context, limit=max(1, min(limit, 500))
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="evidence",
+                context=context,
+                module_label="Evidence",
+                error=exc,
+            )
+        return _render(
+            request,
+            "evidence.html",
+            {"active": "evidence", "context": context, "entries": entries},
+        )
 
     return router
 

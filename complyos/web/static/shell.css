@@ -433,6 +433,116 @@ h2 {
   margin-top: var(--sp-4);
 }
 
+/* ---- WP16b modules: dense data tables, filters, denial panel ---------- */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.data-table th {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.data-table td.num {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.table-caption {
+  caption-side: top;
+  text-align: left;
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-bottom: var(--sp-3);
+}
+
+.cell-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.empty-cell {
+  color: var(--muted);
+  text-align: center;
+  padding: var(--sp-5) var(--sp-3);
+}
+
+.filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.field-inline {
+  width: auto;
+  min-width: 10rem;
+  margin-bottom: 0;
+}
+
+.field-mono {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  resize: vertical;
+}
+
+.metric-value-sm {
+  font-size: var(--fs-h1);
+}
+
+.subhead {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: var(--sp-5) 0 var(--sp-3);
+}
+
+.action-row {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-5);
+}
+
+.action-row .btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.hash-cell {
+  word-break: break-all;
+}
+
+.panel.is-denied {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+
 /* ---- Responsive + reduced motion ------------------------------------- */
 @media (max-width: 52rem) {
   .app {

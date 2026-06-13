@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Gaps · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Gaps</p>
+<h1>Compliance gap queue</h1>
+<p class="lede">
+  Live worker compliance gaps from the audit service for tenant
+  <strong>{{ context.tenant_id }}</strong>.
+  {% if severity_filter %}
+  Showing <strong>{{ severity_filter }}</strong> severity ({{ rows|length }} of
+  {{ total_gaps }}).
+  {% else %}
+  {{ total_gaps }} open gap{{ '' if total_gaps == 1 else 's' }}.
+  {% endif %}
+</p>
+
+<section class="panel" aria-labelledby="filter-heading">
+  <h2 id="filter-heading">Filter by severity</h2>
+  <form method="get" action="{{ shell_url }}/gaps" class="filter-row">
+    <label for="severity">Severity</label>
+    <select id="severity" name="severity" class="field field-inline">
+      <option value="" {% if not severity_filter %}selected{% endif %}>All</option>
+      {% for level in severities %}
+      <option value="{{ level }}"
+              {% if severity_filter == level %}selected{% endif %}>{{ level }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn">Apply</button>
+  </form>
+</section>
+
+<section class="panel" aria-labelledby="gaps-heading">
+  <h2 id="gaps-heading">Open gaps</h2>
+  <table class="data-table" aria-label="Compliance gap queue">
+    <caption class="table-caption">
+      Workers with outstanding required training, most severe first.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Worker</th>
+        <th scope="col">Department</th>
+        <th scope="col">Missing courses</th>
+        <th scope="col" class="num">Days overdue</th>
+        <th scope="col">Severity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><span class="mono">{{ row.user_id }}</span></td>
+        <td>{{ row.department }}</td>
+        <td>
+          <ul class="cell-list">
+            {% for title in row.missing_courses %}
+            <li>{{ title }}</li>
+            {% endfor %}
+          </ul>
+        </td>
+        <td class="num">{{ row.days_overdue if row.days_overdue is not none else '—' }}</td>
+        <td><span class="tag sev-{{ row.severity }}">{{ row.severity }}</span></td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="empty-cell">
+          No gaps match this filter.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

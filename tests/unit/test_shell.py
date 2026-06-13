@@ -206,3 +206,206 @@ def test_shell_login_page_renders(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert 'href="#main"' in response.text  # login page is also accessible
+
+
+# ---------------------------------------------------------------------------
+# WP16b — three live modules: Gaps, Imports, Evidence.
+# ---------------------------------------------------------------------------
+
+
+def _local_client(monkeypatch, tmp_path, db_name: str):
+    """Insecure-local shell client (no token) over a real MockConnector auditor.
+
+    Insecure-local mode lets a test pick a low-privilege role at login, which is
+    how the permission-panel degradation paths are exercised below.
+    """
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.setenv("COMPLYOS_ALLOW_INSECURE_LOCAL", "1")
+    repo = LocalRepository(str(tmp_path / db_name))
+    auditor = ComplianceAuditor(MockConnector())
+    app = create_dashboard_app(auditor=auditor, repository=repo)
+    return TestClient(app), repo
+
+
+def _login_local(client: TestClient, role: str) -> None:
+    # Don't follow the redirect to Overview: low-privilege roles (e.g. importer)
+    # may lack readiness:read, which the Overview module requires. The cookie is
+    # set on the 303 response itself, so the module routes under test still see
+    # an authenticated context.
+    client.post("/shell/login", data={"role": role}, follow_redirects=False)
+
+
+# ---- Gaps -----------------------------------------------------------------
+
+
+def test_shell_gaps_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/gaps", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_gaps_renders_live_audit_data(monkeypatch, tmp_path) -> None:
+    """The gap queue must reflect the live AuditService over the seeded mock.
+
+    MockConnector deterministically produces a gap for user ``u1`` in
+    Engineering missing the "Information Security Basics" course — assert those
+    seeded values appear in the rendered table, proving live data.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-gaps.db")
+    _login_local(client, "compliance_manager")
+
+    response = client.get("/shell/gaps")
+
+    assert response.status_code == 200
+    assert "u1" in response.text
+    assert "Engineering" in response.text
+    assert "Information Security Basics" in response.text
+
+
+def test_shell_gaps_severity_filter_is_server_side(monkeypatch, tmp_path) -> None:
+    """An unmatched severity filter empties the live queue server-side."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-gaps-filter.db")
+    _login_local(client, "compliance_manager")
+
+    # The mock seed yields only medium-severity gaps; filtering to high removes
+    # the u1 row entirely, proving the filter runs server-side over live data.
+    response = client.get("/shell/gaps?severity=high")
+
+    assert response.status_code == 200
+    assert "u1" not in response.text
+
+
+def test_shell_gaps_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking audit:run gets the inline permission panel, not a 500."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-gaps-perm.db")
+    # read_only has audit:read but NOT audit:run (the gap queue runs an audit).
+    _login_local(client, "read_only")
+
+    response = client.get("/shell/gaps")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "audit:run" in response.text
+
+
+# ---- Imports --------------------------------------------------------------
+
+
+def test_shell_imports_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/imports", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_imports_get_renders_paste_form(monkeypatch, tmp_path) -> None:
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-imports.db")
+    _login_local(client, "importer")
+
+    response = client.get("/shell/imports")
+
+    assert response.status_code == 200
+    assert "csv_text" in response.text  # the paste field
+    assert 'action="/shell/imports/preview"' in response.text
+
+
+def test_shell_imports_preview_reflects_pasted_csv(monkeypatch, tmp_path) -> None:
+    """Preview POST renders a table driven by the pasted CSV (live ImportService).
+
+    The CSV has 2 rows and an unexpected ``completed_at`` column; the preview
+    must surface the row count, the unexpected column, and the
+    ``UNEXPECTED_COLUMN`` issue — none of which are static.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-imports-preview.db")
+    _login_local(client, "importer")
+
+    csv_text = (
+        "user_id,course_id,status,completed_at\n"
+        "u1,c1,completed,2026-01-15\n"
+        "u2,c2,bogusstatus,notadate\n"
+    )
+    response = client.post("/shell/imports/preview", data={"csv_text": csv_text})
+
+    assert response.status_code == 200
+    assert "completed_at" in response.text  # the unexpected column
+    assert "UNEXPECTED_COLUMN" in response.text  # the live issue code
+    assert "NEEDS_DECISION" in response.text  # the live row-status bucket
+
+
+def test_shell_imports_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking import:preview gets the inline permission panel on preview."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-imports-perm.db")
+    # read_only lacks import:preview.
+    _login_local(client, "read_only")
+
+    response = client.post(
+        "/shell/imports/preview", data={"csv_text": "user_id\nu1\n"}
+    )
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "import:preview" in response.text
+
+
+# ---- Evidence -------------------------------------------------------------
+
+
+def test_shell_evidence_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/evidence", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_evidence_renders_seeded_ledger_entry(monkeypatch, tmp_path) -> None:
+    """The evidence ledger table reflects a seeded entry (live repository read)."""
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-evidence.db")
+    # Seed a ledger entry for the default tenant the shell context carries.
+    repo.append_evidence_entry(
+        tenant_id="local-default",
+        query_type="audit_gaps",
+        query_params={"department": "Engineering"},
+        raw_data_hash="raw-seed-abc",
+        transformation_steps=["normalize", "match-rules"],
+        output_hash="evidence-seed-deadbeef",
+        output_summary="4 gaps across 5 workers",
+    )
+    _login_local(client, "compliance_manager")
+
+    response = client.get("/shell/evidence")
+
+    assert response.status_code == 200
+    assert "evidence-seed-deadbeef" in response.text  # the seeded evidence hash
+    assert "audit_gaps" in response.text  # the seeded query/action type
+    assert "4 gaps across 5 workers" in response.text  # the seeded summary
+
+
+def test_shell_evidence_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking evidence:read gets the inline permission panel, not a 500.
+
+    No built-in insecure-local role lacks evidence:read, so register a minimal
+    restricted role for the duration of the test. The shell verifies the role
+    against ROLE_PERMISSIONS and rebuilds the context from the same table, so a
+    role with no evidence:read flows end-to-end and the service raises.
+    """
+    from complyos.services import context as ctx_module
+
+    restricted = "no_evidence_role"
+    monkeypatch.setitem(
+        ctx_module.ROLE_PERMISSIONS, restricted, frozenset({"readiness:read"})
+    )
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-evidence-perm.db")
+    _login_local(client, restricted)
+
+    response = client.get("/shell/evidence")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "evidence:read" in response.text

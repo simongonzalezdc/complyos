@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}{{ module_label }} · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · {{ module_label }}</p>
+<h1>{{ module_label }}</h1>
+
+<section class="panel is-denied" role="alert" aria-labelledby="denied-heading">
+  <h2 id="denied-heading">You do not have permission</h2>
+  <p class="lede">
+    Your role <strong class="mono">{{ context.role }}</strong> cannot view the
+    {{ module_label }} module. This needs the
+    <code class="mono">{{ needed_permission }}</code> permission.
+  </p>
+  <p class="metric-note">
+    The shell stays available — ask an administrator to grant
+    <code class="mono">{{ needed_permission }}</code>, or switch to a role that
+    already carries it.
+  </p>
+</section>
+{% endblock %}
