@@ -82,6 +82,13 @@ to completion. Each work package shipped as one atomic, gate-green commit.
 | WP15b | Deterministic proposal-only AI types — anomaly summary, gap explanation, remediation-message draft, duplicate clustering (PII-safe by construction) | P7 |
 | WP16a–d | **Authenticated enterprise web shell** — signed-session auth wrapping the existing `ActorContext`; 8 modules (Overview/Gaps/Imports/Evidence/Remediation/Source-intel/Privacy/Readiness/Admin) on LIVE service data; import decide/promote wired; WCAG 2.2 AA accessibility + contrast audit enforced by tests | P6 |
 | WP17a | Tenant governance metadata (data region/purpose/categories/retention/subprocessors) surfaced through `ReadinessService`/API/shell; `PrivacyProgramService` read method (shell no longer reads the repo directly); configurable session-cookie `Secure` | P8 |
+| WP18 | **Independent-review fix:** closed a cross-tenant write IDOR in `ImportService.decide` (it lacked the `batch.tenant_id == context.tenant_id` gate that `promote` has); API decide endpoint now maps `PermissionError → 403`; locked with a cross-tenant BOLA regression test | P9 |
+
+A final independent adversarial review (multiple parallel reviewers over the full
+diff) confirmed the authorization choke-point, default-MCP-role restriction,
+rate-limiting, AI proposal-only guarantee, shell session-auth soundness, and
+absence of mock theater or false-compliance claims. Its one blocking finding (the
+`decide` IDOR) is fixed in WP18. **658 → 659 tests green.**
 
 **Architecture invariant now provable:** every business workflow routes through a
 service that enforces permissions, and the parity suite fails the build if any
@@ -90,6 +97,20 @@ and no GET triggers a mutating or privileged side effect.
 
 ### Scoped follow-ups (non-blocking)
 
+**Multi-tenant hardening (deferred with the SaaS-vs-single-tenant decision — a §18 stop rule).**
+The runtime is single-tenant by default (frozen default §3) with a tenant-aware data
+model. Before any multi-tenant/shared-token deployment, these must be closed:
+- **API trusts `X-Tenant-Id`/`X-Actor-Role` headers under a single shared `COMPLYOS_API_TOKEN`.**
+  Acceptable for single-tenant runtime (the operator *is* the tenant; the code comment
+  names the threat), but a shared-token multi-tenant deployment needs token→tenant binding
+  (encode/validate the tenant in the credential) so a token holder cannot select another tenant.
+- **Repository point-lookups (`get_import_batch`, `list_import_rows`, `get_privacy_request`,
+  `get_legal_hold`) are keyed by id only**; tenant isolation is enforced by the *service* post-fetch
+  check (tested). Add an optional `tenant_id` filter at the repository layer for defense in depth.
+- **MCP context hardcodes `tenant_id="local-default"`** — add `COMPLYOS_MCP_TENANT_ID` before
+  exposing MCP to multiple tenants.
+
+**Other:**
 - Shell token-login pins `role=owner`; insecure-local mode selects role. Role-scoped
   shell sessions under a token are a future refinement.
 - DRAFT/PREVIEWED/PROMOTION_PENDING/REJECTED/EXPIRED import-batch states are reserved
