@@ -93,17 +93,70 @@
   <p class="metric-note">No issues — all rows validated cleanly.</p>
   {% endif %}
 
+  {% if promotion_status %}
+  <p class="posture-note" role="status">
+    Last promotion attempt resolved to <strong>{{ promotion_status }}</strong>.
+    A batch with blocking rows stays <span class="mono">QUARANTINED</span>.
+  </p>
+  {% endif %}
+
+  {% if rows %}
+  <h3 class="subhead">Rows &amp; decisions</h3>
+  <table class="data-table" aria-label="Import rows and decision controls">
+    <caption class="table-caption">
+      Resolve each row that needs a decision before promoting the batch.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Row</th>
+        <th scope="col">Worker</th>
+        <th scope="col">Course</th>
+        <th scope="col">Status</th>
+        <th scope="col">Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="num">{{ row.row_number }}</td>
+        <td><span class="mono">{{ row.user_id }}</span></td>
+        <td><span class="mono">{{ row.course_id }}</span></td>
+        <td>{{ row.validation_status }}</td>
+        <td>
+          <form method="post"
+                action="{{ shell_url }}/imports/{{ preview.batch_id }}/decisions"
+                class="filter-row">
+            <input type="hidden" name="row_id" value="{{ row.id }}" />
+            <label class="visually-hidden" for="decision-{{ row.id }}">
+              Decision for row {{ row.row_number }}
+            </label>
+            <select id="decision-{{ row.id }}" name="decision_type"
+                    class="field field-inline">
+              <option value="accept">Accept</option>
+              <option value="reject">Reject</option>
+              <option value="ignore_row">Ignore</option>
+              <option value="require_manual_review">Needs review</option>
+            </select>
+            <button type="submit" class="btn">Record</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <div class="action-row">
-    <button type="button" class="btn" disabled>Record decisions <span class="nav-tag">next</span></button>
-    <button type="button" class="btn"
-            {{ '' if preview.can_promote else 'disabled' }}>
-      Promote batch
-      {% if not preview.can_promote %}<span class="nav-tag">blocked</span>{% endif %}
-      <span class="nav-tag">next</span>
-    </button>
+    <form method="post" action="{{ shell_url }}/imports/{{ preview.batch_id }}/promote">
+      <button type="submit" class="btn" {{ '' if preview.can_promote else 'disabled' }}>
+        Promote batch
+        {% if not preview.can_promote %}<span class="nav-tag">blocked</span>{% endif %}
+      </button>
+    </form>
   </div>
   <p class="posture-note">
-    Decision and promotion controls land in a later stage; preview above is live.
+    Promotion is fail-closed: a batch with rejected, pending, or needs-decision rows
+    stays quarantined until every row is resolved.
   </p>
 </section>
 {% endif %}

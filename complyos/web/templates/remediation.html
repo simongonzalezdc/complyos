@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Remediation · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Remediation</p>
+<h1>Remediation queue</h1>
+<p class="lede">
+  Dry-run remediation proposal for tenant <strong>{{ context.tenant_id }}</strong>.
+  These are the actions that <em>would</em> run — nothing has been sent, enrolled,
+  or notified. Execution requires an explicit, separate approval and is never the
+  default.
+</p>
+
+<section class="panel" aria-labelledby="proposed-heading">
+  <h2 id="proposed-heading">Proposed actions</h2>
+  <table class="data-table" aria-label="Proposed remediation actions">
+    <caption class="table-caption">
+      Dry-run proposal from the remediation service. No side effects have occurred.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Worker</th>
+        <th scope="col">Course</th>
+        <th scope="col">Action</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><span class="mono">{{ row.user_id }}</span></td>
+        <td><span class="mono">{{ row.course_id }}</span></td>
+        <td><span class="tag">{{ row.action_type }}</span></td>
+        <td>{{ row.status }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty-cell">
+          No remediation actions proposed — no open gaps require follow-up.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="execute-heading">
+  <h2 id="execute-heading">Execute remediation</h2>
+  <p class="lede">
+    Executing remediation sends reminders and applies mutating follow-up. This is a
+    privileged, approval-gated action — it is intentionally not wired to a one-click
+    control in this view.
+  </p>
+  <div class="action-row">
+    <button type="button" class="btn" disabled>
+      Execute remediation
+      <span class="nav-tag">requires approval</span>
+    </button>
+  </div>
+  <p class="posture-note">
+    The dry-run above is live; execution (<code class="mono">remediation:execute</code>)
+    is deferred behind an explicit approval step.
+  </p>
+</section>
+{% endblock %}

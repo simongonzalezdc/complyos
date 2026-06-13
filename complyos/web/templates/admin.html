@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Administration · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Administration</p>
+<h1>Role administration</h1>
+<p class="lede">
+  Tenant-scoped role bindings for <strong>{{ context.tenant_id }}</strong>. Every
+  binding is owned by this tenant — an admin here can never see or change another
+  tenant's assignments.
+</p>
+
+<section class="panel" aria-labelledby="bindings-heading">
+  <h2 id="bindings-heading">Role bindings</h2>
+  <table class="data-table" aria-label="Role bindings">
+    <caption class="table-caption">
+      Actor-to-role assignments and any explicit permission overrides.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Actor</th>
+        <th scope="col">Role</th>
+        <th scope="col">Permission override</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for binding in bindings %}
+      <tr>
+        <td><span class="mono">{{ binding.actor_id }}</span></td>
+        <td><span class="tag">{{ binding.role }}</span></td>
+        <td>
+          {% if binding.permissions_override %}
+          <ul class="cell-list">
+            {% for permission in binding.permissions_override %}
+            <li><span class="mono">{{ permission }}</span></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <span class="metric-note">role default</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="3" class="empty-cell">
+          No role bindings yet. Actors fall back to their default role permissions.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="manage-heading">
+  <h2 id="manage-heading">Manage bindings</h2>
+  <p class="lede">
+    Setting or removing a binding changes who can do what. These mutating controls
+    are deferred from this stage.
+  </p>
+  <div class="action-row">
+    <button type="button" class="btn" disabled>
+      Set binding
+      <span class="nav-tag">next</span>
+    </button>
+    <button type="button" class="btn" disabled>
+      Remove binding
+      <span class="nav-tag">next</span>
+    </button>
+  </div>
+  <p class="posture-note">
+    Set/remove controls (<code class="mono">admin:manage</code>) land in a later
+    stage; the bindings above are live.
+  </p>
+</section>
+{% endblock %}

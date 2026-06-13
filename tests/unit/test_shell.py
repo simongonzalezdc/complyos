@@ -430,3 +430,401 @@ def test_shell_overview_does_not_500_for_role_lacking_readiness(
 
     assert response.status_code == 200
     assert "restricted" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# WP16c — Remediation, Source-intel, Privacy, Readiness, Admin + import
+# decide/promote.
+# ---------------------------------------------------------------------------
+
+
+# ---- Remediation ----------------------------------------------------------
+
+
+def test_shell_remediation_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/remediation", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_remediation_renders_live_dry_run_proposal(monkeypatch, tmp_path) -> None:
+    """The remediation queue is the live dry-run proposal over the seeded mock.
+
+    The MockConnector seed yields a gap for user ``u1``; with auto_remind on,
+    RemediationService.propose proposes a ``reminder`` action for ``u1`` — assert
+    both appear, proving live (not static) data, and a dry-run that sent nothing.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-remediation.db")
+    _login_local(client, "compliance_manager")
+
+    response = client.get("/shell/remediation")
+
+    assert response.status_code == 200
+    assert "u1" in response.text
+    assert "reminder" in response.text
+    # Execution must be labeled as requiring approval, never a default control.
+    assert "requires approval" in response.text.lower()
+
+
+def test_shell_remediation_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking remediation:propose gets the inline permission panel."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-remediation-perm.db")
+    # read_only lacks remediation:propose.
+    _login_local(client, "read_only")
+
+    response = client.get("/shell/remediation")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "remediation:propose" in response.text
+
+
+# ---- Source intelligence --------------------------------------------------
+
+
+def _seed_source_intel_proposal(repo) -> str:
+    """Seed one source-intelligence proposal for the shell's default tenant.
+
+    Builds a real SourceMonitorRun through the regwatch/microlearning adapters
+    and persists it via the service, so the shell reads a live proposal.
+    """
+    from complyos.microlearning import MicrolearningAdapter
+    from complyos.regwatch import RegWatchAdapter
+    from complyos.services.context import default_local_context
+    from complyos.services.source_intel import SourceIntelService
+    from complyos.source_intel import (
+        SourceDefinition,
+        SourceIntelEngine,
+        SourceSnapshot,
+        SourceType,
+    )
+    from complyos.source_intel.monitor import SourceMonitorRun
+
+    source = SourceDefinition(
+        id="seed-source",
+        name="Seed Source",
+        url="https://example.gov/seed-rule",
+        source_type=SourceType.OFFICIAL_REGULATOR,
+        authority="official",
+        jurisdictions=["US"],
+        topics=["safety training"],
+    )
+    snapshot = SourceSnapshot.from_text(
+        source_id=source.id,
+        url=source.url,
+        title="Final rule on worker training",
+        text="A final rule says covered employers must train workers on safety.",
+    )
+    proposals = SourceIntelEngine(
+        adapters=[RegWatchAdapter(), MicrolearningAdapter()]
+    ).evaluate([source], [snapshot])
+    run = SourceMonitorRun(
+        source_count=1,
+        snapshot_count=1,
+        proposal_count=len(proposals),
+        proposals=proposals,
+        coverage_gaps=[],
+    )
+    context = default_local_context(
+        surface="shell", role="compliance_manager", tenant_id="local-default"
+    )
+    SourceIntelService(repo).record_run(context, query="training", run=run)
+    return source.id
+
+
+def test_shell_source_intel_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/source-intel", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_source_intel_renders_seeded_proposal(monkeypatch, tmp_path) -> None:
+    """The signal queue reflects a seeded proposal (live repository read)."""
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-source-intel.db")
+    seeded_source_id = _seed_source_intel_proposal(repo)
+    _login_local(client, "compliance_manager")
+
+    response = client.get("/shell/source-intel")
+
+    assert response.status_code == 200
+    assert seeded_source_id in response.text  # the seeded source id
+    assert "regulatory_change" in response.text  # a live seeded signal type
+
+
+def test_shell_source_intel_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking source_intel:read gets the inline permission panel."""
+    from complyos.services import context as ctx_module
+
+    restricted = "no_source_intel_role"
+    monkeypatch.setitem(
+        ctx_module.ROLE_PERMISSIONS, restricted, frozenset({"readiness:read"})
+    )
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-source-intel-perm.db")
+    _login_local(client, restricted)
+
+    response = client.get("/shell/source-intel")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "source_intel:read" in response.text
+
+
+# ---- Privacy & retention --------------------------------------------------
+
+
+def _seed_privacy_posture(repo) -> str:
+    """Seed an active legal hold + retention policy for the default tenant."""
+    from complyos.services.context import default_local_context
+    from complyos.services.privacy import PrivacyProgramService
+
+    context = default_local_context(
+        surface="shell", role="privacy_admin", tenant_id="local-default"
+    )
+    service = PrivacyProgramService(repo)
+    hold = service.create_legal_hold(
+        context,
+        subject_id="subject-seed-1",
+        scope="subject",
+        reason="seed-litigation-hold",
+    )
+    service.configure_retention_policy(
+        context,
+        raw_import_days=30,
+        evidence_days=2555,
+        action_log_days=2555,
+        ai_proposal_days=180,
+    )
+    return hold.hold_id
+
+
+def test_shell_privacy_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/privacy", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_privacy_renders_seeded_hold_and_policy(monkeypatch, tmp_path) -> None:
+    """The privacy posture surfaces a seeded legal hold and retention policy.
+
+    Read-only by construction: the GET reads list_active_legal_holds and
+    get_retention_policy and never calls a mutating export/delete method.
+    """
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-privacy.db")
+    seeded_hold_id = _seed_privacy_posture(repo)
+    _login_local(client, "privacy_admin")
+
+    response = client.get("/shell/privacy")
+
+    assert response.status_code == 200
+    assert seeded_hold_id in response.text  # the seeded legal hold
+    assert "seed-litigation-hold" in response.text  # the seeded hold reason
+    assert "raw_import_days" in response.text  # the seeded retention policy key
+
+
+def test_shell_privacy_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking privacy:request gets the inline permission panel."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-privacy-perm.db")
+    # read_only lacks privacy:request.
+    _login_local(client, "read_only")
+
+    response = client.get("/shell/privacy")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "privacy:request" in response.text
+
+
+# ---- Readiness ------------------------------------------------------------
+
+
+def test_shell_readiness_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/readiness", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_readiness_renders_live_control_matrix(monkeypatch, tmp_path) -> None:
+    """The readiness matrix reflects the live ReadinessService control inventory.
+
+    The service always emits the ``access-control-service-authz`` control with a
+    ``designed`` status — assert a control title and a status chip appear, proving
+    the matrix is rendered from live data.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-readiness.db")
+    _login_local(client, "compliance_manager")
+
+    response = client.get("/shell/readiness")
+
+    assert response.status_code == 200
+    assert "Service-layer actor context and permissions" in response.text
+    assert "designed" in response.text
+
+
+def test_shell_readiness_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking readiness:read gets the inline permission panel."""
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-readiness-perm.db")
+    # importer lacks readiness:read.
+    _login_local(client, "importer")
+
+    response = client.get("/shell/readiness")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "readiness:read" in response.text
+
+
+# ---- Administration -------------------------------------------------------
+
+
+def test_shell_admin_unauthenticated_redirects_to_login(monkeypatch, tmp_path) -> None:
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/shell/admin", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/shell/login"
+
+
+def test_shell_admin_renders_seeded_role_binding(monkeypatch, tmp_path) -> None:
+    """The role-bindings table reflects a seeded binding (live repository read)."""
+    from complyos.services.context import default_local_context
+    from complyos.services.role_admin import RoleAdminService
+
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-admin.db")
+    context = default_local_context(surface="shell", role="owner", tenant_id="local-default")
+    RoleAdminService(repo).set_role_binding(
+        context, actor_id="seed-actor-42", role="reviewer"
+    )
+    _login_local(client, "owner")
+
+    response = client.get("/shell/admin")
+
+    assert response.status_code == 200
+    assert "seed-actor-42" in response.text  # the seeded actor
+    assert "reviewer" in response.text  # the seeded role
+
+
+def test_shell_admin_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking admin:manage gets the inline permission panel.
+
+    Only ``owner`` carries admin:manage in the catalog, so even ``admin`` (which
+    holds everything except admin:manage) is denied here.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-admin-perm.db")
+    _login_local(client, "admin")
+
+    response = client.get("/shell/admin")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "admin:manage" in response.text
+
+
+# ---- Imports decide/promote (deferred from WP16b) -------------------------
+
+
+def _seed_import_batch(repo, *, csv_text: str) -> str:
+    """Preview a CSV through the live service and return the new batch id."""
+    from complyos.services.context import default_local_context
+    from complyos.services.imports import ImportPreviewRequest, ImportService
+
+    context = default_local_context(
+        surface="shell", role="import_approver", tenant_id="local-default"
+    )
+    result = ImportService(repo).preview(context, ImportPreviewRequest(csv_text=csv_text))
+    return result.batch_id
+
+
+def test_shell_imports_decide_then_promote_succeeds(monkeypatch, tmp_path) -> None:
+    """Accepting a NEEDS_DECISION row then promoting moves the batch to PROMOTED.
+
+    The seeded CSV has a duplicate row, which the live service routes to
+    NEEDS_DECISION (blocking). Promotion is fail-closed until the row is accepted;
+    after accepting, promote succeeds and the batch reports PROMOTED.
+    """
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-imports-decide.db")
+    # Duplicate (u1,c1) rows -> the second is DUPLICATE_ROW -> NEEDS_DECISION.
+    csv_text = "user_id,course_id\nu1,c1\nu1,c1\n"
+    batch_id = _seed_import_batch(repo, csv_text=csv_text)
+    _login_local(client, "import_approver")
+
+    # Fail-closed: promoting a batch with a NEEDS_DECISION row stays QUARANTINED.
+    blocked = client.post(f"/shell/imports/{batch_id}/promote")
+    assert blocked.status_code == 200
+    assert "QUARANTINED" in blocked.text
+
+    rows = repo.list_import_rows(batch_id)
+    needs_decision = next(r for r in rows if r["validation_status"] == "NEEDS_DECISION")
+
+    accepted = client.post(
+        f"/shell/imports/{batch_id}/decisions",
+        data={"row_id": needs_decision["id"], "decision_type": "accept"},
+    )
+    assert accepted.status_code == 200
+
+    promoted = client.post(f"/shell/imports/{batch_id}/promote")
+    assert promoted.status_code == 200
+    assert "PROMOTED" in promoted.text
+    assert repo.get_import_batch(batch_id)["status"] == "PROMOTED"
+
+
+def test_shell_imports_promote_blocked_batch_stays_quarantined(monkeypatch, tmp_path) -> None:
+    """A batch with a rejected (blocking) row can never be promoted from the shell."""
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-imports-blocked.db")
+    # A row missing course_id is a blocker -> REJECTED -> promotion blocked.
+    csv_text = "user_id,course_id\nu1,\n"
+    batch_id = _seed_import_batch(repo, csv_text=csv_text)
+    _login_local(client, "import_approver")
+
+    promoted = client.post(f"/shell/imports/{batch_id}/promote")
+
+    assert promoted.status_code == 200
+    assert "QUARANTINED" in promoted.text
+    assert repo.get_import_batch(batch_id)["status"] == "QUARANTINED"
+
+
+def test_shell_imports_decide_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking import:decide gets the inline permission panel on decide."""
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-imports-decide-perm.db")
+    csv_text = "user_id,course_id\nu1,c1\nu1,c1\n"
+    batch_id = _seed_import_batch(repo, csv_text=csv_text)
+    rows = repo.list_import_rows(batch_id)
+    needs_decision = next(r for r in rows if r["validation_status"] == "NEEDS_DECISION")
+    # read_only lacks import:decide.
+    _login_local(client, "read_only")
+
+    response = client.post(
+        f"/shell/imports/{batch_id}/decisions",
+        data={"row_id": needs_decision["id"], "decision_type": "accept"},
+    )
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "import:decide" in response.text
+
+
+def test_shell_imports_promote_permission_panel_for_low_priv_role(monkeypatch, tmp_path) -> None:
+    """A role lacking import:promote gets the inline permission panel on promote."""
+    client, repo = _local_client(monkeypatch, tmp_path, "shell-imports-promote-perm.db")
+    csv_text = "user_id,course_id\nu1,c1\n"
+    batch_id = _seed_import_batch(repo, csv_text=csv_text)
+    # importer has import:decide/preview but NOT import:promote.
+    _login_local(client, "importer")
+
+    response = client.post(f"/shell/imports/{batch_id}/promote")
+
+    assert response.status_code == 200
+    assert "do not have permission" in response.text.lower()
+    assert "import:promote" in response.text

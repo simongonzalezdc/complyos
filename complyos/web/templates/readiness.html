@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Readiness · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Readiness</p>
+<h1>Control readiness matrix</h1>
+<p class="lede">
+  Live control readiness for tenant <strong>{{ context.tenant_id }}</strong> from
+  the readiness service. This maps controls and artifacts; it is not a
+  certification.
+</p>
+
+<section class="panel" aria-labelledby="posture-heading">
+  <h2 id="posture-heading">Posture</h2>
+  <p class="lede">{{ posture }}</p>
+  <table class="kv-table" aria-label="Readiness summary by status">
+    <thead>
+      <tr><th scope="col">Status</th><th scope="col" class="num">Controls</th></tr>
+    </thead>
+    <tbody>
+      {% for status, count in summary %}
+      <tr><td>{{ status }}</td><td class="num">{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="matrix-heading">
+  <h2 id="matrix-heading">Controls</h2>
+  <table class="data-table" aria-label="Control readiness matrix">
+    <caption class="table-caption">
+      Each control's status, owner, and supporting artifact.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Control</th>
+        <th scope="col">Area</th>
+        <th scope="col">Status</th>
+        <th scope="col">Owner</th>
+        <th scope="col">Artifact</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for control in controls %}
+      <tr>
+        <td>{{ control.title }}</td>
+        <td>{{ control.area }}</td>
+        <td>
+          <span class="tag readiness-{{ control.status }}">{{ control.status }}</span>
+        </td>
+        <td>{{ control.owner }}</td>
+        <td><span class="mono">{{ control.artifact }}</span></td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="empty-cell">No controls defined.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

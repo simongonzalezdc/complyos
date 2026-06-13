@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Source intelligence · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Source intelligence</p>
+<h1>Regulatory signal queue</h1>
+<p class="lede">
+  Live source-intelligence proposals for tenant
+  <strong>{{ context.tenant_id }}</strong>. Each signal is a human-review
+  proposal — accept/reject decisions never mutate rules or training on their own.
+</p>
+
+<section class="panel" aria-labelledby="signals-heading">
+  <h2 id="signals-heading">Proposals awaiting review</h2>
+  <table class="data-table" aria-label="Source-intelligence proposal queue">
+    <caption class="table-caption">
+      Regulatory and microlearning signals proposed for human review.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Source</th>
+        <th scope="col">Signal type</th>
+        <th scope="col">Summary</th>
+        <th scope="col">State</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for proposal in proposals %}
+      <tr>
+        <td><span class="mono">{{ proposal.source_id }}</span></td>
+        <td><span class="tag">{{ proposal.signal_type }}</span></td>
+        <td>{{ proposal.summary or proposal.title or '—' }}</td>
+        <td>{{ proposal.approval_state }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty-cell">
+          No source-intelligence proposals yet. They accrue as monitoring runs.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="decide-heading">
+  <h2 id="decide-heading">Decisions</h2>
+  <p class="lede">
+    Accept and reject controls move a proposal through review without publishing
+    rules or training automatically.
+  </p>
+  <div class="action-row">
+    <button type="button" class="btn" disabled>
+      Accept / reject
+      <span class="nav-tag">next</span>
+    </button>
+  </div>
+  <p class="posture-note">
+    Decision controls (<code class="mono">source_intel:decide</code>) land in a later
+    stage; the queue above is live.
+  </p>
+</section>
+{% endblock %}

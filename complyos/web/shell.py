@@ -28,14 +28,23 @@ from complyos.models.domain import AuditReport
 from complyos.notification.signing import sign_payload, verify_signature
 from complyos.services.audit import AuditService
 from complyos.services.context import (
+    PERM_PRIVACY_REQUEST,
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
+    require_permission,
 )
 from complyos.services.evidence import EvidenceService
-from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.imports import (
+    ImportIssue,
+    ImportPreviewRequest,
+    ImportPreviewResult,
+    ImportService,
+)
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
+from complyos.services.role_admin import RoleAdminService
 from complyos.services.source_intel import SourceIntelService
 from complyos.web.api_v1 import _truthy_env
 
@@ -54,11 +63,26 @@ MODULES: tuple[dict[str, object], ...] = (
     {"key": "gaps", "label": "Gaps", "href": f"{SHELL_PREFIX}/gaps", "live": True},
     {"key": "imports", "label": "Imports", "href": f"{SHELL_PREFIX}/imports", "live": True},
     {"key": "evidence", "label": "Evidence", "href": f"{SHELL_PREFIX}/evidence", "live": True},
-    {"key": "remediation", "label": "Remediation", "href": "#", "live": False},
-    {"key": "source_intel", "label": "Source intelligence", "href": "#", "live": False},
-    {"key": "privacy", "label": "Privacy & retention", "href": "#", "live": False},
-    {"key": "readiness", "label": "Readiness", "href": "#", "live": False},
-    {"key": "admin", "label": "Administration", "href": "#", "live": False},
+    {
+        "key": "remediation",
+        "label": "Remediation",
+        "href": f"{SHELL_PREFIX}/remediation",
+        "live": True,
+    },
+    {
+        "key": "source_intel",
+        "label": "Source intelligence",
+        "href": f"{SHELL_PREFIX}/source-intel",
+        "live": True,
+    },
+    {
+        "key": "privacy",
+        "label": "Privacy & retention",
+        "href": f"{SHELL_PREFIX}/privacy",
+        "live": True,
+    },
+    {"key": "readiness", "label": "Readiness", "href": f"{SHELL_PREFIX}/readiness", "live": True},
+    {"key": "admin", "label": "Administration", "href": f"{SHELL_PREFIX}/admin", "live": True},
 )
 
 # Gap queue ordering: most severe first.
@@ -356,12 +380,74 @@ def build_shell_router(
         context: ActorContext,
         *,
         preview: object | None = None,
+        rows: list[dict[str, object]] | None = None,
+        promotion_status: str | None = None,
     ) -> Response:
         return _render(
             request,
             "imports.html",
-            {"active": "imports", "context": context, "preview": preview},
+            {
+                "active": "imports",
+                "context": context,
+                "preview": preview,
+                "rows": rows or [],
+                "promotion_status": promotion_status,
+            },
         )
+
+    def _reload_import_preview(
+        service: ImportService,
+        context: ActorContext,
+        batch_id: str,
+    ) -> ImportPreviewResult | None:
+        """Rebuild the preview view of a stored batch (read-only, no mutation).
+
+        Mirrors the existing-batch branch of ImportService.preview so a re-render
+        after a decide/promote shows the batch's current persisted state without
+        re-running validation or touching the LMS.
+        """
+        batch = repository.get_import_batch(batch_id)
+        if batch is None or batch["tenant_id"] != context.tenant_id:
+            return None
+        batch_rows = repository.list_import_rows(batch_id)
+        issues = [
+            ImportIssue(**issue) for row in batch_rows for issue in row.get("issues", [])
+        ]
+        return ImportPreviewResult(
+            batch_id=batch["id"],
+            tenant_id=batch["tenant_id"],
+            source_system=batch["source_system"],
+            profile=batch["profile"],
+            status=batch["status"],
+            idempotency_key=batch["idempotency_key"],
+            raw_file_hash=batch["raw_file_hash"],
+            total_rows=len(batch_rows),
+            row_counts=service._row_counts(batch_rows),
+            unexpected_columns=sorted(
+                {
+                    issue.column
+                    for issue in issues
+                    if issue.code == "UNEXPECTED_COLUMN" and issue.column
+                }
+            ),
+            issues=issues,
+            can_promote=service._can_promote_rows(batch_rows),
+            rows_preview=[row["normalized_payload"] for row in batch_rows[:10]],
+            actor_context=context.public_dict(),
+        )
+
+    def _import_decision_rows(batch_id: str) -> list[dict[str, object]]:
+        """Per-row id/status/payload for the imports decision controls."""
+        return [
+            {
+                "id": row["id"],
+                "row_number": row["row_number"],
+                "validation_status": row["validation_status"],
+                "user_id": row["normalized_payload"].get("user_id", ""),
+                "course_id": row["normalized_payload"].get("course_id", ""),
+            }
+            for row in repository.list_import_rows(batch_id)
+        ]
 
     @router.get("/shell/imports", response_class=HTMLResponse)
     async def shell_imports(request: Request) -> Response:
@@ -391,7 +477,9 @@ def build_shell_router(
                 module_label="Imports",
                 error=exc,
             )
-        return _imports_render(request, context, preview=preview)
+        return _imports_render(
+            request, context, preview=preview, rows=_import_decision_rows(preview.batch_id)
+        )
 
     @router.get("/shell/evidence", response_class=HTMLResponse)
     async def shell_evidence(request: Request, limit: int = 50) -> Response:
@@ -415,6 +503,223 @@ def build_shell_router(
             request,
             "evidence.html",
             {"active": "evidence", "context": context, "entries": entries},
+        )
+
+    @router.get("/shell/remediation", response_class=HTMLResponse)
+    async def shell_remediation(request: Request) -> Response:
+        """Remediation queue as a non-mutating dry-run proposal (remediation:propose).
+
+        Calls RemediationService.propose — the dry-run path that computes the
+        actions that *would* run without sending reminders, enrolling, or
+        notifying. Execution is rendered as a clearly-labeled control that
+        requires explicit approval; this GET never mutates.
+        """
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            _gaps, actions, _ledger = await RemediationService(_get_connector()).propose(context)
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="remediation",
+                context=context,
+                module_label="Remediation",
+                error=exc,
+            )
+        rows = [
+            {
+                "user_id": action.user_id,
+                "course_id": action.course_id,
+                "action_type": action.action_type,
+                "status": action.status,
+            }
+            for action in actions
+        ]
+        return _render(
+            request,
+            "remediation.html",
+            {"active": "remediation", "context": context, "rows": rows},
+        )
+
+    @router.get("/shell/source-intel", response_class=HTMLResponse)
+    async def shell_source_intel(request: Request, limit: int = 100) -> Response:
+        """Regulatory source-signal review queue (source_intel:read)."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            proposals = SourceIntelService(repository).list_proposals(
+                context, limit=max(1, min(limit, 500))
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="source_intel",
+                context=context,
+                module_label="Source intelligence",
+                error=exc,
+            )
+        return _render(
+            request,
+            "source_intel.html",
+            {"active": "source_intel", "context": context, "proposals": proposals},
+        )
+
+    @router.get("/shell/privacy", response_class=HTMLResponse)
+    async def shell_privacy(request: Request) -> Response:
+        """Privacy/DSR + retention posture as a read-only panel (privacy:request).
+
+        The PrivacyProgramService exposes no list/status read API for requests —
+        only mutating export/delete and the create/approve workflow — so this GET
+        renders a read-only posture surface. Legal holds and the retention policy
+        come from the repository's read-safe methods; pending DSR actions are
+        described and deferred. No mutating method is ever called from this GET.
+        """
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        # Gate the read explicitly at the same choke-point the privacy service
+        # uses, so a role without privacy:request gets the inline permission panel
+        # rather than a posture page it should not see.
+        try:
+            require_permission(context, PERM_PRIVACY_REQUEST)
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="privacy",
+                context=context,
+                module_label="Privacy & retention",
+                error=exc,
+            )
+        holds = repository.list_active_legal_holds(tenant_id=context.tenant_id)
+        retention_policy = repository.get_retention_policy(context.tenant_id)
+        return _render(
+            request,
+            "privacy.html",
+            {
+                "active": "privacy",
+                "context": context,
+                "holds": holds,
+                "retention_policy": sorted(retention_policy.items()),
+            },
+        )
+
+    @router.get("/shell/readiness", response_class=HTMLResponse)
+    async def shell_readiness(request: Request) -> Response:
+        """Control readiness matrix from the live ReadinessService (readiness:read)."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            report = ReadinessService(repository).check(context)
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="readiness",
+                context=context,
+                module_label="Readiness",
+                error=exc,
+            )
+        summary = sorted(report.summary.items(), key=lambda kv: kv[0])
+        return _render(
+            request,
+            "readiness.html",
+            {
+                "active": "readiness",
+                "context": context,
+                "controls": report.controls,
+                "summary": summary,
+                "posture": report.posture,
+            },
+        )
+
+    @router.get("/shell/admin", response_class=HTMLResponse)
+    async def shell_admin(request: Request) -> Response:
+        """Tenant-scoped role-binding administration (admin:manage)."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            bindings = RoleAdminService(repository).list_role_bindings(context)
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="admin",
+                context=context,
+                module_label="Administration",
+                error=exc,
+            )
+        return _render(
+            request,
+            "admin.html",
+            {"active": "admin", "context": context, "bindings": bindings},
+        )
+
+    @router.post("/shell/imports/{batch_id}/decisions", response_class=HTMLResponse)
+    async def shell_imports_decide(
+        request: Request,
+        batch_id: str,
+        row_id: str = Form(...),
+        decision_type: str = Form(...),
+    ) -> Response:
+        """Record an operator decision on one quarantined row (import:decide).
+
+        Re-renders the imports view over the batch's updated state so a row moved
+        out of NEEDS_DECISION (e.g. accepted) is reflected immediately.
+        """
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        service = ImportService(repository)
+        try:
+            service.decide(
+                context,
+                batch_id=batch_id,
+                row_id=row_id,
+                decision_type=decision_type,
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="imports",
+                context=context,
+                module_label="Imports",
+                error=exc,
+            )
+        preview = _reload_import_preview(service, context, batch_id)
+        return _imports_render(
+            request, context, preview=preview, rows=_import_decision_rows(batch_id)
+        )
+
+    @router.post("/shell/imports/{batch_id}/promote", response_class=HTMLResponse)
+    async def shell_imports_promote(request: Request, batch_id: str) -> Response:
+        """Promote a batch on explicit operator submit (import:promote).
+
+        Fail-closed behavior is preserved by the service: a batch with any
+        blocking row stays QUARANTINED. The post-promote state is re-rendered.
+        """
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        service = ImportService(repository)
+        try:
+            result = service.promote(context, batch_id)
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="imports",
+                context=context,
+                module_label="Imports",
+                error=exc,
+            )
+        preview = _reload_import_preview(service, context, batch_id)
+        return _imports_render(
+            request,
+            context,
+            preview=preview,
+            rows=_import_decision_rows(batch_id),
+            promotion_status=result.status,
         )
 
     return router
