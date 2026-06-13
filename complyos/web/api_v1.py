@@ -34,6 +34,7 @@ from complyos.services.remediation import RemediationService
 from complyos.services.role_admin import RoleAdminService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
+from complyos.web.rate_limit import RateLimitExceededError, check_rate_limit
 
 
 class ErrorBody(BaseModel):
@@ -168,9 +169,34 @@ def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+async def _rate_limit_guard(request: Request) -> None:
+    """Router-level dependency enforcing the in-process mutating-endpoint quota.
+
+    Runs per route so the matched path template is available for keying. On
+    exceed it returns the project's structured 429 plus a Retry-After header.
+    Read-only methods and an unset limit are no-ops (see web.rate_limit).
+    """
+    try:
+        check_rate_limit(request)
+    except RateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=ErrorBody(
+                code="rate_limited",
+                message=f"rate limit of {exc.limit} requests/min exceeded; retry later",
+                details={"limit_per_minute": exc.limit, "retry_after_seconds": exc.retry_after},
+            ).model_dump(),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+
 def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
     repo = repository or LocalRepository()
-    router = APIRouter(prefix="/api/v1", tags=["ComplyOS API v1"])
+    router = APIRouter(
+        prefix="/api/v1",
+        tags=["ComplyOS API v1"],
+        dependencies=[Depends(_rate_limit_guard)],
+    )
 
     async def actor_context(
         authorization: Annotated[str | None, Header()] = None,
