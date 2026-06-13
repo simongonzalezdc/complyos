@@ -222,6 +222,15 @@ class ImportService:
         decision_payload: dict[str, Any] | None = None,
     ) -> ImportDecisionResult:
         require_permission(context, PERM_IMPORT_DECIDE)
+        # Tenant ownership gate — mirror promote(): the per-operation
+        # batch.tenant_id == context.tenant_id check IS the isolation boundary
+        # (the repository point-lookups are by batch_id only). Without this a
+        # context scoped to tenant A could flip tenant B's import-row status.
+        batch = self.repository.get_import_batch(batch_id)
+        if batch is None:
+            raise ValueError(f"unknown import batch: {batch_id}")
+        if batch["tenant_id"] != context.tenant_id:
+            raise PermissionError("cannot decide on import batch for another tenant")
         rows = self.repository.list_import_rows(batch_id)
         row = next((item for item in rows if item["id"] == row_id), None)
         if row is None:

@@ -68,6 +68,30 @@ def test_tenant_a_cannot_promote_tenant_b_import_batch(app_with_two_tenants) -> 
     assert repo.get_import_batch(batch_b)["status"] != "PROMOTED"
 
 
+def test_tenant_a_cannot_decide_on_tenant_b_import_row(app_with_two_tenants) -> None:
+    client, repo = app_with_two_tenants
+
+    # Tenant B previews an import batch (its own context), creating rows.
+    ctx_b = default_local_context(tenant_id=TENANT_B, role="owner", surface="api")
+    preview_b = ImportService(repo).preview(ctx_b, ImportPreviewRequest(csv_text=CSV_TEXT))
+    batch_b = preview_b.batch_id
+    row_b = repo.list_import_rows(batch_b)[0]
+    original_status = row_b["validation_status"]
+
+    # Tenant A tries to flip tenant B's import-row decision through the API. The
+    # service raises PermissionError on the tenant mismatch -> 403, and tenant B's
+    # row status must be untouched. (Regression: decide() once lacked the tenant
+    # gate that promote() has — a cross-tenant write IDOR.)
+    decided = client.post(
+        f"/api/v1/imports/{batch_b}/decisions",
+        json={"row_id": row_b["id"], "decision_type": "reject"},
+        headers=_headers(TENANT_A),
+    )
+    assert decided.status_code == 403
+    assert decided.json()["detail"]["code"] == "bad_import_decision"
+    assert repo.list_import_rows(batch_b)[0]["validation_status"] == original_status
+
+
 def test_tenant_a_evidence_list_never_returns_tenant_b_rows(app_with_two_tenants) -> None:
     client, repo = app_with_two_tenants
     repo.append_evidence_entry(

@@ -493,7 +493,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             ).model_dump(mode="json")
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
-        except ValueError as exc:
+        except (PermissionError, ValueError) as exc:
             raise _bad_request("bad_import_decision", exc, context) from exc
 
     @router.post("/imports/{batch_id}/promote")
