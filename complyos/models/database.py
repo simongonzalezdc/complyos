@@ -22,6 +22,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
+from complyos.core.time import utc_now
+
 
 class Base(DeclarativeBase):
     pass
@@ -141,7 +143,7 @@ class DBTenant(Base):
     data_categories: Mapped[list[str]] = mapped_column(JSON, default=list)
     retention_policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     subprocessor_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBActor(Base):
@@ -154,7 +156,7 @@ class DBActor(Base):
     type: Mapped[str] = mapped_column(String, default="human")
     auth_subject: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="active")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBRoleBinding(Base):
@@ -166,7 +168,7 @@ class DBRoleBinding(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     permissions_override: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBAuditActionLog(Base):
@@ -182,7 +184,7 @@ class DBAuditActionLog(Base):
     result: Mapped[str] = mapped_column(String, nullable=False)
     request_id: Mapped[str | None] = mapped_column(String, nullable=True)
     redacted_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBImportBatch(Base):
@@ -206,7 +208,7 @@ class DBImportBatch(Base):
     idempotency_key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     promoted_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     batch_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
@@ -235,7 +237,7 @@ class DBImportDecision(Base):
     decision_type: Mapped[str] = mapped_column(String, nullable=False)
     decision_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     decided_by: Mapped[str] = mapped_column(String, nullable=False)
-    decided_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
@@ -249,7 +251,7 @@ class DBApproval(Base):
     approval_type: Mapped[str] = mapped_column(String, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBAIProposal(Base):
@@ -263,7 +265,7 @@ class DBAIProposal(Base):
     status: Mapped[str] = mapped_column(String, default="PROPOSED")
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     output: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
@@ -291,7 +293,7 @@ class DBPrivacyRequest(Base):
     region: Mapped[str | None] = mapped_column(String, nullable=True)
     opened_by: Mapped[str] = mapped_column(String, nullable=False)
     closed_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     request_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     result_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -308,7 +310,7 @@ class DBLegalHold(Base):
     status: Mapped[str] = mapped_column(String, default="ACTIVE", nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     released_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hold_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
@@ -319,7 +321,7 @@ class DBRetentionPolicy(Base):
     tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
     policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     updated_by: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBSourceIntelRun(Base):
@@ -333,7 +335,7 @@ class DBSourceIntelRun(Base):
     proposal_count: Mapped[int] = mapped_column(Integer, nullable=False)
     coverage_gaps: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBSourceIntelProposal(Base):
@@ -351,14 +353,12 @@ class DBSourceIntelProposal(Base):
     decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBSourceIntelSchedule(Base):
     __tablename__ = "source_intel_schedules"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_source_intel_schedule_name"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_source_intel_schedule_name"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
@@ -370,7 +370,7 @@ class DBSourceIntelSchedule(Base):
     status: Mapped[str] = mapped_column(String, default="active", nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBSourceIntelJobExecution(Base):
@@ -393,7 +393,7 @@ class DBSchemaMigration(Base):
 
     migration_id: Mapped[str] = mapped_column(String, primary_key=True)
     description: Mapped[str] = mapped_column(String, nullable=False)
-    applied_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBNotificationEvent(Base):
@@ -409,7 +409,7 @@ class DBNotificationEvent(Base):
     payload_hash: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued", nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBNotificationDelivery(Base):
@@ -427,8 +427,8 @@ class DBNotificationDelivery(Base):
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     response_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBNotificationPreference(Base):
@@ -449,7 +449,7 @@ class DBNotificationPreference(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_by: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class DBInboundWebhookEvent(Base):
@@ -467,7 +467,7 @@ class DBInboundWebhookEvent(Base):
     status: Mapped[str] = mapped_column(String, default="received", nullable=False)
     header_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     received_by: Mapped[str] = mapped_column(String, nullable=False)
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 def resolve_database_url(database: str | None = None) -> str:
@@ -514,9 +514,7 @@ def _ensure_sqlite_schema(engine: Any) -> None:
     inspector = inspect(engine)
     if "evidence_ledger" not in inspector.get_table_names():
         return
-    evidence_columns = {
-        column["name"] for column in inspector.get_columns("evidence_ledger")
-    }
+    evidence_columns = {column["name"] for column in inspector.get_columns("evidence_ledger")}
     if "tenant_id" not in evidence_columns:
         with engine.begin() as connection:
             connection.execute(
