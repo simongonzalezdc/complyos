@@ -34,7 +34,13 @@ from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
-from complyos.services.context import ROLE_PERMISSIONS, ActorContext, default_local_context
+from complyos.services.context import (
+    PERM_REMEDIATION_EXECUTE,
+    ROLE_PERMISSIONS,
+    ActorContext,
+    default_local_context,
+    require_permission,
+)
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.notifications import NotificationOutboxService
@@ -676,6 +682,9 @@ def remediate(
     notify_manager: bool = typer.Option(False, "--notify-manager/--no-notify-manager"),
 ):
     """Audit and remediate compliance gaps."""
+    # Remediation mutates state (reminders, enrollment, manager notifications), so
+    # it is gated on the local operator context rather than running unattributed.
+    require_permission(_local_cli_context(), PERM_REMEDIATION_EXECUTE)
     from complyos.api.mcp_server import _get_auditor, _get_connector
 
     async def _remediate():

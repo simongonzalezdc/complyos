@@ -213,7 +213,9 @@ class TestRulesMCPTools:
 
 
 class TestRemediationMCPTool:
-    async def test_remediate_compliance_gaps(self):
+    async def test_remediate_compliance_gaps(self, monkeypatch):
+        # Mutating remediation requires an explicitly elevated MCP role.
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "compliance_manager")
         from complyos.api.mcp_server import remediate_compliance_gaps
 
         result = await remediate_compliance_gaps()
@@ -222,7 +224,8 @@ class TestRemediationMCPTool:
         assert len(result["actions"]) == result["actions_taken"]
         assert len(result["evidence_hash"]) == 64
 
-    async def test_remediate_with_no_actions(self):
+    async def test_remediate_with_no_actions(self, monkeypatch):
+        monkeypatch.setenv("COMPLYOS_MCP_ROLE", "compliance_manager")
         from complyos.api.mcp_server import remediate_compliance_gaps
 
         result = await remediate_compliance_gaps(
