@@ -12,7 +12,6 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
-    ForeignKey,
     Integer,
     String,
     UniqueConstraint,
@@ -20,7 +19,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from complyos.core.time import utc_now
 
@@ -45,10 +44,6 @@ class DBUser(Base):
     job_title: Mapped[str | None] = mapped_column(String, nullable=True)
     custom_attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    enrollments: Mapped[list[DBEnrollment]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
-
 
 class DBCourse(Base):
     __tablename__ = "courses"
@@ -61,17 +56,17 @@ class DBCourse(Base):
     mandatory: Mapped[bool] = mapped_column(default=False)
     category: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    enrollments: Mapped[list[DBEnrollment]] = relationship(
-        back_populates="course", cascade="all, delete-orphan"
-    )
-
 
 class DBEnrollment(Base):
     __tablename__ = "enrollments"
 
+    # user_id/course_id are source-system identifiers, not enforced relational
+    # keys: learning records and enrollments can be imported standalone for
+    # subjects/items that were never independently synced into users/courses.
+    # They are indexed (see migrations) but intentionally not ForeignKey-backed.
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    course_id: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     assigned_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -79,16 +74,13 @@ class DBEnrollment(Base):
     completion_percentage: Mapped[float] = mapped_column(Float, default=0.0)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    user: Mapped[DBUser] = relationship(back_populates="enrollments")
-    course: Mapped[DBCourse] = relationship(back_populates="enrollments")
-
 
 class DBLearningRecord(Base):
     __tablename__ = "learning_records"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    course_id: Mapped[str] = mapped_column(String, nullable=False)
     source_system: Mapped[str] = mapped_column(String, nullable=False)
     source_record_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
