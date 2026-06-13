@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from complyos.core.repository import LocalRepository
+from complyos.core.time import utc_now
 from complyos.services.context import (
     PERM_NOTIFICATIONS_MANAGE,
     ActorContext,
@@ -151,7 +152,7 @@ class NotificationOutboxService:
             status="sent",
             increment_attempts=True,
             response_metadata=response_metadata,
-            sent_at=datetime.utcnow(),
+            sent_at=utc_now(),
         )
         self._log_delivery(context, delivery, result="sent")
         return delivery
@@ -195,9 +196,7 @@ class NotificationOutboxService:
             status=status,
             increment_attempts=True,
             error=error,
-            next_attempt_at=(
-                None if status == "dead_letter" else datetime.utcnow() + timedelta(minutes=5)
-            ),
+            next_attempt_at=(None if status == "dead_letter" else utc_now() + timedelta(minutes=5)),
             response_metadata={"error": error},
         )
         self._log_delivery(context, delivery, result=status)

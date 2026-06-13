@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -27,6 +26,7 @@ from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
+from complyos.core.time import utc_now
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
 from complyos.notification.outbox import EmailEventSender, WebhookEventSender
@@ -454,8 +454,7 @@ def _audit_schedule_notification_events(
                 "evidence_hash": result.evidence_hash,
                 "email_subject": "ComplyOS scheduled audit completed",
                 "summary": (
-                    f"Scheduled audit {result.job_name} completed with "
-                    f"{result.gaps_found} gaps."
+                    f"Scheduled audit {result.job_name} completed with {result.gaps_found} gaps."
                 ),
             },
             channels=channels,
@@ -606,6 +605,7 @@ def release_check(
 def mcp():
     """Run the MCP server."""
     from complyos.api.mcp_server import main
+
     main()
 
 
@@ -1496,7 +1496,7 @@ def source_intel_run_scheduled(
     notification_events = []
     channels = notify_channel or ["slack", "teams"]
     for schedule in schedules:
-        started_at = datetime.utcnow()
+        started_at = utc_now()
         run_id = None
         try:
             if schedule["mode"] != "fixture":
@@ -1518,7 +1518,7 @@ def source_intel_run_scheduled(
                 run_id=run_id,
                 status="succeeded",
                 started_at=started_at,
-                finished_at=datetime.utcnow(),
+                finished_at=utc_now(),
                 summary=summary,
             )
             if enqueue_notifications:
@@ -1539,7 +1539,7 @@ def source_intel_run_scheduled(
                 run_id=run_id,
                 status="failed",
                 started_at=started_at,
-                finished_at=datetime.utcnow(),
+                finished_at=utc_now(),
                 summary={"schedule_name": schedule["name"], "query": schedule["query"]},
                 error=str(exc),
             )
@@ -1736,9 +1736,7 @@ def notifications_drain(
         for delivery in deliveries:
             try:
                 sender = (
-                    email_sender
-                    if str(delivery["channel"]).lower() == "email"
-                    else webhook_sender
+                    email_sender if str(delivery["channel"]).lower() == "email" else webhook_sender
                 )
                 result = await sender.send_delivery(delivery)
             except Exception as exc:

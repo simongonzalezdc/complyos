@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from complyos.core.time import utc_now
 from complyos.models.database import (
     DBAIProposal,
     DBAIProvenance,
@@ -251,9 +252,7 @@ class LocalRepository:
                             sort_keys=True,
                         ),
                         raw_data_hash=evidence_entry["raw_data_hash"],
-                        transformation_steps=json.dumps(
-                            evidence_entry["transformation_steps"]
-                        ),
+                        transformation_steps=json.dumps(evidence_entry["transformation_steps"]),
                         output_hash=evidence_entry["output_hash"],
                         output_summary=evidence_entry["output_summary"],
                     )
@@ -378,7 +377,7 @@ class LocalRepository:
                 DBEvidenceLedger(
                     id=entry_id,
                     tenant_id=tenant_id,
-                    timestamp=timestamp or datetime.utcnow(),
+                    timestamp=timestamp or utc_now(),
                     query_type=query_type,
                     query_params=json.dumps(query_params, sort_keys=True),
                     raw_data_hash=raw_data_hash,
@@ -431,7 +430,7 @@ class LocalRepository:
                     result=result,
                     request_id=request_id,
                     redacted_metadata=metadata or {},
-                    created_at=created_at or datetime.utcnow(),
+                    created_at=created_at or utc_now(),
                 )
             )
             session.commit()
@@ -463,7 +462,7 @@ class LocalRepository:
         created_at: datetime | None = None,
     ) -> dict[str, Any]:
         run_id = str(uuid.uuid4())
-        timestamp = created_at or datetime.utcnow()
+        timestamp = created_at or utc_now()
         with self._session() as session:
             session.add(
                 DBSourceIntelRun(
@@ -518,11 +517,7 @@ class LocalRepository:
             )
             if state:
                 query = query.where(DBSourceIntelProposal.approval_state == state)
-            rows = (
-                query.order_by(DBSourceIntelProposal.created_at.desc())
-                .limit(limit)
-                .all()
-            )
+            rows = query.order_by(DBSourceIntelProposal.created_at.desc()).limit(limit).all()
             return [self._to_source_intel_proposal_dict(row) for row in rows]
 
     def decide_source_intel_proposal(
@@ -547,7 +542,7 @@ class LocalRepository:
                 raise ValueError(f"unknown source-intelligence proposal: {proposal_id}")
             proposal.approval_state = state
             proposal.decided_by = decided_by
-            proposal.decided_at = decided_at or datetime.utcnow()
+            proposal.decided_at = decided_at or utc_now()
             payload = dict(proposal.payload or {})
             payload["approval_state"] = state
             proposal.payload = payload
@@ -568,7 +563,7 @@ class LocalRepository:
         created_by: str,
         created_at: datetime | None = None,
     ) -> dict[str, Any]:
-        timestamp = created_at or datetime.utcnow()
+        timestamp = created_at or utc_now()
         with self._session() as session:
             schedule = (
                 session.query(DBSourceIntelSchedule)
@@ -674,11 +669,7 @@ class LocalRepository:
             )
             if schedule_id:
                 query = query.where(DBSourceIntelJobExecution.schedule_id == schedule_id)
-            rows = (
-                query.order_by(DBSourceIntelJobExecution.started_at.desc())
-                .limit(limit)
-                .all()
-            )
+            rows = query.order_by(DBSourceIntelJobExecution.started_at.desc()).limit(limit).all()
             return [self._to_source_intel_job_execution_dict(row) for row in rows]
 
     # ------------------------------------------------------------------
@@ -700,7 +691,7 @@ class LocalRepository:
         created_at: datetime | None = None,
     ) -> dict[str, Any]:
         event_id = str(uuid.uuid4())
-        timestamp = created_at or datetime.utcnow()
+        timestamp = created_at or utc_now()
         with self._session() as session:
             event = DBNotificationEvent(
                 id=event_id,
@@ -747,7 +738,7 @@ class LocalRepository:
         updated_by: str,
         updated_at: datetime | None = None,
     ) -> dict[str, Any]:
-        timestamp = updated_at or datetime.utcnow()
+        timestamp = updated_at or utc_now()
         with self._session() as session:
             preference = (
                 session.query(DBNotificationPreference)
@@ -808,7 +799,7 @@ class LocalRepository:
         received_by: str,
         received_at: datetime | None = None,
     ) -> dict[str, Any]:
-        timestamp = received_at or datetime.utcnow()
+        timestamp = received_at or utc_now()
         with self._session() as session:
             event = DBInboundWebhookEvent(
                 id=str(uuid.uuid4()),
@@ -843,11 +834,7 @@ class LocalRepository:
             )
             if source:
                 query = query.where(DBInboundWebhookEvent.source == source)
-            rows = (
-                query.order_by(DBInboundWebhookEvent.received_at.desc())
-                .limit(limit)
-                .all()
-            )
+            rows = query.order_by(DBInboundWebhookEvent.received_at.desc()).limit(limit).all()
             return [self._to_inbound_webhook_event_dict(row) for row in rows]
 
     def list_notification_deliveries(
@@ -863,11 +850,7 @@ class LocalRepository:
             )
             if status:
                 query = query.where(DBNotificationDelivery.status == status)
-            rows = (
-                query.order_by(DBNotificationDelivery.created_at.asc())
-                .limit(limit)
-                .all()
-            )
+            rows = query.order_by(DBNotificationDelivery.created_at.asc()).limit(limit).all()
             deliveries: list[dict[str, Any]] = []
             for row in rows:
                 event = session.get(DBNotificationEvent, row.event_id)
@@ -904,7 +887,7 @@ class LocalRepository:
             delivery.last_error = error
             delivery.next_attempt_at = next_attempt_at
             delivery.sent_at = sent_at
-            delivery.updated_at = datetime.utcnow()
+            delivery.updated_at = utc_now()
             session.commit()
             session.refresh(delivery)
             event = session.get(DBNotificationEvent, delivery.event_id)
@@ -936,7 +919,7 @@ class LocalRepository:
                 status=batch["status"],
                 idempotency_key=batch["idempotency_key"],
                 created_by=batch["created_by"],
-                created_at=batch.get("created_at") or datetime.utcnow(),
+                created_at=batch.get("created_at") or utc_now(),
                 batch_metadata=batch.get("metadata") or {},
             )
             session.add(db_batch)
@@ -1030,7 +1013,7 @@ class LocalRepository:
                     decision_type=decision["decision_type"],
                     decision_payload=decision.get("decision_payload") or {},
                     decided_by=decision["decided_by"],
-                    decided_at=decision.get("decided_at") or datetime.utcnow(),
+                    decided_at=decision.get("decided_at") or utc_now(),
                     reason=decision.get("reason"),
                 )
             )
@@ -1061,7 +1044,7 @@ class LocalRepository:
                     output_hash=proposal["output_hash"],
                     status=proposal["status"],
                     created_by=proposal["created_by"],
-                    created_at=proposal.get("created_at") or datetime.utcnow(),
+                    created_at=proposal.get("created_at") or utc_now(),
                     output=proposal.get("output") or {},
                 )
             )
@@ -1119,7 +1102,7 @@ class LocalRepository:
                     status=request.get("status", "OPEN"),
                     region=request.get("region"),
                     opened_by=request["opened_by"],
-                    created_at=request.get("created_at") or datetime.utcnow(),
+                    created_at=request.get("created_at") or utc_now(),
                     request_metadata=request.get("metadata") or {},
                     result_summary=request.get("result_summary") or {},
                 )
@@ -1165,7 +1148,7 @@ class LocalRepository:
                     approval_type=approval["approval_type"],
                     approved_by=approval.get("approved_by"),
                     status=approval.get("status", "approved"),
-                    created_at=approval.get("created_at") or datetime.utcnow(),
+                    created_at=approval.get("created_at") or utc_now(),
                 )
             )
             session.commit()
@@ -1179,9 +1162,7 @@ class LocalRepository:
                 if user_tenant != tenant_id:
                     user = None
             learning_records = (
-                session.query(DBLearningRecord)
-                .where(DBLearningRecord.user_id == subject_id)
-                .all()
+                session.query(DBLearningRecord).where(DBLearningRecord.user_id == subject_id).all()
                 if user is not None
                 else []
             )
@@ -1240,7 +1221,7 @@ class LocalRepository:
                     reason=hold["reason"],
                     status=hold.get("status", "ACTIVE"),
                     created_by=hold["created_by"],
-                    created_at=hold.get("created_at") or datetime.utcnow(),
+                    created_at=hold.get("created_at") or utc_now(),
                     hold_metadata=hold.get("metadata") or {},
                 )
             )
@@ -1333,11 +1314,7 @@ class LocalRepository:
             held_subjects = {hold.subject_id for hold in active_holds if hold.subject_id}
             if tenant_hold_active:
                 return []
-            return [
-                request.id
-                for request in candidates
-                if request.subject_id not in held_subjects
-            ]
+            return [request.id for request in candidates if request.subject_id not in held_subjects]
 
     def list_retention_eligible_import_batch_ids(
         self,
@@ -1374,11 +1351,7 @@ class LocalRepository:
         if not batch_ids:
             return 0
         with self._session() as session:
-            return (
-                session.query(DBImportRow)
-                .where(DBImportRow.batch_id.in_(batch_ids))
-                .count()
-            )
+            return session.query(DBImportRow).where(DBImportRow.batch_id.in_(batch_ids)).count()
 
     def count_import_decisions_for_batches(self, batch_ids: list[str]) -> int:
         if not batch_ids:
@@ -1813,9 +1786,7 @@ class LocalRepository:
         event: DBNotificationEvent | None,
     ) -> dict[str, Any]:
         event_payload = (
-            LocalRepository._to_notification_event_dict(event)
-            if event is not None
-            else None
+            LocalRepository._to_notification_event_dict(event) if event is not None else None
         )
         return {
             "id": db.id,

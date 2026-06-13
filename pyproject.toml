@@ -62,7 +62,12 @@ select = ["E", "F", "I", "W", "N", "UP", "B", "C4", "SIM"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    'ignore:Using `httpx` with `starlette\.testclient` is deprecated; install `httpx2` instead\.',
+    'ignore:SelectableGroups dict interface is deprecated\. Use select\.:DeprecationWarning:opentelemetry\.util\._importlib_metadata',
+]
 
 [tool.coverage.run]
 source = ["complyos"]
 branch = true
+

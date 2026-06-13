@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from complyos.core.repository import LocalRepository
+from complyos.core.time import utc_now
 from complyos.services.context import (
     PERM_SOURCE_INTEL_DECIDE,
     PERM_SOURCE_INTEL_READ,
@@ -183,7 +184,7 @@ class SourceIntelService:
     ) -> list[dict[str, Any]]:
         """Return active schedules due for execution."""
         require_permission(context, PERM_SOURCE_INTEL_RUN)
-        timestamp = now or datetime.utcnow()
+        timestamp = now or utc_now()
         schedules = self.repository.list_source_intel_schedules(
             tenant_id=context.tenant_id,
             status="active",
@@ -289,7 +290,7 @@ class SourceIntelService:
         )
         return {
             "tenant_id": context.tenant_id,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": utc_now().isoformat(),
             "proposal_count": len(proposals),
             "decided_count": decided_count,
             "proposals": proposals,
