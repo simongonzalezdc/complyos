@@ -201,4 +201,4 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
-- [x] Enterprise readiness layer — privacy/DSR services, retention cleanup, tenant-scoped evidence, security evidence packet, governance packet, and API/MCP/CLI parity
+- [x] Enterprise readiness layer — privacy/DSR services, retention cleanup, tenant-scoped evidence, security evidence packet, governance packet, and CLI/MCP parity for these workflows. The FastAPI surface currently covers the enterprise/privacy workflows (readiness, imports, evidence, security, governance, source-intel, hooks, notifications, AI proposals, privacy); the audit/report/status/digest/remediation/health/rule operations remain CLI- and MCP-only and are tracked for the API surface.
