@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}ComplyOS{% endblock %}</title>
+    <link rel="stylesheet" href="{{ static_url }}/shell.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="app">
+      <nav class="sidenav" aria-label="Modules">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" role="presentation"
+                 aria-hidden="true" focusable="false" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round">
+              <path d="M12 3 4 6v6c0 4.4 3.2 7.6 8 9 4.8-1.4 8-4.6 8-9V6z" />
+              <path d="m9 12 2 2 4-4" />
+            </svg>
+          </span>
+          <span>
+            <span class="brand-name">ComplyOS</span>
+            <span class="brand-sub">Evidence console</span>
+          </span>
+        </div>
+        <ul class="nav-list">
+          {% for item in modules %}
+          <li>
+            {% if item.live %}
+            <a class="nav-link"
+               href="{{ item.href }}"
+               {% if item.key == active %}aria-current="page"{% endif %}>
+              <span>{{ item.label }}</span>
+            </a>
+            {% else %}
+            <span class="nav-link is-coming" aria-disabled="true"
+                  title="{{ item.label }} — coming in a later stage">
+              <span>{{ item.label }}</span>
+              <span class="nav-tag">soon</span>
+            </span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </nav>
+
+      <div class="main">
+        <div class="utility-bar">
+          <div class="utility-context">
+            <span>Tenant <span class="mono">{{ context.tenant_id }}</span></span>
+            <span aria-hidden="true">·</span>
+            <span>Role <span class="mono">{{ context.role }}</span></span>
+          </div>
+          <form method="post" action="{{ shell_url }}/logout">
+            <button type="submit" class="btn-ghost">Sign out</button>
+          </form>
+        </div>
+
+        <main id="main" class="content">
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

@@ -17,6 +17,7 @@ from complyos.models.domain import AuditReport
 from complyos.services.context import default_local_context
 from complyos.services.source_intel import SourceIntelService
 from complyos.web.api_v1 import _truthy_env, build_api_v1_router
+from complyos.web.shell import mount_shell
 
 
 def _guard_legacy_dev_endpoint() -> None:
@@ -54,6 +55,9 @@ def create_dashboard_app(
     repo = repository or LocalRepository()
     app = FastAPI(title="ComplyOS Dashboard", version="0.1.0")
     app.include_router(build_api_v1_router(repo))
+    # Authenticated enterprise shell (plan §10): session auth wrapping the same
+    # ActorContext the services consume, modules rendered from live data.
+    mount_shell(app, auditor=auditor, repository=repo)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

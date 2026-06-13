@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · ComplyOS</title>
+    <link rel="stylesheet" href="{{ static_url }}/shell.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="login-wrap">
+      <main id="main" class="login-card">
+        <p class="eyebrow">ComplyOS console</p>
+        <h1>Sign in</h1>
+        {% if error %}
+        <p class="error-banner" role="alert">{{ error }}</p>
+        {% endif %}
+        {% if local_mode %}
+        <form method="post" action="{{ shell_url }}/login">
+          <label for="role">Local role</label>
+          <select id="role" name="role" class="field">
+            {% for role in roles %}
+            <option value="{{ role }}">{{ role }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn">Enter console</button>
+        </form>
+        <p class="posture-note">
+          Insecure local mode: no API token is configured and
+          <span class="mono">COMPLYOS_ALLOW_INSECURE_LOCAL</span> is on. Choose a
+          role for local development only.
+        </p>
+        {% else %}
+        <form method="post" action="{{ shell_url }}/login">
+          <label for="token">API token</label>
+          <input id="token" name="token" type="password" class="field"
+                 autocomplete="off" required
+                 aria-describedby="token-help" />
+          <button type="submit" class="btn">Sign in</button>
+        </form>
+        <p id="token-help" class="posture-note">
+          Use the value of <span class="mono">COMPLYOS_API_TOKEN</span>. The same
+          credential authenticates the ComplyOS API.
+        </p>
+        {% endif %}
+      </main>
+    </div>
+  </body>
+</html>

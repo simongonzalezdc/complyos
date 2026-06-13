@@ -1,0 +1,276 @@
+"""Authenticated enterprise web shell for ComplyOS (plan §10).
+
+The shell is an APP, not a marketing page: side nav, top utility bar, dense
+tables, and modules rendered from LIVE service data. It wraps the existing
+ActorContext auth model in a SIGNED session cookie rather than inventing a second
+auth model — the cookie carries only an opaque role token signed server-side, and
+``shell_context`` rebuilds the SAME ActorContext that the services consume.
+
+WP16a delivers the foundation (session login/logout, base layout, side nav) plus
+the live Overview module. The remaining seven modules are present in the nav but
+marked "soon" and land in WP16b-d.
+"""
+
+from __future__ import annotations
+
+import hmac
+import os
+from pathlib import Path
+from typing import Protocol
+
+from fastapi import APIRouter, Form, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.templating import Jinja2Templates
+
+from complyos.core.repository import LocalRepository
+from complyos.models.domain import AuditReport
+from complyos.notification.signing import sign_payload, verify_signature
+from complyos.services.context import (
+    ROLE_PERMISSIONS,
+    ActorContext,
+    AuthorizationError,
+    default_local_context,
+)
+from complyos.services.readiness import ReadinessService
+from complyos.services.source_intel import SourceIntelService
+from complyos.web.api_v1 import _truthy_env
+
+_HERE = Path(__file__).resolve().parent
+TEMPLATES_DIR = _HERE / "templates"
+STATIC_DIR = _HERE / "static"
+
+SHELL_PREFIX = "/shell"
+STATIC_PREFIX = "/shell/static"
+SESSION_COOKIE = "complyos_shell"
+
+# Plan §10 — the eight enterprise modules. Only Overview is live this stage.
+MODULES: tuple[dict[str, object], ...] = (
+    {"key": "overview", "label": "Overview", "href": SHELL_PREFIX, "live": True},
+    {"key": "audits", "label": "Audits", "href": "#", "live": False},
+    {"key": "remediation", "label": "Remediation", "href": "#", "live": False},
+    {"key": "imports", "label": "Imports", "href": "#", "live": False},
+    {"key": "source_intel", "label": "Source intelligence", "href": "#", "live": False},
+    {"key": "privacy", "label": "Privacy & retention", "href": "#", "live": False},
+    {"key": "readiness", "label": "Readiness", "href": "#", "live": False},
+    {"key": "admin", "label": "Administration", "href": "#", "live": False},
+)
+
+
+class AuditReporter(Protocol):
+    async def generate_report(
+        self,
+        department: str | None = None,
+        region: str | None = None,
+    ) -> AuditReport:
+        """Generate an audit report."""
+
+
+def _session_secret() -> str | None:
+    """Server secret used to sign session cookies.
+
+    Prefer an explicit session secret; otherwise reuse the API token so the shell
+    shares the deployment's existing credential. Returns None when neither is set
+    (the fail-closed/insecure-local paths handle that case).
+    """
+    secret = os.getenv("COMPLYOS_SESSION_SECRET") or os.getenv("COMPLYOS_API_TOKEN")
+    return secret.strip() if secret else None
+
+
+def _sign_role(role: str, secret: str) -> str:
+    """Sign a role into an opaque, tamper-evident cookie value.
+
+    Format: ``<role>.<signature>`` where the signature is the canonical ComplyOS
+    HMAC-SHA256 over the role bytes (itsdangerous is not a dependency, so we reuse
+    notification.signing — one audited HMAC implementation). The client never
+    receives a forgeable plaintext role it can swap for ``owner``: any edit
+    invalidates the signature.
+    """
+    signature = sign_payload(secret, timestamp="shell-session", body=role.encode("utf-8"))
+    return f"{role}.{signature}"
+
+
+def _verify_cookie(value: str | None, secret: str) -> str | None:
+    """Return the role from a valid signed cookie, else None (constant-time)."""
+    if not value:
+        return None
+    role, _, signature = value.partition(".")
+    if not role or not signature:
+        return None
+    if not verify_signature(
+        secret, timestamp="shell-session", body=role.encode("utf-8"), signature=signature
+    ):
+        return None
+    if role not in ROLE_PERMISSIONS:
+        return None
+    return role
+
+
+def build_shell_router(
+    *,
+    auditor: AuditReporter,
+    repository: LocalRepository,
+) -> APIRouter:
+    """Build the authenticated shell router (mounted by the dashboard app)."""
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    router = APIRouter()
+
+    def _login_redirect() -> RedirectResponse:
+        return RedirectResponse(f"{SHELL_PREFIX}/login", status_code=status.HTTP_302_FOUND)
+
+    def _shell_context(request: Request) -> ActorContext | None:
+        """Read + verify the session cookie and rebuild the service ActorContext."""
+        secret = _session_secret()
+        if secret:
+            role = _verify_cookie(request.cookies.get(SESSION_COOKIE), secret)
+            if role is None:
+                return None
+            auth_method = "session"
+        elif _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"):
+            role = _verify_cookie(request.cookies.get(SESSION_COOKIE), "insecure-local")
+            if role is None:
+                return None
+            auth_method = "local_dev"
+        else:
+            return None
+        return default_local_context(surface="shell", role=role, auth_method=auth_method)
+
+    def _set_session(response: Response, role: str) -> None:
+        secret = _session_secret() or "insecure-local"
+        response.set_cookie(
+            SESSION_COOKIE,
+            _sign_role(role, secret),
+            httponly=True,
+            samesite="lax",
+            secure=False,  # local-first; a TLS terminator/proxy owns Secure in prod
+            path=SHELL_PREFIX,
+        )
+
+    def _render(
+        request: Request,
+        name: str,
+        ctx: dict[str, object],
+        *,
+        status_code: int = status.HTTP_200_OK,
+    ) -> Response:
+        base: dict[str, object] = {
+            "request": request,
+            "static_url": STATIC_PREFIX,
+            "shell_url": SHELL_PREFIX,
+            "modules": MODULES,
+        }
+        base.update(ctx)
+        return templates.TemplateResponse(request, name, base, status_code=status_code)
+
+    def _login_error(request: Request, message: str) -> Response:
+        local_mode = _session_secret() is None and _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL")
+        return _render(
+            request,
+            "login.html",
+            {"local_mode": local_mode, "roles": sorted(ROLE_PERMISSIONS), "error": message},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    @router.get("/shell/login", response_class=HTMLResponse)
+    async def login_page(request: Request) -> Response:
+        local_mode = _session_secret() is None and _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL")
+        return _render(
+            request,
+            "login.html",
+            {
+                "local_mode": local_mode,
+                "roles": sorted(ROLE_PERMISSIONS),
+                "error": None,
+            },
+        )
+
+    @router.post("/shell/login")
+    async def login(
+        request: Request,
+        token: str = Form(default=""),
+        role: str = Form(default=""),
+    ) -> Response:
+        secret = _session_secret()
+        if secret:
+            # Bearer-token parity with the API: constant-time compare, then the
+            # signed cookie pins role=owner (the API's default privileged role).
+            if not token or not hmac.compare_digest(token, secret):
+                return _login_error(request, "Invalid API token.")
+            session_role = "owner"
+        elif _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"):
+            session_role = role if role in ROLE_PERMISSIONS else "owner"
+        else:
+            # Fail closed: no token configured and no insecure opt-in — refuse,
+            # exactly like the API's actor_context dependency.
+            return _login_error(request, "Console authentication is not configured.")
+
+        response = RedirectResponse(SHELL_PREFIX, status_code=status.HTTP_303_SEE_OTHER)
+        _set_session(response, session_role)
+        return response
+
+    @router.post("/shell/logout")
+    async def logout() -> Response:
+        response = RedirectResponse(
+            f"{SHELL_PREFIX}/login", status_code=status.HTTP_303_SEE_OTHER
+        )
+        response.delete_cookie(SESSION_COOKIE, path=SHELL_PREFIX)
+        return response
+
+    async def _overview_view(request: Request) -> Response:
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+
+        report = await auditor.generate_report()
+        readiness = ReadinessService(repository).check(context)
+        try:
+            pending_signals = len(
+                SourceIntelService(repository).list_proposals(context, limit=100)
+            )
+        except AuthorizationError:
+            # Roles without source_intel:read still get an Overview; the signal
+            # tile just reports zero rather than 403-ing the whole page.
+            pending_signals = 0
+
+        severity_order = ("critical", "high", "medium", "low")
+        gaps_by_severity = [
+            (sev, report.gaps_by_severity.get(sev, 0)) for sev in severity_order
+        ]
+        high_risk = report.gaps_by_severity.get("high", 0) + report.gaps_by_severity.get(
+            "critical", 0
+        )
+        readiness_summary = sorted(readiness.summary.items(), key=lambda kv: kv[0])
+
+        overview = {
+            "gaps_found": report.gaps_found,
+            "total_users_audited": report.total_users_audited,
+            "high_risk_gaps": high_risk,
+            "gaps_by_severity": gaps_by_severity,
+            "readiness_designed": readiness.summary.get("designed", 0),
+            "readiness_total": len(readiness.controls),
+            "readiness_summary": readiness_summary,
+            "readiness_posture": readiness.posture,
+            "pending_signals": pending_signals,
+        }
+        return _render(
+            request,
+            "overview.html",
+            {"active": "overview", "context": context, "overview": overview},
+        )
+
+    @router.get("/shell", response_class=HTMLResponse)
+    async def shell_root(request: Request) -> Response:
+        return await _overview_view(request)
+
+    @router.get("/shell/overview", response_class=HTMLResponse)
+    async def shell_overview(request: Request) -> Response:
+        return await _overview_view(request)
+
+    return router
+
+
+def mount_shell(app, *, auditor: AuditReporter, repository: LocalRepository) -> None:
+    """Mount the shell router and its static files onto an existing app."""
+    from fastapi.staticfiles import StaticFiles
+
+    app.include_router(build_shell_router(auditor=auditor, repository=repository))
+    app.mount(STATIC_PREFIX, StaticFiles(directory=str(STATIC_DIR)), name="shell-static")

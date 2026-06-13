@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Overview · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Overview</p>
+<h1>Compliance overview</h1>
+<p class="lede">
+  Live posture pulled from the audit and readiness services for tenant
+  <strong>{{ context.tenant_id }}</strong>. Numbers reflect the current data set,
+  not a static snapshot.
+</p>
+
+<section aria-label="Key metrics">
+  <div class="metric-grid">
+    <div class="metric">
+      <div class="metric-label">Open gaps</div>
+      <div class="metric-value">{{ overview.gaps_found }}</div>
+      <p class="metric-note">across {{ overview.total_users_audited }} active workers</p>
+    </div>
+    <div class="metric">
+      <div class="metric-label">High-risk gaps</div>
+      <div class="metric-value is-risk">{{ overview.high_risk_gaps }}</div>
+      <p class="metric-note">high + critical severity</p>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Readiness designed</div>
+      <div class="metric-value">{{ overview.readiness_designed }}</div>
+      <p class="metric-note">of {{ overview.readiness_total }} controls</p>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Source signals</div>
+      <div class="metric-value">{{ overview.pending_signals }}</div>
+      <p class="metric-note">awaiting human review</p>
+    </div>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="sev-heading">
+  <h2 id="sev-heading">Gaps by severity</h2>
+  <table class="kv-table">
+    <thead>
+      <tr><th scope="col">Severity</th><th scope="col" class="num">Count</th></tr>
+    </thead>
+    <tbody>
+      {% for severity, count in overview.gaps_by_severity %}
+      <tr>
+        <td><span class="tag sev-{{ severity }}">{{ severity }}</span></td>
+        <td class="num">{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="readiness-heading">
+  <h2 id="readiness-heading">Readiness summary</h2>
+  <p class="lede">{{ overview.readiness_posture }}</p>
+  <table class="kv-table">
+    <thead>
+      <tr><th scope="col">Status</th><th scope="col" class="num">Controls</th></tr>
+    </thead>
+    <tbody>
+      {% for status, count in overview.readiness_summary %}
+      <tr>
+        <td>{{ status }}</td>
+        <td class="num">{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
