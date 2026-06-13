@@ -29,7 +29,7 @@ from complyos.core.repository import LocalRepository
 from complyos.core.rules import AssignmentRuleEngine
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
-from complyos.notification.outbox import WebhookEventSender
+from complyos.notification.outbox import EmailEventSender, WebhookEventSender
 from complyos.notification.sender import NotificationSender
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
@@ -120,6 +120,19 @@ def _get_outbox_sender() -> WebhookEventSender:
     return WebhookEventSender(
         channel_urls=channel_urls,
         signing_secret=os.getenv("COMPLYOS_WEBHOOK_SECRET"),
+    )
+
+
+def _get_email_outbox_sender() -> EmailEventSender:
+    """Build an SMTP-backed event sender with env-configured default recipients."""
+    recipients = [
+        item.strip()
+        for item in os.getenv("COMPLYOS_NOTIFICATION_EMAIL_TO", "").split(",")
+        if item.strip()
+    ]
+    return EmailEventSender(
+        notification_sender=_get_notifier() or NotificationSender(),
+        default_recipients=recipients,
     )
 
 
@@ -420,6 +433,61 @@ def sync(
     )
 
 
+def _audit_schedule_notification_events(
+    *,
+    notification_service: NotificationOutboxService,
+    context: ActorContext,
+    result: Any,
+    channels: list[str],
+) -> list[dict[str, Any]]:
+    events = [
+        notification_service.enqueue_event(
+            context,
+            event_type="audit.completed",
+            object_type="audit_snapshot",
+            object_id=result.snapshot_id,
+            payload={
+                "job_name": result.job_name,
+                "scope": result.scope,
+                "gaps_found": result.gaps_found,
+                "gaps_by_severity": result.gaps_by_severity,
+                "evidence_hash": result.evidence_hash,
+                "email_subject": "ComplyOS scheduled audit completed",
+                "summary": (
+                    f"Scheduled audit {result.job_name} completed with "
+                    f"{result.gaps_found} gaps."
+                ),
+            },
+            channels=channels,
+        )
+    ]
+    high_risk_count = int(result.gaps_by_severity.get("critical", 0)) + int(
+        result.gaps_by_severity.get("high", 0)
+    )
+    if high_risk_count:
+        events.append(
+            notification_service.enqueue_event(
+                context,
+                event_type="audit.high_risk_gaps_found",
+                object_type="audit_snapshot",
+                object_id=result.snapshot_id,
+                payload={
+                    "job_name": result.job_name,
+                    "scope": result.scope,
+                    "high_risk_count": high_risk_count,
+                    "gaps_by_severity": result.gaps_by_severity,
+                    "email_subject": "ComplyOS high-risk audit gaps found",
+                    "summary": (
+                        f"Scheduled audit {result.job_name} found "
+                        f"{high_risk_count} high/critical gaps."
+                    ),
+                },
+                channels=channels,
+            )
+        )
+    return events
+
+
 @app.command("run-schedule")
 def run_schedule(
     config_path: str = typer.Option(
@@ -429,6 +497,15 @@ def run_schedule(
     ),
     db_path: str | None = typer.Option(None, "--db", help="Path to SQLite database"),
     force: bool = typer.Option(False, "--force", help="Run jobs even when last_run_at is not due"),
+    enqueue_notifications: bool = typer.Option(
+        True,
+        "--enqueue-notifications/--no-enqueue-notifications",
+        help="Queue audit notification events without sending network calls",
+    ),
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
 ):
     """Run due scheduled audit jobs once."""
     from complyos.api.mcp_server import _get_auditor
@@ -448,6 +525,9 @@ def run_schedule(
     repo = LocalRepository(db_path or ComplyOSConfig.load(config_path).database_path())
     auditor = _get_auditor()
     notifier = _get_webhook_notifier()
+    context = _local_cli_context(role="compliance_manager")
+    notification_service = NotificationOutboxService(repo)
+    channels = notify_channel or ["email", "slack", "teams"]
 
     async def _run():
         results = []
@@ -467,6 +547,15 @@ def run_schedule(
     if not results:
         console.print("[yellow]No scheduled audit jobs were due[/yellow]")
         return
+
+    if enqueue_notifications:
+        for result in results:
+            _audit_schedule_notification_events(
+                notification_service=notification_service,
+                context=context,
+                result=result,
+                channels=channels,
+            )
 
     table = Table(title="Scheduled Audit Runs")
     table.add_column("Job")
@@ -1563,6 +1652,66 @@ def notifications_list(
     console.print(table)
 
 
+@notifications_app.command("preferences")
+def notifications_preferences(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List tenant notification preferences and kill switches."""
+    context = _local_cli_context(role="compliance_manager")
+    preferences = NotificationOutboxService(LocalRepository(db_path)).list_preferences(context)
+    payload = {"preferences": preferences}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Notification Preferences")
+    table.add_column("Channel")
+    table.add_column("Event")
+    table.add_column("Enabled")
+    table.add_column("Reason")
+    for preference in preferences:
+        table.add_row(
+            str(preference["channel"]),
+            str(preference["event_type"]),
+            "yes" if preference["enabled"] else "no",
+            str(preference.get("reason") or ""),
+        )
+    console.print(table)
+
+
+@notifications_app.command("preference-set")
+def notifications_preference_set(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    channel: str = typer.Option(..., "--channel", help="Channel name or '*'"),
+    event_type: str = typer.Option("*", "--event-type", help="Event type or '*'"),
+    enabled: bool = typer.Option(
+        True,
+        "--enabled/--disabled",
+        help="Enable or disable this channel/event route",
+    ),
+    reason: str | None = typer.Option(None, "--reason", help="Human-readable change reason"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Set a channel/event notification preference for the current tenant."""
+    context = _local_cli_context(role="compliance_manager")
+    preference = NotificationOutboxService(LocalRepository(db_path)).set_preference(
+        context,
+        channel=channel,
+        event_type=event_type,
+        enabled=enabled,
+        reason=reason,
+    )
+    if json_output:
+        _print_json(preference)
+        return
+    console.print(
+        f"[green]Notification preference saved:[/green] "
+        f"{preference['channel']} / {preference['event_type']} "
+        f"{'enabled' if preference['enabled'] else 'disabled'}"
+    )
+
+
 @notifications_app.command("drain")
 def notifications_drain(
     db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
@@ -1581,10 +1730,16 @@ def notifications_drain(
     results: list[dict[str, Any]] = []
 
     async def _send_all() -> list[dict[str, Any]]:
-        sender = _get_outbox_sender()
+        webhook_sender = _get_outbox_sender()
+        email_sender = _get_email_outbox_sender()
         sent_results: list[dict[str, Any]] = []
         for delivery in deliveries:
             try:
+                sender = (
+                    email_sender
+                    if str(delivery["channel"]).lower() == "email"
+                    else webhook_sender
+                )
                 result = await sender.send_delivery(delivery)
             except Exception as exc:
                 marked = service.mark_delivery_failed(
@@ -1601,11 +1756,20 @@ def notifications_drain(
                     delivery_id=str(delivery["id"]),
                     error=str(result["error"]),
                 )
+            elif not result.get("sent"):
+                marked = service.mark_delivery_failed(
+                    context,
+                    delivery_id=str(delivery["id"]),
+                    error=str(result.get("error", "notification delivery failed")),
+                )
             else:
                 marked = service.mark_delivery_sent(
                     context,
                     delivery_id=str(delivery["id"]),
-                    response_metadata={"status_code": result.get("status_code")},
+                    response_metadata={
+                        "status_code": result.get("status_code"),
+                        "recipient_count": result.get("recipient_count"),
+                    },
                 )
             sent_results.append({"delivery": marked, "status": marked["status"]})
         return sent_results

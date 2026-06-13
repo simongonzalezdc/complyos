@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+
 from fastapi.testclient import TestClient
 
 from complyos.core.repository import LocalRepository
 from complyos.web.api_v1 import create_api_v1_app
 
 CSV_TEXT = "user_id,course_id,status,source_record_id\nu1,c1,completed,sr1\n"
+
+
+def _hook_signature(secret: str, *, timestamp: str, body: bytes) -> str:
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        timestamp.encode("utf-8") + b"." + body,
+        hashlib.sha256,
+    ).hexdigest()
+    return f"sha256={digest}"
 
 
 def test_api_v1_health(tmp_path) -> None:
@@ -268,3 +281,93 @@ def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) ->
     assert packet.status_code == 200
     assert packet.json()["proposal_count"] == 2
     assert packet.json()["decided_count"] == 1
+
+
+def test_api_v1_records_signed_inbound_webhook_receipt(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.setenv("COMPLYOS_INBOUND_WEBHOOK_SECRET", "inbound-secret")
+    repo = LocalRepository(str(tmp_path / "api-inbound-hooks.db"))
+    client = TestClient(create_api_v1_app(repo))
+    body = json.dumps(
+        {
+            "event_type": "lms.assignment.updated",
+            "object_type": "assignment",
+            "object_id": "assign-1",
+            "payload": {"status": "published", "api_token": "do-not-store"},
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    timestamp = "2026-06-13T12:00:00Z"
+
+    response = client.post(
+        "/api/v1/hooks/inbound/canvas",
+        content=body,
+        headers={
+            "Authorization": "Bearer test-token",
+            "X-Actor-Role": "compliance_manager",
+            "X-Tenant-Id": "tenant-a",
+            "Content-Type": "application/json",
+            "X-ComplyOS-Timestamp": timestamp,
+            "X-ComplyOS-Signature": _hook_signature(
+                "inbound-secret",
+                timestamp=timestamp,
+                body=body,
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "canvas"
+    assert payload["event_type"] == "lms.assignment.updated"
+    assert payload["tenant_id"] == "tenant-a"
+    assert payload["signature_valid"] is True
+    assert payload["payload"]["payload"] == {"status": "published"}
+
+
+def test_api_v1_rejects_invalid_inbound_webhook_signature(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.setenv("COMPLYOS_INBOUND_WEBHOOK_SECRET", "inbound-secret")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-bad-hook.db"))))
+
+    response = client.post(
+        "/api/v1/hooks/inbound/canvas",
+        json={"event_type": "lms.assignment.updated"},
+        headers={
+            "Authorization": "Bearer test-token",
+            "X-Actor-Role": "compliance_manager",
+            "X-ComplyOS-Timestamp": "2026-06-13T12:00:00Z",
+            "X-ComplyOS-Signature": "sha256=wrong",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "inbound_signature_invalid"
+
+
+def test_api_v1_sets_and_lists_notification_preferences(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-prefs.db"))))
+    headers = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "compliance_manager",
+        "X-Tenant-Id": "tenant-a",
+    }
+
+    saved = client.put(
+        "/api/v1/notifications/preferences",
+        json={
+            "channel": "email",
+            "event_type": "privacy.request.created",
+            "enabled": False,
+            "reason": "send through case manager only",
+        },
+        headers=headers,
+    )
+    assert saved.status_code == 200
+    assert saved.json()["enabled"] is False
+
+    listed = client.get("/api/v1/notifications/preferences", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["preferences"][0]["channel"] == "email"
+    assert listed.json()["preferences"][0]["event_type"] == "privacy.request.created"

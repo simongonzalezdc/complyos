@@ -117,6 +117,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_PRIVACY_DELETE,
             PERM_PRIVACY_RETENTION_MANAGE,
             PERM_LEGAL_HOLD_MANAGE,
+            PERM_NOTIFICATIONS_MANAGE,
         }
     ),
     "importer": frozenset({PERM_IMPORT_PREVIEW, PERM_IMPORT_DECIDE, PERM_EVIDENCE_READ}),

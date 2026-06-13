@@ -38,6 +38,12 @@ class NotificationOutboxService:
         """Persist one event plus pending per-channel delivery rows."""
         require_permission(context, PERM_NOTIFICATIONS_MANAGE)
         normalized_channels = _normalize_channels(channels)
+        preferences = self.repository.list_notification_preferences(tenant_id=context.tenant_id)
+        enabled_channels = [
+            channel
+            for channel in normalized_channels
+            if _channel_enabled(preferences, channel=channel, event_type=event_type)
+        ]
         redacted_payload = _redact_payload(payload)
         payload_hash = _payload_hash(redacted_payload)
         event = self.repository.save_notification_event(
@@ -48,8 +54,9 @@ class NotificationOutboxService:
             object_id=object_id,
             payload=redacted_payload,
             payload_hash=payload_hash,
-            channels=normalized_channels,
+            channels=enabled_channels,
             created_by=context.actor_id,
+            status="queued" if enabled_channels else "suppressed",
         )
         self.repository.save_action_log(
             tenant_id=context.tenant_id,
@@ -63,10 +70,57 @@ class NotificationOutboxService:
             metadata={
                 "event_type": event_type,
                 "channels": normalized_channels,
+                "enabled_channels": enabled_channels,
+                "suppressed_channels": [
+                    channel for channel in normalized_channels if channel not in enabled_channels
+                ],
                 "payload_hash": payload_hash,
             },
         )
         return event
+
+    def set_preference(
+        self,
+        context: ActorContext,
+        *,
+        channel: str,
+        event_type: str = "*",
+        enabled: bool,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Set an event/channel preference or kill switch for the current tenant."""
+        require_permission(context, PERM_NOTIFICATIONS_MANAGE)
+        normalized_channel = _normalize_selector(channel, field="channel")
+        normalized_event_type = _normalize_selector(event_type, field="event_type")
+        preference = self.repository.save_notification_preference(
+            tenant_id=context.tenant_id,
+            channel=normalized_channel,
+            event_type=normalized_event_type,
+            enabled=enabled,
+            reason=reason,
+            updated_by=context.actor_id,
+        )
+        self.repository.save_action_log(
+            tenant_id=context.tenant_id,
+            actor_id=context.actor_id,
+            surface=context.surface,
+            action="notification.preference.set",
+            object_type="notification_preference",
+            object_id=str(preference["id"]),
+            result="enabled" if enabled else "disabled",
+            request_id=context.request_id,
+            metadata={
+                "channel": normalized_channel,
+                "event_type": normalized_event_type,
+                "reason": reason,
+            },
+        )
+        return preference
+
+    def list_preferences(self, context: ActorContext) -> list[dict[str, Any]]:
+        """List notification preferences for the current tenant."""
+        require_permission(context, PERM_NOTIFICATIONS_MANAGE)
+        return self.repository.list_notification_preferences(tenant_id=context.tenant_id)
 
     def list_pending_deliveries(
         self,
@@ -192,6 +246,38 @@ def _normalize_channels(channels: list[str]) -> list[str]:
     if not normalized:
         raise ValueError("at least one notification channel is required")
     return normalized
+
+
+def _normalize_selector(value: str, *, field: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError(f"{field} is required")
+    return normalized
+
+
+def _channel_enabled(
+    preferences: list[dict[str, Any]],
+    *,
+    channel: str,
+    event_type: str,
+) -> bool:
+    """Return effective preference using exact match before wildcard fallback."""
+    normalized_channel = channel.lower()
+    normalized_event = event_type.lower()
+    matches: list[tuple[int, dict[str, Any]]] = []
+    for preference in preferences:
+        pref_channel = str(preference["channel"]).lower()
+        pref_event = str(preference["event_type"]).lower()
+        channel_match = pref_channel in {normalized_channel, "*"}
+        event_match = pref_event in {normalized_event, "*"}
+        if not channel_match or not event_match:
+            continue
+        specificity = int(pref_channel == normalized_channel) + int(pref_event == normalized_event)
+        matches.append((specificity, preference))
+    if not matches:
+        return True
+    _, most_specific = sorted(matches, key=lambda item: item[0], reverse=True)[0]
+    return bool(most_specific["enabled"])
 
 
 def _redact_payload(value: Any) -> Any:

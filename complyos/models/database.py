@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -428,6 +429,45 @@ class DBNotificationDelivery(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBNotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "channel",
+            "event_type",
+            name="uq_notification_preference_scope",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, default="*", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DBInboundWebhookEvent(Base):
+    __tablename__ = "inbound_webhook_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    object_type: Mapped[str] = mapped_column(String, default="inbound_event", nullable=False)
+    object_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    payload_hash: Mapped[str] = mapped_column(String, nullable=False)
+    signature_valid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="received", nullable=False)
+    header_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    received_by: Mapped[str] = mapped_column(String, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 def resolve_database_url(database: str | None = None) -> str:

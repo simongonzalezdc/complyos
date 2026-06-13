@@ -62,6 +62,7 @@ class ScheduledAuditResult:
     generated_at: datetime
     scope: str
     gaps_found: int
+    gaps_by_severity: dict[str, int]
     evidence_hash: str
     snapshot_id: str
     dashboard_path: str | None = None
@@ -119,6 +120,7 @@ async def run_scheduled_audit_once(
         generated_at=report.generated_at,
         scope=report.scope,
         gaps_found=report.gaps_found,
+        gaps_by_severity=report.gaps_by_severity,
         evidence_hash=report.evidence_hash,
         snapshot_id=snapshot_id,
         dashboard_path=dashboard_path,

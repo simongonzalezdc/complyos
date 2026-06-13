@@ -23,6 +23,9 @@ from complyos.services.context import (
     ActorContext,
     require_permission,
 )
+from complyos.services.notifications import NotificationOutboxService
+
+PRIVACY_NOTIFICATION_CHANNELS = ["email", "slack", "teams"]
 
 
 class PrivacyRequestResult(BaseModel):
@@ -135,6 +138,22 @@ class PrivacyProgramService:
             request_id=context.request_id,
             metadata={"request_type": request_type, "region": region},
         )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.request.created",
+            object_type="privacy_request",
+            object_id=request_id,
+            payload={
+                "request_type": request_type,
+                "region": region,
+                "status": "PENDING_CONTROLLER_APPROVAL",
+                "email_subject": "ComplyOS privacy request needs controller approval",
+                "summary": (
+                    f"Privacy {request_type} request {request_id} was opened for "
+                    f"subject {subject_id}."
+                ),
+            },
+        )
         return PrivacyRequestResult(
             request_id=request_id,
             tenant_id=context.tenant_id,
@@ -190,6 +209,19 @@ class PrivacyProgramService:
             result="success",
             request_id=context.request_id,
             metadata={"approval_id": approval_id},
+        )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.request.approved",
+            object_type="privacy_request",
+            object_id=request_id,
+            payload={
+                "approval_id": approval_id,
+                "request_type": request["request_type"],
+                "status": "APPROVED",
+                "email_subject": "ComplyOS privacy request approved",
+                "summary": f"Privacy request {request_id} was approved for processing.",
+            },
         )
         created_at = request["created_at"]
         if not isinstance(created_at, datetime):
@@ -270,6 +302,21 @@ class PrivacyProgramService:
                 request_id=context.request_id,
                 metadata=result_summary,
             )
+            self._enqueue_privacy_event(
+                context,
+                event_type="privacy.delete.blocked_by_legal_hold",
+                object_type="privacy_request",
+                object_id=request_id,
+                payload={
+                    "subject_id": subject_id,
+                    "blocked_by_holds": hold_ids,
+                    "status": "BLOCKED_LEGAL_HOLD",
+                    "email_subject": "ComplyOS deletion blocked by legal hold",
+                    "summary": (
+                        f"Deletion request {request_id} is blocked by active legal holds."
+                    ),
+                },
+            )
             return DeletionResult(
                 request_id=request_id,
                 tenant_id=context.tenant_id,
@@ -300,6 +347,19 @@ class PrivacyProgramService:
             result="success",
             request_id=context.request_id,
             metadata={"deleted_records": deleted},
+        )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.delete.completed",
+            object_type="privacy_request",
+            object_id=request_id,
+            payload={
+                "subject_id": subject_id,
+                "deleted_records": deleted,
+                "status": "COMPLETED",
+                "email_subject": "ComplyOS deletion request completed",
+                "summary": f"Deletion request {request_id} completed.",
+            },
         )
         return DeletionResult(
             request_id=request_id,
@@ -349,6 +409,19 @@ class PrivacyProgramService:
             request_id=context.request_id,
             metadata={"scope": scope},
         )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.legal_hold.created",
+            object_type="legal_hold",
+            object_id=hold_id,
+            payload={
+                "scope": scope,
+                "subject_id": subject_id,
+                "status": "ACTIVE",
+                "email_subject": "ComplyOS legal hold created",
+                "summary": f"Legal hold {hold_id} was created with scope {scope}.",
+            },
+        )
         return LegalHoldResult(
             hold_id=hold_id,
             tenant_id=context.tenant_id,
@@ -381,6 +454,19 @@ class PrivacyProgramService:
             result="success",
             request_id=context.request_id,
             metadata={"scope": hold["scope"]},
+        )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.legal_hold.released",
+            object_type="legal_hold",
+            object_id=hold_id,
+            payload={
+                "scope": hold["scope"],
+                "subject_id": hold["subject_id"],
+                "status": "RELEASED",
+                "email_subject": "ComplyOS legal hold released",
+                "summary": f"Legal hold {hold_id} was released.",
+            },
         )
         return LegalHoldResult(
             hold_id=hold_id,
@@ -548,6 +634,23 @@ class PrivacyProgramService:
                 },
             },
         )
+        self._enqueue_privacy_event(
+            context,
+            event_type="privacy.retention.run",
+            object_type="retention_policy",
+            object_id=context.tenant_id,
+            payload={
+                "dry_run": dry_run,
+                "eligible_counts": eligible_counts,
+                "deleted_counts": deleted_counts,
+                "email_subject": "ComplyOS retention cleanup run",
+                "summary": (
+                    "Retention cleanup completed as a dry run."
+                    if dry_run
+                    else "Retention cleanup completed and removed eligible records."
+                ),
+            },
+        )
         return RetentionCleanupResult(
             tenant_id=context.tenant_id,
             dry_run=dry_run,
@@ -557,6 +660,24 @@ class PrivacyProgramService:
             deleted_counts=deleted_counts,
             generated_at=generated_at,
             actor_context=context.public_dict(),
+        )
+
+    def _enqueue_privacy_event(
+        self,
+        context: ActorContext,
+        *,
+        event_type: str,
+        object_type: str,
+        object_id: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        NotificationOutboxService(self.repository).enqueue_event(
+            context,
+            event_type=event_type,
+            object_type=object_type,
+            object_id=object_id,
+            payload=payload,
+            channels=PRIVACY_NOTIFICATION_CHANNELS,
         )
 
     def _get_scoped_request(self, context: ActorContext, request_id: str) -> dict[str, object]:

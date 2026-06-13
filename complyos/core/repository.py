@@ -21,10 +21,12 @@ from complyos.models.database import (
     DBImportBatch,
     DBImportDecision,
     DBImportRow,
+    DBInboundWebhookEvent,
     DBLearningRecord,
     DBLegalHold,
     DBNotificationDelivery,
     DBNotificationEvent,
+    DBNotificationPreference,
     DBPrivacyRequest,
     DBRetentionPolicy,
     DBSourceIntelJobExecution,
@@ -694,6 +696,7 @@ class LocalRepository:
         payload_hash: str,
         channels: list[str],
         created_by: str,
+        status: str = "queued",
         created_at: datetime | None = None,
     ) -> dict[str, Any]:
         event_id = str(uuid.uuid4())
@@ -708,7 +711,7 @@ class LocalRepository:
                 object_id=object_id,
                 payload=payload,
                 payload_hash=payload_hash,
-                status="queued",
+                status=status,
                 created_by=created_by,
                 created_at=timestamp,
             )
@@ -732,6 +735,120 @@ class LocalRepository:
             session.commit()
             session.refresh(event)
             return self._to_notification_event_dict(event, delivery_count=len(channels))
+
+    def save_notification_preference(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        event_type: str,
+        enabled: bool,
+        reason: str | None,
+        updated_by: str,
+        updated_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = updated_at or datetime.utcnow()
+        with self._session() as session:
+            preference = (
+                session.query(DBNotificationPreference)
+                .where(
+                    DBNotificationPreference.tenant_id == tenant_id,
+                    DBNotificationPreference.channel == channel,
+                    DBNotificationPreference.event_type == event_type,
+                )
+                .first()
+            )
+            if preference is None:
+                preference = DBNotificationPreference(
+                    id=str(uuid.uuid4()),
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    event_type=event_type,
+                    enabled=enabled,
+                    reason=reason,
+                    updated_by=updated_by,
+                    updated_at=timestamp,
+                )
+                session.add(preference)
+            else:
+                preference.enabled = enabled
+                preference.reason = reason
+                preference.updated_by = updated_by
+                preference.updated_at = timestamp
+            session.commit()
+            session.refresh(preference)
+            return self._to_notification_preference_dict(preference)
+
+    def list_notification_preferences(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        with self._session() as session:
+            rows = (
+                session.query(DBNotificationPreference)
+                .where(DBNotificationPreference.tenant_id == tenant_id)
+                .order_by(
+                    DBNotificationPreference.event_type.asc(),
+                    DBNotificationPreference.channel.asc(),
+                )
+                .all()
+            )
+            return [self._to_notification_preference_dict(row) for row in rows]
+
+    def save_inbound_webhook_event(
+        self,
+        *,
+        tenant_id: str,
+        source: str,
+        event_type: str,
+        object_type: str,
+        object_id: str | None,
+        payload: dict[str, Any],
+        payload_hash: str,
+        signature_valid: bool,
+        status: str,
+        header_metadata: dict[str, Any],
+        received_by: str,
+        received_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        timestamp = received_at or datetime.utcnow()
+        with self._session() as session:
+            event = DBInboundWebhookEvent(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                source=source,
+                event_type=event_type,
+                object_type=object_type,
+                object_id=object_id,
+                payload=payload,
+                payload_hash=payload_hash,
+                signature_valid=signature_valid,
+                status=status,
+                header_metadata=header_metadata,
+                received_by=received_by,
+                received_at=timestamp,
+            )
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            return self._to_inbound_webhook_event_dict(event)
+
+    def list_inbound_webhook_events(
+        self,
+        *,
+        tenant_id: str,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(DBInboundWebhookEvent).where(
+                DBInboundWebhookEvent.tenant_id == tenant_id
+            )
+            if source:
+                query = query.where(DBInboundWebhookEvent.source == source)
+            rows = (
+                query.order_by(DBInboundWebhookEvent.received_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [self._to_inbound_webhook_event_dict(row) for row in rows]
 
     def list_notification_deliveries(
         self,
@@ -1716,6 +1833,39 @@ class LocalRepository:
             "created_at": db.created_at,
             "updated_at": db.updated_at,
             "event": event_payload,
+        }
+
+    @staticmethod
+    def _to_notification_preference_dict(
+        db: DBNotificationPreference,
+    ) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "channel": db.channel,
+            "event_type": db.event_type,
+            "enabled": db.enabled,
+            "reason": db.reason,
+            "updated_by": db.updated_by,
+            "updated_at": db.updated_at,
+        }
+
+    @staticmethod
+    def _to_inbound_webhook_event_dict(db: DBInboundWebhookEvent) -> dict[str, Any]:
+        return {
+            "id": db.id,
+            "tenant_id": db.tenant_id,
+            "source": db.source,
+            "event_type": db.event_type,
+            "object_type": db.object_type,
+            "object_id": db.object_id,
+            "payload": db.payload or {},
+            "payload_hash": db.payload_hash,
+            "signature_valid": db.signature_valid,
+            "status": db.status,
+            "header_metadata": db.header_metadata or {},
+            "received_by": db.received_by,
+            "received_at": db.received_at,
         }
 
     @staticmethod

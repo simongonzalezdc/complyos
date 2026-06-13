@@ -169,10 +169,19 @@ engine.
 
 Notifications use an outbox pattern. Jobs enqueue tenant-scoped
 `notification_events` and `notification_deliveries`; a separate
-`complyos notifications drain` worker sends configured Slack, Teams, or generic
-customer webhooks. Outbound hook payloads include event IDs, idempotency keys,
-payload hashes, and optional HMAC signatures, while delivery rows keep retry,
-skip, sent, and dead-letter evidence without storing webhook URLs in packets.
+`complyos notifications drain` worker sends configured email, Slack, Teams, or
+generic customer webhooks. `notification_preferences` provides channel/event
+kill switches before deliveries are created. Outbound hook payloads include
+event IDs, idempotency keys, payload hashes, and optional HMAC signatures, while
+delivery rows keep retry, skip, sent, and dead-letter evidence without storing
+webhook URLs in packets.
+
+Inbound hooks are provider-neutral receipts first, not LMS-specific automation.
+`POST /api/v1/hooks/inbound/{source}` validates the API token, optionally
+verifies `COMPLYOS_INBOUND_WEBHOOK_SECRET`, redacts sensitive fields, stores the
+payload hash in `inbound_webhook_events`, and records an action log. Canvas,
+Workday, SuccessFactors, Cornerstone, or customer-specific parsers can sit on top
+later without changing the receipt/audit foundation.
 
 PostgreSQL-ready SQLAlchemy URLs and a live FastAPI dashboard are available for scale-out deployments without rewriting the auditor. SQLite remains the default local store.
 

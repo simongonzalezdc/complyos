@@ -41,7 +41,7 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 - **Privacy workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and dry-run retention cleanup.
 - **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
 - **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream rule or module changes.
-- **Notification outbox and signed hooks** — Queue Slack, Teams, or customer webhook deliveries with payload hashes, retry state, dry-run drain, and HMAC headers instead of coupling jobs to network uptime.
+- **Notification outbox, email, and signed hooks** — Queue email, Slack, Teams, or customer webhook deliveries with payload hashes, retry state, dry-run drain, channel/event kill switches, and HMAC headers instead of coupling jobs to network uptime.
 - **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, and MCP tools.
 - **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
 
@@ -119,6 +119,12 @@ complyos serve-dashboard --host 127.0.0.1 --port 8000
 
 # Run configured scheduled audits once from cron/systemd/Forgejo Actions
 complyos run-schedule --config complyos.yaml
+
+# Queue and drain notification outbox events without inline network coupling
+complyos notifications list --db complyos.db --json
+complyos notifications preference-set --db complyos.db --channel email --event-type audit.completed --disabled --reason "quiet hours" --json
+complyos notifications drain --db complyos.db --dry-run --json
+complyos notifications drain --db complyos.db --send --json
 
 # Check release-readiness artifacts
 complyos release-check --json
@@ -266,9 +272,9 @@ Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes fo
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 - [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
 - [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only
-- [x] Notification outbox hooks — DB-backed events/deliveries, source-intel scheduled-run enqueue, dry-run/send CLI drain, signed outbound webhook payloads, and no-secret logs
+- [x] Notification outbox hooks — DB-backed events/deliveries/preferences, source-intel/audit/privacy event enqueue, email/webhook drain, signed outbound and inbound hook payloads, worker templates, and no-secret logs
 
-Remaining work is mostly outside application code: counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
+Remaining work is mostly outside application code: real webhook URLs/SMTP credentials, paid regulatory APIs, provider-specific LMS/HRIS event parsers, counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
 
 ---
 

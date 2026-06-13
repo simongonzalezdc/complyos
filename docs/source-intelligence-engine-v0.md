@@ -81,7 +81,8 @@ The repo now includes a no-paid source-monitoring slice:
 - `SourceMonitor` to fan fetched snapshots into RegWatch and MicroLearn adapters;
 - `SourceReviewStore` to persist review proposals in local JSONL;
 - DB-backed runs/proposals/schedules/job executions for durable local ops;
-- notification outbox events for scheduled-run completion/proposal alerts;
+- notification outbox events for scheduled-run completion/proposal alerts,
+  email/webhook delivery, preferences, and kill switches;
 - `source-intel run-upload` for approved local source text when APIs are blocked;
 - CLI commands under `complyos source-intel`.
 
@@ -114,7 +115,8 @@ depend on external API credentials:
 - schema migration ledger: `20260612_source_intel_hardening`;
 - tenant-scoped repository methods for saving, listing, and deciding proposals;
 - tenant-scoped scheduled run receipts for observability;
-- tenant-scoped notification outbox rows for Slack/Teams/customer hook delivery;
+- tenant-scoped notification outbox rows for email/Slack/Teams/customer hook
+  delivery plus channel/event preferences;
 - service-layer permissions for `source_intel:read`, `source_intel:run`, and
   `source_intel:decide`;
 - FastAPI endpoints:
@@ -130,7 +132,11 @@ depend on external API credentials:
   - `complyos source-intel run-scheduled --db complyos.db --force --json`;
   - `complyos source-intel export-packet --db complyos.db --output packet.json --json`;
   - `complyos notifications list --db complyos.db --json`;
+  - `complyos notifications preference-set --db complyos.db --channel email --event-type source_intel.proposals_waiting --disabled --reason "route through review meeting" --json`;
   - `complyos notifications drain --db complyos.db --dry-run --json`;
+- generic inbound hook receipt:
+  - `POST /api/v1/hooks/inbound/{source}` stores a signed, redacted receipt
+    before provider-specific parsing exists;
 - deployment checks:
   - `complyos deployment-check --json`.
 
@@ -181,7 +187,9 @@ It proves:
 8. review packets export proposals, decisions, jobs, and action logs;
 9. API, CLI, and dashboard surfaces expose the review flow;
 10. scheduled runs enqueue notification events without sending network calls;
-11. migration/deployment checks include the source-intelligence hardening pieces.
+11. notification preferences suppress deliveries without losing the event audit;
+12. inbound hooks store redacted, signed receipts before provider-specific parsing;
+13. migration/deployment checks include the source-intelligence hardening pieces.
 
 ## Product maturity language
 

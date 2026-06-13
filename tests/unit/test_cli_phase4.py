@@ -8,6 +8,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from complyos.cli import app
+from complyos.core.repository import LocalRepository
+from complyos.services.context import default_local_context
+from complyos.services.notifications import NotificationOutboxService
 
 runner = CliRunner()
 
@@ -42,6 +45,12 @@ schedule:
     assert result.exit_code == 0
     assert "daily-all" in result.output
     assert "snapshot" in result.output.lower()
+
+    deliveries = NotificationOutboxService(LocalRepository(str(db_path))).list_pending_deliveries(
+        default_local_context(role="compliance_manager"),
+        limit=20,
+    )
+    assert {delivery["event"]["event_type"] for delivery in deliveries} >= {"audit.completed"}
 
 
 def test_serve_dashboard_dry_run_reports_bind_address() -> None:

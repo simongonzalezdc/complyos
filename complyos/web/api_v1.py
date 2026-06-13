@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from complyos.core.repository import LocalRepository
@@ -18,6 +18,8 @@ from complyos.services.context import (
 )
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.inbound_hooks import InboundHookService, InboundWebhookSignatureError
+from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.security_evidence import SecurityEvidenceService
@@ -76,6 +78,13 @@ class RetentionRunBody(BaseModel):
 
 class SourceIntelDecisionBody(BaseModel):
     state: str
+
+
+class NotificationPreferenceBody(BaseModel):
+    channel: str
+    event_type: str = "*"
+    enabled: bool = True
+    reason: str | None = None
 
 
 def _http_error(
@@ -280,6 +289,62 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             return SourceIntelService(repo).export_review_packet(context)
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    @router.post("/hooks/inbound/{source}")
+    async def receive_inbound_hook(
+        source: str,
+        request: Request,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return InboundHookService(repo).record(
+                context,
+                source=source,
+                body=await request.body(),
+                headers=request.headers,
+                signing_secret=os.getenv("COMPLYOS_INBOUND_WEBHOOK_SECRET"),
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except InboundWebhookSignatureError as exc:
+            raise _http_error(
+                exc.code,
+                str(exc),
+                status.HTTP_401_UNAUTHORIZED,
+                request_id=context.request_id,
+            ) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_inbound_webhook", exc, context) from exc
+
+    @router.get("/notifications/preferences")
+    async def list_notification_preferences(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return {
+                "preferences": NotificationOutboxService(repo).list_preferences(context),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.put("/notifications/preferences")
+    async def set_notification_preference(
+        request: NotificationPreferenceBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return NotificationOutboxService(repo).set_preference(
+                context,
+                channel=request.channel,
+                event_type=request.event_type,
+                enabled=request.enabled,
+                reason=request.reason,
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_notification_preference", exc, context) from exc
 
     @router.post("/source-intel/proposals/{proposal_id}/decision")
     async def decide_source_intel_proposal(

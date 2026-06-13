@@ -82,3 +82,62 @@ def test_notification_outbox_service_marks_delivery_states(tmp_path) -> None:
     assert failed["status"] == "pending"
     assert failed["attempts"] == 1
     assert failed["last_error"] == "503 Service Unavailable"
+
+
+def test_notification_preferences_disable_channel_without_losing_event_audit(
+    tmp_path,
+) -> None:
+    repo = LocalRepository(str(tmp_path / "notification-preferences.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+
+    preference = service.set_preference(
+        context,
+        channel="slack",
+        event_type="privacy.request.created",
+        enabled=False,
+        reason="privacy events go to email/teams first",
+    )
+    assert preference["enabled"] is False
+
+    event = service.enqueue_event(
+        context,
+        event_type="privacy.request.created",
+        object_type="privacy_request",
+        object_id="dsr-1",
+        payload={"subject_id": "u-1"},
+        channels=["slack", "teams"],
+    )
+
+    assert event["status"] == "queued"
+    assert event["delivery_count"] == 1
+    assert service.list_preferences(context)[0]["channel"] == "slack"
+    pending = service.list_pending_deliveries(context)
+    assert {delivery["channel"] for delivery in pending} == {"teams"}
+
+
+def test_notification_preferences_wildcard_can_suppress_all_deliveries(tmp_path) -> None:
+    repo = LocalRepository(str(tmp_path / "notification-kill-switch.db"))
+    service = NotificationOutboxService(repo)
+    context = default_local_context(tenant_id="tenant-a", role="compliance_manager")
+
+    service.set_preference(
+        context,
+        channel="*",
+        event_type="*",
+        enabled=False,
+        reason="tenant-wide notification freeze",
+    )
+
+    event = service.enqueue_event(
+        context,
+        event_type="audit.completed",
+        object_type="audit_snapshot",
+        object_id="snap-1",
+        payload={"gaps_found": 2},
+        channels=["email", "webhook"],
+    )
+
+    assert event["status"] == "suppressed"
+    assert event["delivery_count"] == 0
+    assert service.list_pending_deliveries(context) == []

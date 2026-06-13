@@ -13,6 +13,8 @@ from sqlalchemy import text
 
 SOURCE_INTEL_HARDENING_MIGRATION = "20260612_source_intel_hardening"
 NOTIFICATION_OUTBOX_MIGRATION = "20260613_notification_outbox_hooks"
+NOTIFICATION_PREFERENCES_MIGRATION = "20260613_notification_preferences"
+INBOUND_WEBHOOKS_MIGRATION = "20260613_inbound_webhook_events"
 
 
 class SchemaMigration(TypedDict):
@@ -93,6 +95,52 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
                 sent_at DATETIME,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+        ],
+    },
+    {
+        "migration_id": NOTIFICATION_PREFERENCES_MIGRATION,
+        "description": "Tenant notification channel preferences and kill switches",
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS notification_preferences (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL DEFAULT 'local-default',
+                channel VARCHAR NOT NULL,
+                event_type VARCHAR NOT NULL DEFAULT '*',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                reason VARCHAR,
+                updated_by VARCHAR NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_notification_preference_scope UNIQUE (
+                    tenant_id,
+                    channel,
+                    event_type
+                )
+            )
+            """,
+        ],
+    },
+    {
+        "migration_id": INBOUND_WEBHOOKS_MIGRATION,
+        "description": "Generic inbound webhook receipt ledger",
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS inbound_webhook_events (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL DEFAULT 'local-default',
+                source VARCHAR NOT NULL,
+                event_type VARCHAR NOT NULL,
+                object_type VARCHAR NOT NULL DEFAULT 'inbound_event',
+                object_id VARCHAR,
+                payload JSON NOT NULL DEFAULT '{}',
+                payload_hash VARCHAR NOT NULL,
+                signature_valid BOOLEAN NOT NULL DEFAULT 0,
+                status VARCHAR NOT NULL DEFAULT 'received',
+                header_metadata JSON NOT NULL DEFAULT '{}',
+                received_by VARCHAR NOT NULL,
+                received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
         ],

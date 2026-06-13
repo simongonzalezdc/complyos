@@ -45,3 +45,7 @@ def test_deployment_checklist_covers_source_intel_hardening() -> None:
     assert checks["observability_action_logs"]["ok"] is True
     assert checks["notification_outbox"]["ok"] is True
     assert checks["signed_hook_sender"]["ok"] is True
+    assert checks["email_outbox_sender"]["ok"] is True
+    assert checks["inbound_hook_api"]["ok"] is True
+    assert checks["notification_preferences"]["ok"] is True
+    assert checks["notification_worker_templates"]["ok"] is True

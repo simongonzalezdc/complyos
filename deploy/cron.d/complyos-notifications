@@ -1,0 +1,6 @@
+# Generic cron fallback for ComplyOS notification outbox draining.
+# Install as /etc/cron.d/complyos-notifications after creating the complyos user.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/5 * * * * complyos cd /opt/complyos && . /etc/complyos/complyos.env && /opt/complyos/.venv/bin/complyos notifications drain --db /var/lib/complyos/complyos.db --send --limit 100 --json

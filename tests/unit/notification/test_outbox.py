@@ -6,7 +6,7 @@ import pytest
 import respx
 from httpx import Response
 
-from complyos.notification.outbox import WebhookEventSender
+from complyos.notification.outbox import EmailEventSender, WebhookEventSender
 
 
 def _delivery(channel: str = "webhook") -> dict[str, object]:
@@ -60,4 +60,52 @@ async def test_webhook_event_sender_skips_missing_channel_url() -> None:
         "skipped": True,
         "channel": "slack",
         "error": "No webhook URL configured for channel: slack",
+    }
+
+
+class FakeEmailSender:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    async def send_email(self, to_address: str, subject: str, body: str) -> dict[str, object]:
+        self.calls.append({"to": to_address, "subject": subject, "body": body})
+        return {"sent": True}
+
+
+@pytest.mark.asyncio
+async def test_email_event_sender_uses_payload_recipients_and_subject() -> None:
+    sender = FakeEmailSender()
+    delivery = _delivery("email")
+    assert isinstance(delivery["event"], dict)
+    delivery["event"]["payload"] = {
+        "email_to": ["ops@example.com", "legal@example.com"],
+        "email_subject": "Privacy request waiting",
+        "summary": "Controller approval needed",
+    }
+
+    result = await EmailEventSender(
+        notification_sender=sender,
+        default_recipients=[],
+    ).send_delivery(delivery)
+
+    assert result["sent"] is True
+    assert result["channel"] == "email"
+    assert result["recipient_count"] == 2
+    assert [call["to"] for call in sender.calls] == ["ops@example.com", "legal@example.com"]
+    assert sender.calls[0]["subject"] == "Privacy request waiting"
+    assert "Controller approval needed" in sender.calls[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_email_event_sender_skips_when_no_recipients_are_configured() -> None:
+    result = await EmailEventSender(
+        notification_sender=FakeEmailSender(),
+        default_recipients=[],
+    ).send_delivery(_delivery("email"))
+
+    assert result == {
+        "sent": False,
+        "skipped": True,
+        "channel": "email",
+        "error": "No email recipients configured for notification delivery",
     }

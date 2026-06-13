@@ -106,6 +106,30 @@ def build_deployment_checklist(root: Path | str = ".") -> list[ReleaseCheck]:
             "complyos/notification/outbox.py",
             "X-ComplyOS-Signature",
         ),
+        (
+            "email_outbox_sender",
+            "Email outbox sender",
+            "complyos/notification/outbox.py",
+            "EmailEventSender",
+        ),
+        (
+            "inbound_hook_api",
+            "Inbound hook API",
+            "complyos/web/api_v1.py",
+            "/hooks/inbound/{source}",
+        ),
+        (
+            "notification_preferences",
+            "Notification preferences and kill switches",
+            "complyos/services/notifications.py",
+            "notification.preference.set",
+        ),
+        (
+            "notification_worker_templates",
+            "Notification worker templates",
+            "deploy/systemd/complyos-notification-drain.service",
+            "complyos notifications drain",
+        ),
     ]
     for check_id, label, relative_path, required_text in deployment_checks:
         ok = _file_contains(base, relative_path, required_text)
