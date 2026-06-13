@@ -159,6 +159,32 @@ complyos health
 complyos remediate --dry-run
 ```
 
+### Notification and Hook Operations
+
+ComplyOS now treats notifications and hooks as durable infrastructure, not inline
+side effects. Audit, privacy, retention, and source-intelligence workflows enqueue
+tenant-scoped `notification_events`; a separate worker drains `email`, `slack`,
+`teams`, or generic `webhook` deliveries.
+
+Provider-neutral controls that are implemented now:
+
+- durable outbox tables for events and deliveries;
+- retry, skip, sent, and dead-letter delivery states;
+- SMTP-backed email delivery via `COMPLYOS_SMTP_*` and
+  `COMPLYOS_NOTIFICATION_EMAIL_TO`;
+- Slack, Teams, and generic webhook delivery via `COMPLYOS_SLACK_WEBHOOK_URL`,
+  `COMPLYOS_TEAMS_WEBHOOK_URL`, and `COMPLYOS_WEBHOOK_URL`;
+- optional outbound HMAC signing via `COMPLYOS_WEBHOOK_SECRET`;
+- channel/event preferences and tenant kill switches through
+  `complyos notifications preference-set` and
+  `/api/v1/notifications/preferences`;
+- generic inbound hook receipts through `POST /api/v1/hooks/inbound/{source}`;
+- optional inbound HMAC validation via `COMPLYOS_INBOUND_WEBHOOK_SECRET`;
+- systemd, cron, and Forgejo Action worker templates under `deploy/`.
+
+Still intentionally deferred: real customer webhook URLs, real SMTP credentials,
+paid regulatory APIs, and provider-specific LMS/HRIS parsers.
+
 ### MCP Server
 
 ```bash
@@ -268,7 +294,7 @@ Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes fo
 - [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
 - [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
-- [x] Phase 4 — Operator-ready release: scheduled audit runs, Slack/Teams notifications, release packaging, and documentation/security polish
+- [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
 - [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
 - [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only

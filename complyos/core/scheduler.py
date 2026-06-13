@@ -1,8 +1,8 @@
 """Scheduled audit run helpers.
 
-This module intentionally does not run a background daemon. It gives operators
-a deterministic one-shot runner they can invoke from cron, systemd timers,
-GitHub/Forgejo Actions, or a long-running process later.
+This module gives operators a deterministic one-shot runner that can be invoked
+directly or by the generic systemd, cron, and Forgejo Action worker templates in
+``deploy/``.
 """
 
 from __future__ import annotations

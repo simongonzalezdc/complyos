@@ -1,4 +1,4 @@
-"""Generic webhook sender for notification outbox deliveries."""
+"""Generic email and webhook senders for notification outbox deliveries."""
 
 from __future__ import annotations
 
