@@ -255,7 +255,19 @@ def build_shell_router(
             return _login_redirect()
 
         report = await auditor.generate_report()
-        readiness = ReadinessService(repository).check(context)
+        try:
+            readiness = ReadinessService(repository).check(context)
+            readiness_summary = sorted(readiness.summary.items(), key=lambda kv: kv[0])
+            readiness_designed = readiness.summary.get("designed", 0)
+            readiness_total = len(readiness.controls)
+            readiness_posture = readiness.posture
+        except AuthorizationError:
+            # A role without readiness:read still gets an Overview; the readiness
+            # tile reports "restricted" rather than 500-ing the landing page.
+            readiness_summary = []
+            readiness_designed = 0
+            readiness_total = 0
+            readiness_posture = "restricted"
         try:
             pending_signals = len(
                 SourceIntelService(repository).list_proposals(context, limit=100)
@@ -272,17 +284,16 @@ def build_shell_router(
         high_risk = report.gaps_by_severity.get("high", 0) + report.gaps_by_severity.get(
             "critical", 0
         )
-        readiness_summary = sorted(readiness.summary.items(), key=lambda kv: kv[0])
 
         overview = {
             "gaps_found": report.gaps_found,
             "total_users_audited": report.total_users_audited,
             "high_risk_gaps": high_risk,
             "gaps_by_severity": gaps_by_severity,
-            "readiness_designed": readiness.summary.get("designed", 0),
-            "readiness_total": len(readiness.controls),
+            "readiness_designed": readiness_designed,
+            "readiness_total": readiness_total,
             "readiness_summary": readiness_summary,
-            "readiness_posture": readiness.posture,
+            "readiness_posture": readiness_posture,
             "pending_signals": pending_signals,
         }
         return _render(

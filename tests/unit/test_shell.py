@@ -409,3 +409,24 @@ def test_shell_evidence_permission_panel_for_low_priv_role(monkeypatch, tmp_path
     assert response.status_code == 200
     assert "do not have permission" in response.text.lower()
     assert "evidence:read" in response.text
+
+
+# ---- Overview degrades for low-privilege roles (regression) ----------------
+
+
+def test_shell_overview_does_not_500_for_role_lacking_readiness(
+    monkeypatch, tmp_path
+) -> None:
+    """A logged-in role without readiness:read must still get the Overview.
+
+    Regression: the Overview's ReadinessService.check() used to run outside any
+    try/except, so an importer (no readiness:read) 500'd on the landing page.
+    The readiness tile now degrades to "restricted" instead of crashing.
+    """
+    client, _ = _local_client(monkeypatch, tmp_path, "shell-overview-lowpriv.db")
+    _login_local(client, "importer")
+
+    response = client.get("/shell")
+
+    assert response.status_code == 200
+    assert "restricted" in response.text.lower()
