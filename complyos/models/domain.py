@@ -230,6 +230,12 @@ class EvidenceLedgerEntry(BaseModel):
 # an unknown scope. Keeping them here as enums is the single source of truth.
 # ---------------------------------------------------------------------------
 class ImportBatchStatus(StrEnum):
+    # The full plan §6.1 batch lifecycle vocabulary. The states ImportService
+    # currently drives are QUARANTINED (preview lands here), PROMOTED, and
+    # PROMOTION_FAILED. DRAFT/PREVIEWED/PROMOTION_PENDING/REJECTED/EXPIRED are
+    # reserved transitions (e.g. a future async promotion queue or batch TTL);
+    # they are kept here as the single source of truth so a later stage adds the
+    # transition, not the vocabulary.
     DRAFT = "DRAFT"
     PREVIEWED = "PREVIEWED"
     QUARANTINED = "QUARANTINED"

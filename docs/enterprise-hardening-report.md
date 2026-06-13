@@ -1,10 +1,12 @@
 # ComplyOS Enterprise Hardening — Remediation Report
 
 > Branch: `simon/enterprise-hardening` · Baseline: `main` (342 tests green)
-> Result: 377 tests green (+35 regression tests), ruff + mypy clean. All 3
-> CRITICAL and all HIGH/MEDIUM findings remediated; the repository God-object
-> split is complete and the security-critical typed-model migration is done. One
-> mechanical follow-up remains (see "Remaining work").
+> Result: **658 tests green**, ruff + mypy clean. All 3 CRITICAL and all
+> HIGH/MEDIUM findings remediated; the repository God-object split and the
+> security-critical typed-model migration are done; and the full enterprise
+> control plane (service boundary, API v1, CLI/MCP parity, AI proposal layer,
+> readiness, adversarial test suite, and the authenticated web shell) is
+> **complete** — see "Control-plane completion (WP10–WP17)". Nothing pushed.
 
 ## How this was produced
 
@@ -61,17 +63,40 @@ New regression tests live in: `test_retention_legal_hold_hardening.py`,
 | H8 — PrivacyRequest model | The DSR/privacy request (the authorization surface for export/erasure) is now a Pydantic `PrivacyRequest` carried end to end; the controller-approval gate is the typed `is_controller_approved()`, replacing scattered isinstance/dict chains. | WP7 |
 | **H7 — repository split (complete)** | The 2000-line `LocalRepository` God-object is decomposed into 7 cohesive files (core-audit 453 · privacy 551 · notification 306 · source-intel 267 · import 226 · mappers 374 · base 63) composed via mixins behind a typed `RepositoryBase`. **Zero public-API change.** | WP8 |
 
-## Remaining work (one mechanical follow-up)
+## Control-plane completion (WP10–WP17)
 
-**Type the remaining data-record envelopes.** LegalHold, RetentionPolicy, import
-batches/rows/decisions, and AI proposals still cross the repository boundary as
-`dict[str, Any]`. The security-critical envelope (PrivacyRequest + the approval
-gate) is now typed; these remaining ones are data DTOs (no authorization
-decision rides on them), so converting them to Pydantic models is uniform,
-lower-risk mechanical work — best done as a focused pass, de-risked by the
-regression net added here. (A repository Protocol + composition root to drop the
-`or LocalRepository()` default-construction is an optional further refinement;
-the split itself is complete.)
+After the hardening findings closed, the remainder of the enterprise remediation
+plan (`.omx/plans/complyos-enterprise-remediation.md`, phases 1–9) was executed
+to completion. Each work package shipped as one atomic, gate-green commit.
+
+| WP | What shipped | Plan phase |
+|----|--------------|-----------|
+| WP10 | `AuditService`/`EvidenceService`/`RemediationService` wrappers — audit/report/digest/evidence/remediation now flow through a single service-layer authorization choke-point (CLI/MCP/API rewired) | P1 |
+| WP11 | `ConnectorRegistry` + `PolicyRuleService`; API `/connectors` list + `/rules` validate/preview | P4 |
+| WP12 | API v1 completion — `/admin/roles` (BOLA-scoped role bindings), `POST /sync`, plural-resource aliases, legacy dashboard dev-gating, OpenAPI snapshot test | P4/P5 |
+| WP12b | In-process per-identity rate limiting on remote mutating endpoints (no external datastore — fits local-first) | P4 |
+| WP13 | Surface-parity matrix tests (every §7 workflow proven across CLI/MCP/API); MCP HTML export now requires `evidence:export`; no mutating capability is MCP-only | P5/P9 |
+| WP13b | Gated the ungated `send_notification` MCP tool (removed `notifications:manage` from the default proposal-only role); added MCP `sync`/`list_connectors`; `POST /api/v1/exports/reports` (returns content, never writes server disk) | P5/P9 |
+| WP14 | Adversarial/security suite — secrets audit, API BOLA/IDOR, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases (incl. a new backdated-date invariant + empty-load promotion guard), connector-failure-fails-closed | P9 |
+| WP15a | AI proposal layer hardened — PII redacted before hashing, prompt-injection inertness, forbidden-mutation guards, reject + expiry-TTL lifecycle (AI approval mutates no compliance state) | P7 |
+| WP15b | Deterministic proposal-only AI types — anomaly summary, gap explanation, remediation-message draft, duplicate clustering (PII-safe by construction) | P7 |
+| WP16a–d | **Authenticated enterprise web shell** — signed-session auth wrapping the existing `ActorContext`; 8 modules (Overview/Gaps/Imports/Evidence/Remediation/Source-intel/Privacy/Readiness/Admin) on LIVE service data; import decide/promote wired; WCAG 2.2 AA accessibility + contrast audit enforced by tests | P6 |
+| WP17a | Tenant governance metadata (data region/purpose/categories/retention/subprocessors) surfaced through `ReadinessService`/API/shell; `PrivacyProgramService` read method (shell no longer reads the repo directly); configurable session-cookie `Secure` | P8 |
+
+**Architecture invariant now provable:** every business workflow routes through a
+service that enforces permissions, and the parity suite fails the build if any
+surface drifts. The web shell renders only live service data (no mock theater),
+and no GET triggers a mutating or privileged side effect.
+
+### Scoped follow-ups (non-blocking)
+
+- Shell token-login pins `role=owner`; insecure-local mode selects role. Role-scoped
+  shell sessions under a token are a future refinement.
+- DRAFT/PREVIEWED/PROMOTION_PENDING/REJECTED/EXPIRED import-batch states are reserved
+  transitions (documented in `ImportBatchStatus`), pending a future async-promotion/TTL stage.
+- Remaining `dict[str, Any]` data-record envelopes (LegalHold, RetentionPolicy, import
+  rows/decisions, AI proposals) are typeable as a uniform mechanical pass; no authorization
+  decision rides on them (the security-critical `PrivacyRequest` envelope is already typed).
 
 ## Verify
 
