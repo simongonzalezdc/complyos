@@ -14,6 +14,7 @@ from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
+from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.auditor import ComplianceAuditor
 from complyos.core.remediation import RemediationEngine
 from complyos.core.report_exporter import export_html
@@ -162,28 +163,7 @@ async def audit_compliance_gaps(
     require_permission(_mcp_context(), PERM_AUDIT_RUN)
     auditor = _get_auditor()
     gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-    return {
-        "gaps_found": len(gaps),
-        "users_affected": len({g.user.id for g in gaps}),
-        "evidence_hash": ledger.output_hash,
-        "gaps": [
-            {
-                "user": {
-                    "id": g.user.id,
-                    "name": g.user.full_name,
-                    "email": g.user.email,
-                    "department": g.user.department,
-                    "region": g.user.region,
-                },
-                "missing_courses": [c.title for c in g.missing_courses],
-                "rule": g.rule_name,
-                "days_overdue": g.days_overdue,
-                "severity": g.severity,
-            }
-            for g in gaps
-        ],
-    }
+    return shape_gaps(gaps, ledger)
 
 
 @mcp.tool()
@@ -222,17 +202,7 @@ async def generate_audit_report(
     require_permission(_mcp_context(), PERM_AUDIT_RUN)
     auditor = _get_auditor()
     report = await auditor.generate_report(department=department, region=region)
-
-    return {
-        "generated_at": report.generated_at.isoformat(),
-        "scope": report.scope,
-        "total_users_audited": report.total_users_audited,
-        "gaps_found": report.gaps_found,
-        "gaps_by_severity": report.gaps_by_severity,
-        "gaps_by_department": report.gaps_by_department,
-        "top_missing_courses": report.top_missing_courses,
-        "evidence_hash": report.evidence_hash,
-    }
+    return shape_report(report)
 
 
 @mcp.tool()
@@ -374,21 +344,7 @@ async def remediate_compliance_gaps(
         auto_enroll=auto_enroll,
         notify_manager=notify_manager,
     )
-
-    return {
-        "gaps_found": len(gaps),
-        "actions_taken": len(actions),
-        "actions": [
-            {
-                "type": a.action_type,
-                "user_id": a.user_id,
-                "course_id": a.course_id,
-                "status": a.status,
-            }
-            for a in actions
-        ],
-        "evidence_hash": ledger.output_hash,
-    }
+    return shape_remediation(gaps, actions, ledger)
 
 
 @mcp.tool()

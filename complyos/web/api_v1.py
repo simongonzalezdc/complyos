@@ -9,13 +9,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from complyos.api.mcp_server import _get_connector, _get_notifier
+from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
+from complyos.core.auditor import ComplianceAuditor
+from complyos.core.digest import DigestEngine
+from complyos.core.remediation import RemediationEngine
 from complyos.core.repository import LocalRepository
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.context import (
+    PERM_AUDIT_READ,
+    PERM_AUDIT_RUN,
+    PERM_CONNECTORS_READ,
+    PERM_REMEDIATION_EXECUTE,
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
+    require_permission,
 )
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
@@ -75,6 +85,14 @@ class RetentionPolicyRequestBody(BaseModel):
 
 class RetentionRunBody(BaseModel):
     dry_run: bool = True
+
+
+class RemediationRequestBody(BaseModel):
+    department: str | None = None
+    region: str | None = None
+    auto_remind: bool = True
+    auto_enroll: bool = False
+    notify_manager: bool = False
 
 
 class SourceIntelDecisionBody(BaseModel):
@@ -194,6 +212,94 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
     ) -> dict[str, object]:
         try:
             return ReadinessService(repo).check(context).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    # ---- Audit/remediation parity with the CLI and MCP surfaces -------------
+    @router.get("/audit")
+    async def audit(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_AUDIT_RUN)
+            gaps, ledger = await ComplianceAuditor(_get_connector()).audit_gaps(
+                department=department, region=region
+            )
+            return shape_gaps(gaps, ledger)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/report")
+    async def report(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_AUDIT_RUN)
+            audit_report = await ComplianceAuditor(_get_connector()).generate_report(
+                department=department, region=region
+            )
+            return shape_report(audit_report)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/users/{user_id}/status")
+    async def user_status(
+        user_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_AUDIT_READ)
+            return await ComplianceAuditor(_get_connector()).get_user_status(user_id)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/digest")
+    async def digest(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_AUDIT_RUN)
+            result = await DigestEngine(ComplianceAuditor(_get_connector()), repo).generate(
+                department=department, region=region
+            )
+            return result.model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/connectors/health")
+    async def connector_health(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_CONNECTORS_READ)
+            return await _get_connector().health_check()
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/remediate")
+    async def remediate(
+        body: RemediationRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            require_permission(context, PERM_REMEDIATION_EXECUTE)
+            connector = _get_connector()
+            gaps, ledger = await ComplianceAuditor(connector).audit_gaps(
+                department=body.department, region=body.region
+            )
+            actions = await RemediationEngine(connector, notifier=_get_notifier()).remediate_gaps(
+                gaps,
+                auto_remind=body.auto_remind,
+                auto_enroll=body.auto_enroll,
+                notify_manager=body.notify_manager,
+            )
+            return shape_remediation(gaps, actions, ledger)
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
 

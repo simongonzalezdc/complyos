@@ -301,6 +301,33 @@ def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) ->
     assert packet.json()["decided_count"] == 1
 
 
+def test_api_v1_audit_report_parity(monkeypatch, tmp_path) -> None:
+    """The API exposes the audit/report/status/health/remediate operations too."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-audit.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    audit = client.get("/api/v1/audit", headers=headers)
+    assert audit.status_code == 200
+    assert "gaps_found" in audit.json()
+
+    report = client.get("/api/v1/report", headers=headers)
+    assert report.status_code == 200
+    assert "gaps_by_severity" in report.json()
+
+    health = client.get("/api/v1/connectors/health", headers=headers)
+    assert health.status_code == 200
+
+    # A read-only actor cannot execute remediation (mutating).
+    denied = client.post(
+        "/api/v1/remediate", json={}, headers={**headers, "X-Actor-Role": "read_only"}
+    )
+    assert denied.status_code == 403
+
+
 def test_api_v1_authorization_failure_returns_403_not_400(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
     client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-403.db"))))
