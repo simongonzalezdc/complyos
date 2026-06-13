@@ -38,6 +38,7 @@ from complyos.models.database import (
     DBRetentionPolicy,
     DBUser,
 )
+from complyos.models.domain import PrivacyRequest
 
 
 class PrivacyRepositoryMixin(RepositoryBase, RepositoryMappers):
@@ -46,28 +47,28 @@ class PrivacyRepositoryMixin(RepositoryBase, RepositoryMappers):
     # ------------------------------------------------------------------
     # Privacy program workflows
     # ------------------------------------------------------------------
-    def save_privacy_request(self, request: dict[str, Any]) -> None:
+    def save_privacy_request(self, request: PrivacyRequest) -> None:
         with self._session() as session:
             session.add(
                 DBPrivacyRequest(
-                    id=request["id"],
-                    tenant_id=request["tenant_id"],
-                    subject_id=request["subject_id"],
-                    request_type=request["request_type"],
-                    status=request.get("status", "OPEN"),
-                    region=request.get("region"),
-                    opened_by=request["opened_by"],
-                    created_at=request.get("created_at") or utc_now(),
-                    request_metadata=request.get("metadata") or {},
-                    result_summary=request.get("result_summary") or {},
+                    id=request.id,
+                    tenant_id=request.tenant_id,
+                    subject_id=request.subject_id,
+                    request_type=request.request_type.value,
+                    status=request.status,
+                    region=request.region,
+                    opened_by=request.opened_by,
+                    created_at=request.created_at or utc_now(),
+                    request_metadata=request.metadata or {},
+                    result_summary=request.result_summary or {},
                 )
             )
             session.commit()
 
-    def get_privacy_request(self, request_id: str) -> dict[str, Any] | None:
+    def get_privacy_request(self, request_id: str) -> PrivacyRequest | None:
         with self._session() as session:
             request = session.get(DBPrivacyRequest, request_id)
-            return self._to_privacy_request_dict(request) if request else None
+            return self._to_privacy_request(request) if request else None
 
     def update_privacy_request_status(
         self,

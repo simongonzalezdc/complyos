@@ -38,6 +38,8 @@ from complyos.models.domain import (
     Enrollment,
     LearningRecord,
     LearningRecordStatus,
+    PrivacyRequest,
+    PrivacyRequestType,
     User,
 )
 
@@ -341,21 +343,21 @@ class RepositoryMappers:
         }
 
     @staticmethod
-    def _to_privacy_request_dict(db: DBPrivacyRequest) -> dict[str, Any]:
-        return {
-            "id": db.id,
-            "tenant_id": db.tenant_id,
-            "subject_id": db.subject_id,
-            "request_type": db.request_type,
-            "status": db.status,
-            "region": db.region,
-            "opened_by": db.opened_by,
-            "closed_by": db.closed_by,
-            "created_at": db.created_at,
-            "completed_at": db.completed_at,
-            "metadata": db.request_metadata or {},
-            "result_summary": db.result_summary or {},
-        }
+    def _to_privacy_request(db: DBPrivacyRequest) -> PrivacyRequest:
+        return PrivacyRequest(
+            id=db.id,
+            tenant_id=db.tenant_id,
+            subject_id=db.subject_id,
+            request_type=PrivacyRequestType(db.request_type),
+            status=db.status,
+            region=db.region,
+            opened_by=db.opened_by,
+            closed_by=db.closed_by,
+            created_at=db.created_at,
+            completed_at=db.completed_at,
+            metadata=db.request_metadata or {},
+            result_summary=db.result_summary or {},
+        )
 
     @staticmethod
     def _to_legal_hold_dict(db: DBLegalHold) -> dict[str, Any]:

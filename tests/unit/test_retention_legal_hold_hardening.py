@@ -17,7 +17,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import User
+from complyos.models.domain import PrivacyRequest, User
 from complyos.services.context import default_local_context
 from complyos.services.privacy import PrivacyProgramService
 
@@ -83,16 +83,16 @@ def _seed_closed_privacy_request(
     repo: LocalRepository, request_id: str, subject_id: str, created_at: datetime
 ) -> None:
     repo.save_privacy_request(
-        {
-            "id": request_id,
-            "tenant_id": TENANT,
-            "subject_id": subject_id,
-            "request_type": "access",
-            "status": "COMPLETED",
-            "opened_by": "operator",
-            "created_at": created_at,
-            "result_summary": {"controller_approval": {"status": "approved"}},
-        }
+        PrivacyRequest(
+            id=request_id,
+            tenant_id=TENANT,
+            subject_id=subject_id,
+            request_type="access",
+            status="COMPLETED",
+            opened_by="operator",
+            created_at=created_at,
+            result_summary={"controller_approval": {"status": "approved"}},
+        )
     )
 
 

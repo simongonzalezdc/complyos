@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import LearningRecord, LearningRecordStatus, User
+from complyos.models.domain import LearningRecord, LearningRecordStatus, PrivacyRequest, User
 from complyos.services.context import default_local_context
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
@@ -89,6 +89,24 @@ def test_privacy_request_export_delete_and_legal_hold_flow(tmp_path) -> None:
     assert completed.deleted_records["users"] == 1
     assert completed.deleted_records["learning_records"] == 1
     assert repo.get_user("u-privacy") is None
+
+
+def test_privacy_request_controller_approval_gate() -> None:
+    """The approval gate is a typed predicate on the model, not a dict lookup."""
+    base = {
+        "id": "r1",
+        "tenant_id": "t",
+        "subject_id": "s",
+        "request_type": "deletion",
+        "status": "PENDING_CONTROLLER_APPROVAL",
+        "opened_by": "op",
+        "created_at": datetime.now(UTC),
+    }
+    assert PrivacyRequest(**base).is_controller_approved() is False
+    approved = PrivacyRequest(
+        **base, result_summary={"controller_approval": {"status": "approved"}}
+    )
+    assert approved.is_controller_approved() is True
 
 
 def test_invalid_request_type_and_hold_scope_are_rejected(tmp_path) -> None:
@@ -197,28 +215,28 @@ def test_retention_cleanup_dry_run_then_apply_removes_closed_privacy_cases(tmp_p
         privacy_request_days=30,
     )
     repo.save_privacy_request(
-        {
-            "id": "old-closed",
-            "tenant_id": "tenant-a",
-            "subject_id": "u-old",
-            "request_type": "access",
-            "status": "COMPLETED",
-            "opened_by": "operator",
-            "created_at": now - timedelta(days=60),
-            "result_summary": {"controller_approval": {"status": "approved"}},
-        }
+        PrivacyRequest(
+            id="old-closed",
+            tenant_id="tenant-a",
+            subject_id="u-old",
+            request_type="access",
+            status="COMPLETED",
+            opened_by="operator",
+            created_at=now - timedelta(days=60),
+            result_summary={"controller_approval": {"status": "approved"}},
+        )
     )
     repo.save_privacy_request(
-        {
-            "id": "recent-closed",
-            "tenant_id": "tenant-a",
-            "subject_id": "u-recent",
-            "request_type": "access",
-            "status": "COMPLETED",
-            "opened_by": "operator",
-            "created_at": now - timedelta(days=5),
-            "result_summary": {"controller_approval": {"status": "approved"}},
-        }
+        PrivacyRequest(
+            id="recent-closed",
+            tenant_id="tenant-a",
+            subject_id="u-recent",
+            request_type="access",
+            status="COMPLETED",
+            opened_by="operator",
+            created_at=now - timedelta(days=5),
+            result_summary={"controller_approval": {"status": "approved"}},
+        )
     )
 
     dry_run = service.run_retention_cleanup(context, dry_run=True)

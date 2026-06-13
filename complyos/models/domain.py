@@ -262,3 +262,37 @@ class LegalHoldScope(StrEnum):
     SUBJECT = "subject"
     TENANT = "tenant"
     SYSTEM = "system"
+
+
+class PrivacyRequest(BaseModel):
+    """A tenant-scoped data-subject / privacy request case.
+
+    The controller-approval gate that authorizes export/deletion of a person's
+    data is exposed as a typed predicate (`is_controller_approved`) rather than
+    re-derived from nested dict lookups at each call site, so the authorization
+    decision has one home the type system can see.
+    """
+
+    id: str
+    tenant_id: str
+    subject_id: str
+    request_type: PrivacyRequestType
+    status: str
+    opened_by: str
+    region: str | None = None
+    closed_by: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    # result_summary is intentionally free-form: it accumulates controller
+    # approval, deletion counts, and legal-hold block lists over the case life.
+    result_summary: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def controller_approval(self) -> dict[str, Any]:
+        approval = self.result_summary.get("controller_approval")
+        return approval if isinstance(approval, dict) else {}
+
+    def is_controller_approved(self) -> bool:
+        """True only when a controller has recorded an explicit approval."""
+        return self.controller_approval.get("status") == "approved"
