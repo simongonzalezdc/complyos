@@ -8,7 +8,7 @@ import pytest
 
 from complyos.connectors.mock import MockConnector
 from complyos.core.remediation import RemediationEngine
-from complyos.models.domain import ComplianceGap, Course, User
+from complyos.models.domain import ComplianceGap, Course, EmploymentStatus, User
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
                 manager_id="m1",
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
@@ -57,7 +57,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
             severity="high",
@@ -77,7 +77,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
             severity="medium",
@@ -98,7 +98,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
             severity="low",
@@ -117,7 +117,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
             severity="high",
@@ -138,7 +138,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[Course(id="c1", code="SEC-101", title="Security")],
             severity="high",
@@ -157,7 +157,7 @@ class TestRemediateGaps:
                 department="Eng",
                 region="US",
                 hire_date=date(2023, 1, 1),
-                employment_status="active",
+                employment_status=EmploymentStatus.ACTIVE,
             ),
             missing_courses=[
                 Course(id="c1", code="SEC-101", title="Security"),

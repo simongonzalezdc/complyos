@@ -115,8 +115,8 @@ depend on external API credentials:
 - schema migration ledger: `20260612_source_intel_hardening`;
 - tenant-scoped repository methods for saving, listing, and deciding proposals;
 - tenant-scoped scheduled run receipts for observability;
-- tenant-scoped notification outbox rows for email/Slack/Teams/customer hook
-  delivery plus channel/event preferences;
+- tenant-scoped notification outbox rows for email, Slack-compatible,
+  Teams-compatible, and customer webhook delivery plus channel/event preferences;
 - service-layer permissions for `source_intel:read`, `source_intel:run`, and
   `source_intel:decide`;
 - FastAPI endpoints:
