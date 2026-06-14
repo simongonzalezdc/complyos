@@ -42,7 +42,9 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 - **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
 - **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream rule or module changes.
 - **Notification outbox, email, and signed hooks** — Queue email, Slack, Teams, or customer webhook deliveries with payload hashes, retry state, dry-run drain, channel/event kill switches, and HMAC headers instead of coupling jobs to network uptime.
-- **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, and MCP tools.
+- **Authenticated web shell** — Nine live modules (Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration) served at `/shell` from the same service layer. Signed-session cookie auth, WCAG 2.2 AA contrast enforced by tests. Not a mock: every module reads real service data.
+- **Proposal-only AI layer** — AI can suggest field mappings, anomaly summaries, gap explanations, remediation-message drafts, and duplicate clusters, but cannot mark a learner compliant, promote imports, execute remediation, or change rules. PII is redacted before hashing. Every proposal has a reject + expiry lifecycle and full provenance hashes.
+- **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, MCP tools, or the web shell.
 - **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
 
 ---
@@ -50,18 +52,35 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   MCP Client    │────▶│  ComplyOS MCP    │────▶│ Compliance      │
-│ (Claude/Cursor) │     │  Server (FastMCP)│     │ Auditor         │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                           ┌──────────────────────────────┼──────────────┐
-                           │                              │              │
-                    ┌──────▼──────┐            ┌──────────▼─────┐  ┌────▼─────┐
-                    │ CSV / Mock  │            │   Workday      │  │ SAP/CSOD │
-                    │ Connectors  │            │   Connector    │  │Connectors│
-                    └─────────────┘            └────────────────┘  └──────────┘
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│  CLI (Typer) │  │  API v1      │  │  MCP         │  │  Web shell       │
+│  complyos *  │  │  FastAPI     │  │  FastMCP     │  │  /shell (cookie) │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘
+       │                 │                 │                    │
+       └─────────────────┴─────────────────┴────────────────────┘
+                                   │
+                    ┌──────────────▼──────────────────┐
+                    │   Application SERVICE layer      │
+                    │  ActorContext + require_perm(*)  │
+                    │  (AuditService, EvidenceService, │
+                    │   ImportService, PrivacySvc, …)  │
+                    └──────┬──────────────┬────────────┘
+                           │              │
+              ┌────────────▼───┐   ┌──────▼───────────────────────┐
+              │  Auditor /     │   │  LocalRepository (mixins)    │
+              │  Rules engine  │   │  core | privacy | notif |    │
+              └────────────────┘   │  source-intel | import | ORM │
+                                   └──────────────┬───────────────┘
+                                                  │
+                    ┌─────────────────────────────┴──────────────────┐
+                    │               Connectors                        │
+                    │  CSV  │  Workday  │  SAP SuccessFactors  │ CSOD │
+                    └────────────────────────────────────────────────┘
 ```
+
+### Tenant model
+
+ComplyOS runs **single-tenant at runtime** with a **tenant-aware data model**: every persisted row carries a `tenant_id` so the schema is ready for a later migration without backfills. Multi-tenant / SaaS hosting is not built — see [docs/multi-tenancy.md](docs/multi-tenancy.md) for the full posture, what is guaranteed today, and what must change before shared deployment is safe.
 
 ---
 
@@ -114,8 +133,9 @@ complyos digest
 # Generate a self-contained HTML dashboard (summary, trend, filterable table)
 complyos dashboard --open
 
-# Serve the live dashboard API locally
+# Serve the live dashboard API and authenticated web shell locally
 complyos serve-dashboard --host 127.0.0.1 --port 8000
+# Then open http://127.0.0.1:8000/shell in your browser (login with your API token)
 
 # Run configured scheduled audits once from cron/systemd/Forgejo Actions
 complyos run-schedule --config complyos.yaml
@@ -299,6 +319,7 @@ Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes fo
 - [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
 - [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only
 - [x] Notification outbox hooks — DB-backed events/deliveries/preferences, source-intel/audit/privacy event enqueue, email/webhook drain, signed outbound and inbound hook payloads, worker templates, and no-secret logs
+- [x] Enterprise control-plane — service boundary with ActorContext + 30-permission catalog + require_permission choke-point across all services; API v1 (FastAPI) with bearer-token auth, structured errors, rate limiting, admin/roles routes, and OpenAPI snapshot test; CLI/MCP/API v1 surface parity enforced by adversarial tests (BOLA/IDOR, secrets audit, cross-surface denial, export formula/XSS neutralization); authenticated web shell at /shell with nine live modules (Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration) and WCAG 2.2 AA enforcement; proposal-only AI layer with PII redaction, reject/expiry lifecycle, and provenance hashes.
 
 Remaining work is mostly outside application code: real webhook URLs/SMTP credentials, paid regulatory APIs, provider-specific LMS/HRIS event parsers, counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
 

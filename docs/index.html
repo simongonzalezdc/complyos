@@ -1088,10 +1088,12 @@
             ComplyOS normalizes Workday, SAP SuccessFactors, Cornerstone, Canvas-style learning data,
             and plain exports into tenant-scoped evidence, privacy workflows, and review packets. It
             does not claim certification; it prepares the receipts for counsel, auditors, and buyers.
-            It is the live compliance/evidence module inside the working-title LearningOps Suite.
+            Operators work through an authenticated enterprise web shell, CLI, API v1, or MCP — all
+            backed by the same service layer. It is the live compliance/evidence module inside the
+            working-title LearningOps Suite.
           </p>
           <div class="hero-actions" aria-label="Landing page actions">
-            <a class="button" href="./agent-surface.md">Operate through CLI/API/MCP</a>
+            <a class="button" href="./agent-surface.md">Operate through shell/CLI/API/MCP</a>
             <a class="button secondary" href="./hr-people-analytics-compliance-audit.md">
               See the gap audit
             </a>
@@ -1108,16 +1110,16 @@
               <small>Workforce compliance and campus readiness on one audit model.</small>
             </span>
             <span>
-              <strong>CLI/API/MCP</strong>
-              <small>Agents and humans use the same service-backed workflows.</small>
+              <strong>Web shell</strong>
+              <small>Authenticated enterprise shell — 9 modules on live service data.</small>
             </span>
             <span>
               <strong>DSR + hold</strong>
               <small>Approval-gated export/delete with legal-hold blocking.</small>
             </span>
             <span>
-              <strong>BUSL-1.1</strong>
-              <small>Source-available core with Apache-2.0 conversion language.</small>
+              <strong>659 tests</strong>
+              <small>Adversarial suite: BOLA/IDOR, cross-surface denial, XSS, formula injection.</small>
             </span>
           </div>
         </div>
@@ -1228,7 +1230,8 @@
         <div class="section-heading">
           <h2 id="suite-title">LearningOps Suite is modular on purpose.</h2>
           <p>
-            The suite is not a pile of fake modules. It is a labeled operating model:
+            The latest work turned the app into a control plane. The suite is not a
+            pile of fake modules. It is a labeled operating model:
             ComplyOS is live, Source Intelligence is the shared tested spine, RegWatch
             has a proposal-only contract, and the broader training-ops modules are
             synthetic demos or roadmap until buyer pull proves them.
@@ -1239,16 +1242,19 @@
             <span class="maturity">Live</span>
             <h3>ComplyOS</h3>
             <p>
-              Evidence-backed gaps, tenant logs, readiness packets, privacy workflows,
-              security evidence, CSV fallback, CLI, API, and MCP.
+              Authenticated enterprise web shell (9 live modules), service-backed CLI/API v1/MCP
+              control plane, import governance, privacy/DSR workflows, AI proposal-only assistance,
+              and an adversarial test suite.
             </p>
             <div class="module-list" aria-label="Live ComplyOS surfaces">
-              <span>CSV import</span>
+              <span>Web shell</span>
+              <span>CLI/API v1/MCP</span>
               <span>Gap reports</span>
               <span>Evidence packets</span>
-              <span>CLI/API/MCP</span>
+              <span>Import governance</span>
+              <span>Privacy/DSR</span>
               <span>Source Intel</span>
-              <span>Notification outbox</span>
+              <span>AI proposals</span>
             </div>
           </article>
           <article class="suite-card live">
@@ -1369,11 +1375,13 @@
 
       <section id="controls" aria-labelledby="controls-title">
         <div class="section-heading">
-          <h2 id="controls-title">The latest work turned the app into a control plane.</h2>
+          <h2 id="controls-title">One service layer, four surfaces.</h2>
           <p>
-            The product now documents and exposes privacy, retention, security-evidence, and governance
-            workflows across CLI, API v1, and MCP. The honest boundary is still clear: ComplyOS prepares
-            evidence; lawyers, auditors, and customers approve the claims.
+            The authenticated web shell at <code>/shell</code>, CLI, API v1, and MCP all route through
+            the same service-backed control plane — no mutating capability is shell-only or MCP-only.
+            Privacy, retention, security-evidence, and governance workflows are exposed everywhere.
+            The honest boundary is still clear: ComplyOS prepares evidence; lawyers, auditors, and
+            customers approve the claims.
           </p>
         </div>
         <div class="control-grid">
@@ -1459,19 +1467,19 @@
             </div>
             <div class="connector">
               <strong>Canvas</strong>
-              <small>Courses, enrollments, completions, cohorts, and assignments.</small>
+              <small>Courses, enrollments, completions, cohorts, and assignments. Roadmap target — not yet an implemented connector.</small>
             </div>
             <div class="connector">
               <strong>Moodle</strong>
-              <small>Course completion data from open learning programs.</small>
+              <small>Course completion data from open learning programs. Roadmap target — not yet an implemented connector.</small>
             </div>
             <div class="connector">
               <strong>Blackboard</strong>
-              <small>Institutional learning evidence for legacy campuses.</small>
+              <small>Institutional learning evidence for legacy campuses. Roadmap target — not yet an implemented connector.</small>
             </div>
             <div class="connector">
               <strong>D2L Brightspace</strong>
-              <small>Modern LMS records for higher education and enterprise learning.</small>
+              <small>Modern LMS records for higher education and enterprise learning. Roadmap target — not yet an implemented connector.</small>
             </div>
           </div>
         </div>
@@ -1523,8 +1531,9 @@
         <h2 id="final-title">Compliance software should start with proof, not a sales deck.</h2>
         <p>
           ComplyOS gives small teams a CSV path and gives larger teams a clean integration story. The
-          same records power CLI audits, API routes, MCP tools, dashboard/report exports, privacy
-          workflows, security evidence packets, and governance packets without splitting the product in two.
+          same records power the authenticated web shell (9 modules on live service data), CLI audits,
+          API v1 routes, MCP tools, privacy workflows, security evidence packets, and governance packets
+          — all enforced through one service layer, one authorization choke-point, and 659 adversarial tests.
         </p>
         <div class="hero-actions">
           <a class="button" href="./release-checklist.md">Run the release checks</a>

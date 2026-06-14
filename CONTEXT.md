@@ -76,6 +76,33 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 > data into `LearningRecord`. The existing `Enrollment` model remains available
 > as the compatibility layer for the current audit engine.
 
+## Current State (branch simon/enterprise-hardening, 659 tests passing)
+
+### Built
+
+**Service / authorization layer**
+- Every business workflow routes through application services that call `require_permission(context, PERM_*)` — a single authorization choke-point. Services: AuditService, EvidenceService, RemediationService, ImportService, ConnectorRegistry, PolicyRuleService, AIProposalService, PrivacyProgramService, ReadinessService, SecurityEvidenceService, GovernancePacketService, SourceIntelService, NotificationOutboxService, InboundHookService, RoleAdminService.
+- An `ActorContext` (tenant_id, actor_id, role, permissions, surface, request_id) is carried into every service call. Roles map to a 30-permission catalog (`complyos/services/context.py`).
+- `LocalRepository` is decomposed into cohesive mixins — PrivacyRepositoryMixin, ImportRepositoryMixin, SourceIntelRepositoryMixin, NotificationRepositoryMixin, RoleBindingRepositoryMixin — behind a typed `RepositoryBase`.
+
+**Surfaces (all call the same services; cross-surface parity enforced by tests)**
+- **CLI (Typer):** audit / report / status / digest / dashboard / serve-dashboard / sync / connectors / health / validate-rule / preview-rule / remediate / export / notifications / security evidence / governance packet / privacy / admin role-bindings / source-intel / mcp / run-schedule / release-check.
+- **MCP (FastMCP, ~30 tools):** same services; default role is least-privilege `agent_service_account` (proposal-only); privileged ops require `COMPLYOS_MCP_ROLE` opt-in.
+- **API v1 (FastAPI, `/api/v1/*`):** versioned routes covering audits, learners, connectors, imports (preview/decisions/promote), evidence, exports/reports, rules (validate/preview), remediations, ai/proposals (mapping/approve), readiness, admin/roles, sync, privacy (requests/legal-holds/retention), source-intel, notifications, hooks/inbound. Bearer-token auth (fail-closed when `COMPLYOS_API_TOKEN` unset; constant-time compare). Structured errors `{code,message,details,request_id}`. OpenAPI snapshot test. In-process per-identity rate limiting on mutating endpoints (`COMPLYOS_RATE_LIMIT_PER_MINUTE`).
+- **Web shell (`/shell`):** authenticated enterprise web shell served by `complyos serve-dashboard`. Signed-session cookie auth wraps the same `ActorContext` (login exchanges the API token, or a chosen role in `COMPLYOS_ALLOW_INSECURE_LOCAL` mode, for an `HttpOnly SameSite=Lax` signed cookie). Nine modules rendered from live service data: Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration. Import preview/decide/promote are wired. WCAG 2.2 AA accessibility and color-contrast enforced by tests.
+
+**AI proposal layer**
+- Proposal-only: can suggest field mappings, anomaly summaries, gap explanations, remediation-message drafts, and duplicate clustering. Cannot mark a learner compliant, promote imports, execute remediation, or change rules. PII is redacted before any hash/stored output. Proposals have a reject + expiry-TTL lifecycle and full provenance hashes.
+
+**Tenant model**
+- Tenant-aware data model, single-tenant runtime by default. Tenant governance metadata (data_region, processing_purpose, data_categories, retention_policy, subprocessor_profile) is surfaced through readiness. Multi-tenant / SaaS is deliberately not built — see `docs/multi-tenancy.md`.
+
+**Connectors:** CSV (read-only), Workday, SAP SuccessFactors, Cornerstone, Mock.
+
+**Test suite:** 659 passing; adversarial suite includes BOLA/IDOR, secrets audit, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases, and connector-failure-fails-closed.
+
+---
+
 ## Flagged Ambiguities
 
 - **`BSL` is ambiguous.** Use `BUSL-1.1` when referring to Business Source
@@ -94,3 +121,4 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 - **AI is proposal-only.** AI can propose mappings and drafts; it cannot mark
   people compliant, promote imports, send remediation, or make employment or
   education decisions.
+- **Multi-tenant / SaaS is not built.** The runtime is single-tenant. See `docs/multi-tenancy.md` for the deliberate scope boundary.

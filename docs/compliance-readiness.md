@@ -16,9 +16,10 @@ ComplyOS should present itself as readiness/control-mapping software until couns
 | AI governance | Proposal-only outputs, provenance, human approval | `complyos/services/ai_proposals.py` |
 | Change management | Release checklist, test gates, review evidence | `docs/release-checklist.md` |
 | Incident response | Security contact, triage path, severity model | `SECURITY.md` |
-| Accessibility | WCAG 2.2 AA target and public-sector expectations | future shell a11y test evidence |
+| Accessibility | WCAG 2.2 AA target and public-sector expectations | web shell a11y tests live — landmarks/labels/scope plus computed color-contrast enforced by `tests/unit/test_shell_accessibility.py` |
 | School privacy | FERPA/COPPA review inputs, minimization, access logs | this doc plus contract review |
-| Global privacy | Purpose, minimization, retention, data-region and subprocessor records | readiness service metadata |
+| Global privacy | Purpose, minimization, retention, data-region and subprocessor records | `ReadinessService` surfaces `TenantMetadata` (data_region, processing_purpose, data_categories, retention_policy, subprocessor_profile) per tenant via API `/api/v1/readiness` and the web shell Readiness module |
+| Control plane integrity | Service-layer authz, actor/action audit logs, per-identity rate limiting, adversarial test coverage | `complyos/services/context.py`, `audit_action_logs` table, `complyos/web/rate_limit.py`, 659-test suite (BOLA/IDOR, cross-surface parity, secrets audit) |
 
 ## SOC 2 readiness posture
 
@@ -26,8 +27,9 @@ AICPA Trust Services Criteria cover Security, Availability, Processing Integrity
 
 Product requirements:
 
-- service-layer authz tests;
-- actor/action/object/result logs;
+- service-layer authz tests (require_permission choke-point across all 15 services; 659 tests including BOLA/IDOR and cross-surface denial parity);
+- actor/action/object/result logs (`audit_action_logs` table, designed + partial production receipts needed);
+- per-identity in-process rate limiting on mutating API endpoints (`COMPLYOS_RATE_LIMIT_PER_MINUTE`);
 - deterministic audit engine with evidence hashes;
 - backup/restore procedure for local/customer-hosted deployments;
 - release/change-management checklist;
@@ -68,6 +70,8 @@ Global privacy posture must be a regional control matrix, not a badge. Store and
 - export destinations;
 - incident owner and notification workflow;
 - privacy request runbook for access, correction, deletion, export, restriction/objection where applicable.
+
+These five fields are now first-class product data. `ReadinessService.check()` populates a `TenantMetadata` object (`data_region`, `processing_purpose`, `data_categories`, `retention_policy`, `subprocessor_profile`) from `LocalRepository.get_tenant_metadata()` and embeds it in every `ReadinessReport`. Buyers and auditors can retrieve this inventory via `GET /api/v1/readiness` (Bearer token required) or through the web shell Readiness module. Absent values surface as `null` / empty — a gap signal, not a hidden default.
 
 Watchlist references:
 

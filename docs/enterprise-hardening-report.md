@@ -1,7 +1,7 @@
 # ComplyOS Enterprise Hardening — Remediation Report
 
 > Branch: `simon/enterprise-hardening` · Baseline: `main` (342 tests green)
-> Result: **658 tests green**, ruff + mypy clean. All 3 CRITICAL and all
+> Result: **659 tests green**, ruff + mypy clean. All 3 CRITICAL and all
 > HIGH/MEDIUM findings remediated; the repository God-object split and the
 > security-critical typed-model migration are done; and the full enterprise
 > control plane (service boundary, API v1, CLI/MCP parity, AI proposal layer,
@@ -80,7 +80,7 @@ to completion. Each work package shipped as one atomic, gate-green commit.
 | WP14 | Adversarial/security suite — secrets audit, API BOLA/IDOR, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases (incl. a new backdated-date invariant + empty-load promotion guard), connector-failure-fails-closed | P9 |
 | WP15a | AI proposal layer hardened — PII redacted before hashing, prompt-injection inertness, forbidden-mutation guards, reject + expiry-TTL lifecycle (AI approval mutates no compliance state) | P7 |
 | WP15b | Deterministic proposal-only AI types — anomaly summary, gap explanation, remediation-message draft, duplicate clustering (PII-safe by construction) | P7 |
-| WP16a–d | **Authenticated enterprise web shell** — signed-session auth wrapping the existing `ActorContext`; 8 modules (Overview/Gaps/Imports/Evidence/Remediation/Source-intel/Privacy/Readiness/Admin) on LIVE service data; import decide/promote wired; WCAG 2.2 AA accessibility + contrast audit enforced by tests | P6 |
+| WP16a–d | **Authenticated enterprise web shell** — signed-session auth wrapping the existing `ActorContext`; 9 modules (Overview/Gaps/Imports/Evidence/Remediation/Source-intel/Privacy/Readiness/Admin) on LIVE service data; import decide/promote wired; WCAG 2.2 AA accessibility + contrast audit enforced by tests | P6 |
 | WP17a | Tenant governance metadata (data region/purpose/categories/retention/subprocessors) surfaced through `ReadinessService`/API/shell; `PrivacyProgramService` read method (shell no longer reads the repo directly); configurable session-cookie `Secure` | P8 |
 | WP18 | **Independent-review fix:** closed a cross-tenant write IDOR in `ImportService.decide` (it lacked the `batch.tenant_id == context.tenant_id` gate that `promote` has); API decide endpoint now maps `PermissionError → 403`; locked with a cross-tenant BOLA regression test | P9 |
 
