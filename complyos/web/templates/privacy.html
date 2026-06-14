@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy & retention · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Privacy &amp; retention</p>
+<h1>Privacy &amp; retention posture</h1>
+<p class="lede">
+  Read-only privacy posture for tenant <strong>{{ context.tenant_id }}</strong>.
+  This view surfaces active legal holds and the retention policy. Data-subject
+  export and deletion are mutating, controller-approved actions and are not
+  triggered from this page.
+</p>
+
+<section class="panel" aria-labelledby="holds-heading">
+  <h2 id="holds-heading">Active legal holds</h2>
+  <table class="data-table" aria-label="Active legal holds">
+    <caption class="table-caption">
+      Holds that block deletion until released, most relevant first.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Hold</th>
+        <th scope="col">Scope</th>
+        <th scope="col">Subject</th>
+        <th scope="col">Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for hold in holds %}
+      <tr>
+        <td><span class="mono">{{ hold.id }}</span></td>
+        <td><span class="tag">{{ hold.scope }}</span></td>
+        <td><span class="mono">{{ hold.subject_id or '—' }}</span></td>
+        <td>{{ hold.reason }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty-cell">
+          No active legal holds.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel" aria-labelledby="retention-heading">
+  <h2 id="retention-heading">Retention policy</h2>
+  {% if retention_policy %}
+  <table class="kv-table" aria-label="Retention policy in days by dataset">
+    <thead>
+      <tr><th scope="col">Dataset</th><th scope="col" class="num">Days</th></tr>
+    </thead>
+    <tbody>
+      {% for key, value in retention_policy %}
+      <tr><td>{{ key }}</td><td class="num">{{ value }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="metric-note">
+    No retention policy configured. Configure one before running retention cleanup.
+  </p>
+  {% endif %}
+</section>
+
+<section class="panel" aria-labelledby="dsr-heading">
+  <h2 id="dsr-heading">Data-subject requests</h2>
+  <p class="lede">
+    DSR intake, controller approval, export, and deletion run through the privacy
+    workflow with explicit approval gates. They are mutating actions and are not
+    exposed as one-click controls in this read-only posture view.
+  </p>
+  <div class="action-row">
+    <button type="button" class="btn" disabled>
+      Open DSR workflow
+      <span class="nav-tag">requires approval</span>
+    </button>
+  </div>
+  <p class="posture-note">
+    Export (<code class="mono">privacy:export</code>) and deletion
+    (<code class="mono">privacy:delete</code>) require controller approval and are
+    deferred from this surface.
+  </p>
+</section>
+{% endblock %}

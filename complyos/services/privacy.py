@@ -13,6 +13,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from complyos.core.repository import LocalRepository
+from complyos.models.domain import LegalHoldScope, PrivacyRequest, PrivacyRequestType
 from complyos.services.context import (
     PERM_LEGAL_HOLD_MANAGE,
     PERM_PRIVACY_APPROVE,
@@ -93,6 +94,16 @@ class RetentionCleanupResult(BaseModel):
     actor_context: dict[str, str] = Field(default_factory=dict)
 
 
+class PrivacyPostureResult(BaseModel):
+    """Read-only privacy posture: active legal holds + the retention policy."""
+
+    tenant_id: str
+    active_legal_holds: list[dict[str, Any]] = Field(default_factory=list)
+    retention_policy: dict[str, Any] = Field(default_factory=dict)
+    generated_at: datetime
+    actor_context: dict[str, str] = Field(default_factory=dict)
+
+
 class PrivacyProgramService:
     """Operational privacy workflows over repository-backed records."""
 
@@ -109,23 +120,22 @@ class PrivacyProgramService:
         notes: str | None = None,
     ) -> PrivacyRequestResult:
         require_permission(context, PERM_PRIVACY_REQUEST)
-        allowed = {"access", "export", "correction", "deletion", "restriction", "objection"}
-        if request_type not in allowed:
+        if request_type not in set(PrivacyRequestType):
             raise ValueError(f"unsupported privacy request type: {request_type}")
         created_at = datetime.now(UTC)
         request_id = str(uuid4())
         self.repository.save_privacy_request(
-            {
-                "id": request_id,
-                "tenant_id": context.tenant_id,
-                "subject_id": subject_id,
-                "request_type": request_type,
-                "status": "PENDING_CONTROLLER_APPROVAL",
-                "region": region,
-                "opened_by": context.actor_id,
-                "created_at": created_at,
-                "metadata": {"notes": notes} if notes else {},
-            }
+            PrivacyRequest(
+                id=request_id,
+                tenant_id=context.tenant_id,
+                subject_id=subject_id,
+                request_type=PrivacyRequestType(request_type),
+                status="PENDING_CONTROLLER_APPROVAL",
+                region=region,
+                opened_by=context.actor_id,
+                created_at=created_at,
+                metadata={"notes": notes} if notes else {},
+            )
         )
         self.repository.save_action_log(
             tenant_id=context.tenant_id,
@@ -165,6 +175,26 @@ class PrivacyProgramService:
             actor_context=context.public_dict(),
         )
 
+    def get_privacy_posture(self, context: ActorContext) -> PrivacyPostureResult:
+        """Return the tenant's read-only privacy posture (active holds + policy).
+
+        Gated by ``privacy:request``: the privacy program has no dedicated pure
+        read permission, and this is the same permission the shell's read-only
+        privacy view already required, so the service layer becomes the single
+        authorization choke-point for the posture read. Tenant-scoped: holds and
+        the retention policy are resolved for ``context.tenant_id`` only.
+        """
+        require_permission(context, PERM_PRIVACY_REQUEST)
+        holds = self.repository.list_active_legal_holds(tenant_id=context.tenant_id)
+        retention_policy = self.repository.get_retention_policy(context.tenant_id)
+        return PrivacyPostureResult(
+            tenant_id=context.tenant_id,
+            active_legal_holds=holds,
+            retention_policy=retention_policy,
+            generated_at=datetime.now(UTC),
+            actor_context=context.public_dict(),
+        )
+
     def approve_request(
         self,
         context: ActorContext,
@@ -186,7 +216,7 @@ class PrivacyProgramService:
                 "created_at": approved_at,
             }
         )
-        result_summary = self._dict_value(request.get("result_summary"))
+        result_summary = dict(request.result_summary)
         result_summary["controller_approval"] = {
             "approval_id": approval_id,
             "approved_by": context.actor_id,
@@ -217,23 +247,20 @@ class PrivacyProgramService:
             object_id=request_id,
             payload={
                 "approval_id": approval_id,
-                "request_type": request["request_type"],
+                "request_type": request.request_type.value,
                 "status": "APPROVED",
                 "email_subject": "ComplyOS privacy request approved",
                 "summary": f"Privacy request {request_id} was approved for processing.",
             },
         )
-        created_at = request["created_at"]
-        if not isinstance(created_at, datetime):
-            raise ValueError(f"privacy request has invalid created_at: {request_id}")
         return PrivacyRequestResult(
             request_id=request_id,
             tenant_id=context.tenant_id,
-            subject_id=str(request["subject_id"]),
-            request_type=str(request["request_type"]),
+            subject_id=request.subject_id,
+            request_type=request.request_type.value,
             status="APPROVED",
-            region=request["region"] if isinstance(request["region"], str) else None,
-            created_at=created_at,
+            region=request.region,
+            created_at=request.created_at,
             actor_context=context.public_dict(),
         )
 
@@ -241,7 +268,7 @@ class PrivacyProgramService:
         require_permission(context, PERM_PRIVACY_EXPORT)
         request = self._get_scoped_request(context, request_id)
         self._require_controller_approval(request)
-        subject_id = str(request["subject_id"])
+        subject_id = request.subject_id
         exported = self.repository.get_subject_export(
             subject_id, tenant_id=context.tenant_id
         )
@@ -278,13 +305,13 @@ class PrivacyProgramService:
         require_permission(context, PERM_PRIVACY_DELETE)
         request = self._get_scoped_request(context, request_id)
         self._require_controller_approval(request)
-        subject_id = str(request["subject_id"])
+        subject_id = request.subject_id
         holds = self.repository.list_active_legal_holds(
             tenant_id=context.tenant_id, subject_id=subject_id
         )
         if holds:
             hold_ids = [hold["id"] for hold in holds]
-            result_summary = self._dict_value(request.get("result_summary"))
+            result_summary = dict(request.result_summary)
             result_summary["blocked_by_holds"] = hold_ids
             self.repository.update_privacy_request_status(
                 request_id,
@@ -328,7 +355,7 @@ class PrivacyProgramService:
 
         deleted = self.repository.delete_subject_records(subject_id, tenant_id=context.tenant_id)
         completed_at = datetime.now(UTC)
-        result_summary = self._dict_value(request.get("result_summary"))
+        result_summary = dict(request.result_summary)
         result_summary["deleted_records"] = deleted
         self.repository.update_privacy_request_status(
             request_id,
@@ -380,7 +407,7 @@ class PrivacyProgramService:
         reason: str,
     ) -> LegalHoldResult:
         require_permission(context, PERM_LEGAL_HOLD_MANAGE)
-        if scope not in {"subject", "tenant", "system"}:
+        if scope not in set(LegalHoldScope):
             raise ValueError(f"unsupported legal hold scope: {scope}")
         if scope == "subject" and not subject_id:
             raise ValueError("subject legal hold requires subject_id")
@@ -583,57 +610,45 @@ class PrivacyProgramService:
             "evidence_ledger": len(eligible_evidence_ids),
             "action_logs": len(eligible_action_log_ids),
         }
-        deleted_privacy_requests = (
-            0
-            if dry_run
-            else self.repository.delete_privacy_requests_by_ids(eligible_privacy_request_ids)
-        )
-        deleted_import_payloads = (
-            {"raw_import_rows": 0, "import_decisions": 0}
-            if dry_run
-            else self.repository.delete_import_payloads_for_batches(eligible_import_batch_ids)
-        )
-        deleted_ai_proposals = (
-            0
-            if dry_run
-            else self.repository.delete_ai_proposals_by_ids(eligible_ai_proposal_ids)
-        )
-        deleted_evidence = (
-            0
-            if dry_run
-            else self.repository.delete_evidence_entries_by_ids(eligible_evidence_ids)
-        )
-        deleted_action_logs = (
-            0
-            if dry_run
-            else self.repository.delete_action_logs_by_ids(eligible_action_log_ids)
-        )
-        deleted_counts = {
-            "privacy_requests": deleted_privacy_requests,
-            "raw_import_rows": deleted_import_payloads["raw_import_rows"],
-            "import_decisions": deleted_import_payloads["import_decisions"],
-            "ai_proposals": deleted_ai_proposals,
-            "evidence_ledger": deleted_evidence,
-            "action_logs": deleted_action_logs,
-        }
-        self.repository.save_action_log(
-            tenant_id=context.tenant_id,
-            actor_id=context.actor_id,
-            surface=context.surface,
-            action="privacy.retention.run",
-            object_type="retention_policy",
-            object_id=context.tenant_id,
-            result="dry_run" if dry_run else "success",
-            request_id=context.request_id,
-            metadata={
-                "dry_run": dry_run,
-                "eligible_counts": eligible_counts,
-                "deleted_counts": deleted_counts,
-                "cutoff_by_dataset": {
-                    key: value.isoformat() for key, value in cutoff_by_dataset.items()
+        cutoff_serialized = {key: value.isoformat() for key, value in cutoff_by_dataset.items()}
+        if dry_run:
+            deleted_counts = dict.fromkeys(eligible_counts, 0)
+            # No destructive writes on a dry run, so a standalone audit log is safe.
+            self.repository.save_action_log(
+                tenant_id=context.tenant_id,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                action="privacy.retention.run",
+                object_type="retention_policy",
+                object_id=context.tenant_id,
+                result="dry_run",
+                request_id=context.request_id,
+                metadata={
+                    "dry_run": True,
+                    "eligible_counts": eligible_counts,
+                    "deleted_counts": deleted_counts,
+                    "cutoff_by_dataset": cutoff_serialized,
                 },
-            },
-        )
+            )
+        else:
+            # Deletes + the "what was purged" audit record commit atomically, so a
+            # partial failure can never destroy PII/evidence without an audit trail.
+            deleted_counts = self.repository.purge_retention_eligible(
+                tenant_id=context.tenant_id,
+                privacy_request_ids=eligible_privacy_request_ids,
+                import_batch_ids=eligible_import_batch_ids,
+                ai_proposal_ids=eligible_ai_proposal_ids,
+                evidence_ids=eligible_evidence_ids,
+                action_log_ids=eligible_action_log_ids,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                request_id=context.request_id,
+                log_metadata={
+                    "dry_run": False,
+                    "eligible_counts": eligible_counts,
+                    "cutoff_by_dataset": cutoff_serialized,
+                },
+            )
         self._enqueue_privacy_event(
             context,
             event_type="privacy.retention.run",
@@ -680,26 +695,16 @@ class PrivacyProgramService:
             channels=PRIVACY_NOTIFICATION_CHANNELS,
         )
 
-    def _get_scoped_request(self, context: ActorContext, request_id: str) -> dict[str, object]:
+    def _get_scoped_request(self, context: ActorContext, request_id: str) -> PrivacyRequest:
         request = self.repository.get_privacy_request(request_id)
         if request is None:
             raise ValueError(f"unknown privacy request: {request_id}")
-        if request["tenant_id"] != context.tenant_id:
+        if request.tenant_id != context.tenant_id:
             raise PermissionError("cannot access privacy request for another tenant")
         return request
 
     @staticmethod
-    def _require_controller_approval(request: dict[str, object]) -> None:
-        result_summary = request.get("result_summary")
-        approval = (
-            result_summary.get("controller_approval")
-            if isinstance(result_summary, dict)
-            else None
-        )
-        if isinstance(approval, dict) and approval.get("status") == "approved":
+    def _require_controller_approval(request: PrivacyRequest) -> None:
+        if request.is_controller_approved():
             return
         raise PermissionError("privacy request requires controller approval before processing")
-
-    @staticmethod
-    def _dict_value(value: object) -> dict[str, Any]:
-        return dict(value) if isinstance(value, dict) else {}

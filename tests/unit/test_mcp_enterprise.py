@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from complyos.api.mcp_server import (
     approve_ai_proposal,
     approve_privacy_request,
@@ -20,6 +22,17 @@ from complyos.api.mcp_server import (
 )
 
 CSV_TEXT = "user_id,course_id,status,source_record_id\nu1,c1,completed,sr1\n"
+
+
+@pytest.fixture(autouse=True)
+def _elevated_mcp_role(monkeypatch):
+    """These tests exercise privileged tool functionality, not authz.
+
+    The MCP surface now defaults to a least-privileged proposal-only role, so
+    opt these flows up to owner. The least-privilege default (and that it blocks
+    privileged operations) is covered by tests/unit/test_mcp_authz.py.
+    """
+    monkeypatch.setenv("COMPLYOS_MCP_ROLE", "owner")
 
 
 async def test_mcp_readiness_and_import_flow(tmp_path) -> None:

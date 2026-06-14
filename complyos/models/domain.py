@@ -218,3 +218,87 @@ class EvidenceLedgerEntry(BaseModel):
     transformation_steps: list[str]
     output_hash: str
     output_summary: str
+
+
+# ---------------------------------------------------------------------------
+# Workflow vocabularies
+#
+# These name the valid states/types for the import, privacy, and legal-hold
+# workflows. They previously lived as ad-hoc string sets scattered across the
+# services (one set was even decorative and had drifted from the states the
+# code actually wrote), so the type system could not catch a typo'd status or
+# an unknown scope. Keeping them here as enums is the single source of truth.
+# ---------------------------------------------------------------------------
+class ImportBatchStatus(StrEnum):
+    # The full plan §6.1 batch lifecycle vocabulary. The states ImportService
+    # currently drives are QUARANTINED (preview lands here), PROMOTED, and
+    # PROMOTION_FAILED. DRAFT/PREVIEWED/PROMOTION_PENDING/REJECTED/EXPIRED are
+    # reserved transitions (e.g. a future async promotion queue or batch TTL);
+    # they are kept here as the single source of truth so a later stage adds the
+    # transition, not the vocabulary.
+    DRAFT = "DRAFT"
+    PREVIEWED = "PREVIEWED"
+    QUARANTINED = "QUARANTINED"
+    PROMOTION_PENDING = "PROMOTION_PENDING"
+    PROMOTED = "PROMOTED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    PROMOTION_FAILED = "PROMOTION_FAILED"
+
+
+class ImportRowStatus(StrEnum):
+    PENDING = "PENDING"
+    VALID = "VALID"
+    REJECTED = "REJECTED"
+    NEEDS_DECISION = "NEEDS_DECISION"
+    PROMOTED = "PROMOTED"
+    IGNORED = "IGNORED"
+
+
+class PrivacyRequestType(StrEnum):
+    ACCESS = "access"
+    EXPORT = "export"
+    CORRECTION = "correction"
+    DELETION = "deletion"
+    RESTRICTION = "restriction"
+    OBJECTION = "objection"
+
+
+class LegalHoldScope(StrEnum):
+    SUBJECT = "subject"
+    TENANT = "tenant"
+    SYSTEM = "system"
+
+
+class PrivacyRequest(BaseModel):
+    """A tenant-scoped data-subject / privacy request case.
+
+    The controller-approval gate that authorizes export/deletion of a person's
+    data is exposed as a typed predicate (`is_controller_approved`) rather than
+    re-derived from nested dict lookups at each call site, so the authorization
+    decision has one home the type system can see.
+    """
+
+    id: str
+    tenant_id: str
+    subject_id: str
+    request_type: PrivacyRequestType
+    status: str
+    opened_by: str
+    region: str | None = None
+    closed_by: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    # result_summary is intentionally free-form: it accumulates controller
+    # approval, deletion counts, and legal-hold block lists over the case life.
+    result_summary: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def controller_approval(self) -> dict[str, Any]:
+        approval = self.result_summary.get("controller_approval")
+        return approval if isinstance(approval, dict) else {}
+
+    def is_controller_approved(self) -> bool:
+        """True only when a controller has recorded an explicit approval."""
+        return self.controller_approval.get("status") == "approved"

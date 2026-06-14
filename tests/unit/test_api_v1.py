@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from complyos.core.repository import LocalRepository
+from complyos.notification.signing import sign_payload
 from complyos.web.api_v1 import create_api_v1_app
 
 CSV_TEXT = "user_id,course_id,status,source_record_id\nu1,c1,completed,sr1\n"
 
 
 def _hook_signature(secret: str, *, timestamp: str, body: bytes) -> str:
-    digest = hmac.new(
-        secret.encode("utf-8"),
-        timestamp.encode("utf-8") + b"." + body,
-        hashlib.sha256,
-    ).hexdigest()
-    return f"sha256={digest}"
+    # Exercise the production signer so inbound verification is tested end-to-end.
+    return sign_payload(secret, timestamp=timestamp, body=body)
 
 
 def test_api_v1_health(tmp_path) -> None:
@@ -30,6 +26,57 @@ def test_api_v1_health(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["service"] == "complyos-api-v1"
+
+
+def test_api_v1_fails_closed_when_unconfigured(monkeypatch, tmp_path) -> None:
+    """No token and no explicit insecure opt-in must reject privileged calls."""
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.delenv("COMPLYOS_ALLOW_INSECURE_LOCAL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-failclosed.db"))))
+
+    # An attacker-supplied owner role on an unauthenticated surface must NOT pass.
+    response = client.get("/api/v1/readiness", headers={"X-Actor-Role": "owner"})
+
+    assert response.status_code == 401
+
+
+def test_api_v1_insecure_local_flag_allows_explicit_local_use(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("COMPLYOS_API_TOKEN", raising=False)
+    monkeypatch.setenv("COMPLYOS_ALLOW_INSECURE_LOCAL", "1")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-insecure.db"))))
+
+    response = client.get("/api/v1/readiness", headers={"X-Actor-Role": "read_only"})
+
+    assert response.status_code == 200
+
+
+def test_api_v1_readiness_surfaces_tenant_metadata(monkeypatch, tmp_path) -> None:
+    """The readiness response carries the tenant's data-governance metadata.
+
+    init_db seeds local-default with a known processing purpose and data
+    category, so the readiness endpoint must surface those five governance
+    fields (plan §15) without renaming or dropping the existing report shape.
+    """
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-meta.db"))))
+
+    response = client.get("/api/v1/readiness", headers={"Authorization": "Bearer test-token"})
+
+    assert response.status_code == 200
+    body = response.json()
+    # Existing fields remain (backward-compatible add, not a rename).
+    assert "posture" in body
+    assert "controls" in body
+    meta = body["tenant_metadata"]
+    assert set(meta) == {
+        "data_region",
+        "processing_purpose",
+        "data_categories",
+        "retention_policy",
+        "subprocessor_profile",
+    }
+    assert meta["processing_purpose"] == "local learning-compliance operations"
+    assert meta["data_categories"] == ["workforce_learning_records"]
 
 
 def test_api_v1_token_auth_and_import_flow(monkeypatch, tmp_path) -> None:
@@ -283,6 +330,97 @@ def test_api_v1_source_intel_review_queue_and_decision(monkeypatch, tmp_path) ->
     assert packet.json()["decided_count"] == 1
 
 
+def test_api_v1_audit_report_parity(monkeypatch, tmp_path) -> None:
+    """The API exposes the audit/report/status/health/remediate operations too."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-audit.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    audit = client.get("/api/v1/audit", headers=headers)
+    assert audit.status_code == 200
+    assert "gaps_found" in audit.json()
+
+    report = client.get("/api/v1/report", headers=headers)
+    assert report.status_code == 200
+    assert "gaps_by_severity" in report.json()
+
+    health = client.get("/api/v1/connectors/health", headers=headers)
+    assert health.status_code == 200
+
+    # A read-only actor cannot execute remediation (mutating).
+    denied = client.post(
+        "/api/v1/remediate", json={}, headers={**headers, "X-Actor-Role": "read_only"}
+    )
+    assert denied.status_code == 403
+
+
+def test_api_v1_export_report_returns_content_not_disk_write(monkeypatch, tmp_path) -> None:
+    """POST /exports/reports returns rendered content + evidence hash; no server file."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-export.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    response = client.post("/api/v1/exports/reports", json={}, headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["format"] == "html"
+    # Report CONTENT is returned in the response, not a server file path.
+    assert "<html" in payload["content"].lower()
+    assert "output_path" not in payload
+    assert len(payload["evidence_hash"]) == 64
+    assert payload["gaps_found"] >= 0
+    # Nothing was written to server disk by the remote export call.
+    assert not list(tmp_path.glob("*.html"))
+
+
+def test_api_v1_export_report_denied_for_underprivileged_role(monkeypatch, tmp_path) -> None:
+    """A role without evidence:export is denied the report export (403)."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-export-403.db"))))
+
+    denied = client.post(
+        "/api/v1/exports/reports",
+        json={},
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+
+def test_api_v1_authorization_failure_returns_403_not_400(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-403.db"))))
+    headers = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "privacy_admin",
+        "X-Tenant-Id": "tenant-a",
+    }
+    created = client.post(
+        "/api/v1/privacy/requests",
+        json={"subject_id": "u1", "request_type": "deletion"},
+        headers=headers,
+    )
+    assert created.status_code == 200
+    request_id = created.json()["request_id"]
+
+    # Deleting before controller approval is an authorization failure: the
+    # service raises PermissionError, which must surface as 403, not 400.
+    denied = client.post(f"/api/v1/privacy/requests/{request_id}/delete", headers=headers)
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "privacy_delete_failed"
+
+
 def test_api_v1_records_signed_inbound_webhook_receipt(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
     monkeypatch.setenv("COMPLYOS_INBOUND_WEBHOOK_SECRET", "inbound-secret")
@@ -297,7 +435,7 @@ def test_api_v1_records_signed_inbound_webhook_receipt(monkeypatch, tmp_path) ->
         },
         separators=(",", ":"),
     ).encode("utf-8")
-    timestamp = "2026-06-13T12:00:00Z"
+    timestamp = datetime.now(UTC).isoformat()
 
     response = client.post(
         "/api/v1/hooks/inbound/canvas",
@@ -336,7 +474,7 @@ def test_api_v1_rejects_invalid_inbound_webhook_signature(monkeypatch, tmp_path)
         headers={
             "Authorization": "Bearer test-token",
             "X-Actor-Role": "compliance_manager",
-            "X-ComplyOS-Timestamp": "2026-06-13T12:00:00Z",
+            "X-ComplyOS-Timestamp": datetime.now(UTC).isoformat(),
             "X-ComplyOS-Signature": "sha256=wrong",
         },
     )
@@ -371,3 +509,223 @@ def test_api_v1_sets_and_lists_notification_preferences(monkeypatch, tmp_path) -
     assert listed.status_code == 200
     assert listed.json()["preferences"][0]["channel"] == "email"
     assert listed.json()["preferences"][0]["event_type"] == "privacy.request.created"
+
+
+def test_api_v1_lists_connector_capability_matrix(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-connectors.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    listed = client.get("/api/v1/connectors", headers=headers)
+    assert listed.status_code == 200
+    matrix = listed.json()["connectors"]
+    assert any(item["name"] == "csv" for item in matrix)
+
+    filtered = client.get("/api/v1/connectors", params={"profile": "campus"}, headers=headers)
+    assert filtered.status_code == 200
+    assert all(item["profile"] in {"campus", "both"} for item in filtered.json()["connectors"])
+
+
+def test_api_v1_connectors_list_fails_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-conn-denied.db"))))
+
+    denied = client.get(
+        "/api/v1/connectors",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+
+def _seed_rule_repo(repo: LocalRepository) -> None:
+    from datetime import date
+
+    from complyos.models.domain import Course, EmploymentStatus, User
+
+    repo.save_user(
+        User(
+            id="u1",
+            employee_id="E001",
+            email="alice@example.com",
+            first_name="Alice",
+            last_name="Smith",
+            department="Engineering",
+            region="US",
+            hire_date=date(2023, 1, 1),
+            employment_status=EmploymentStatus.ACTIVE,
+        )
+    )
+    repo.save_course(Course(id="c1", code="SEC-101", title="Security", mandatory=True))
+
+
+def test_api_v1_validates_and_previews_assignment_rules(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-rules.db"))
+    _seed_rule_repo(repo)
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+    body = {
+        "name": "Engineering Security",
+        "target_criteria": {"department": "Engineering"},
+        "course_ids": ["c1"],
+        "deadline_days": 30,
+    }
+
+    validated = client.post("/api/v1/rules/validate", json=body, headers=headers)
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+
+    previewed = client.post("/api/v1/rules/preview", json=body, headers=headers)
+    assert previewed.status_code == 200
+    assert previewed.json()["rule_name"] == "Engineering Security"
+    assert len(previewed.json()["users"]) == 1
+
+
+def test_api_v1_rules_fail_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-rules-denied.db"))))
+    body = {
+        "name": "Engineering Security",
+        "target_criteria": {"department": "Engineering"},
+        "course_ids": ["c1"],
+    }
+    # importer lacks rules:preview.
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "importer"}
+
+    denied_validate = client.post("/api/v1/rules/validate", json=body, headers=headers)
+    assert denied_validate.status_code == 403
+    assert denied_validate.json()["detail"]["code"] == "permission_denied"
+
+    denied_preview = client.post("/api/v1/rules/preview", json=body, headers=headers)
+    assert denied_preview.status_code == 403
+    assert denied_preview.json()["detail"]["code"] == "permission_denied"
+
+
+def test_api_v1_admin_roles_crud_and_tenant_scope(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-admin-roles.db"))
+    client = TestClient(create_api_v1_app(repo))
+    # Only owner carries admin:manage.
+    owner_a = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "owner",
+        "X-Tenant-Id": "tenant-a",
+    }
+    owner_b = {
+        "Authorization": "Bearer test-token",
+        "X-Actor-Role": "owner",
+        "X-Tenant-Id": "tenant-b",
+    }
+
+    created = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "reviewer"},
+        headers=owner_a,
+    )
+    assert created.status_code == 200
+    assert created.json()["role"] == "reviewer"
+
+    # Tenant B writes its own binding for the same actor_id.
+    client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "read_only"},
+        headers=owner_b,
+    )
+
+    listed_a = client.get("/api/v1/admin/roles", headers=owner_a)
+    assert listed_a.status_code == 200
+    assert {b["role"] for b in listed_a.json()["role_bindings"]} == {"reviewer"}
+
+    # BOLA: tenant A deleting actor-1 must not affect tenant B's binding.
+    removed = client.delete("/api/v1/admin/roles/actor-1", headers=owner_a)
+    assert removed.status_code == 200
+    assert removed.json()["removed"] is True
+
+    listed_b = client.get("/api/v1/admin/roles", headers=owner_b)
+    assert {b["role"] for b in listed_b.json()["role_bindings"]} == {"read_only"}
+
+
+def test_api_v1_admin_roles_fail_closed_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-admin-denied.db"))))
+    # admin role lacks admin:manage by design.
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "admin"}
+
+    denied_list = client.get("/api/v1/admin/roles", headers=headers)
+    assert denied_list.status_code == 403
+    assert denied_list.json()["detail"]["code"] == "permission_denied"
+
+    denied_set = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "reviewer"},
+        headers=headers,
+    )
+    assert denied_set.status_code == 403
+
+
+def test_api_v1_admin_roles_rejects_unknown_role(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-admin-badrole.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "owner"}
+
+    response = client.post(
+        "/api/v1/admin/roles",
+        json={"actor_id": "actor-1", "role": "not-a-role"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "bad_role_binding"
+
+
+def test_api_v1_sync_is_permission_gated(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-sync.db"))))
+
+    # read_only lacks audit:run; sync is mutating and must fail closed.
+    denied = client.post(
+        "/api/v1/sync",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+
+    # compliance_manager carries audit:run; sync succeeds and returns counts.
+    allowed = client.post(
+        "/api/v1/sync",
+        headers={"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"},
+    )
+    assert allowed.status_code == 200
+    assert "users" in allowed.json()["synced"]
+
+
+def test_api_v1_plural_resource_aliases_reachable(monkeypatch, tmp_path) -> None:
+    """Plural paths (plan §8.2) and the legacy singular aliases both work."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COMPLYOS_CSV_DIR", raising=False)
+    monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-plural.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    # /audits (canonical plural) and /audit (deprecated alias) both work.
+    plural_audit = client.get("/api/v1/audits", headers=headers)
+    assert plural_audit.status_code == 200
+    assert "gaps_found" in plural_audit.json()
+    legacy_audit = client.get("/api/v1/audit", headers=headers)
+    assert legacy_audit.status_code == 200
+
+    # /learners/{id}/status and /users/{id}/status both work.
+    plural_learner = client.get("/api/v1/learners/unknown-user/status", headers=headers)
+    assert plural_learner.status_code == 200
+    legacy_learner = client.get("/api/v1/users/unknown-user/status", headers=headers)
+    assert legacy_learner.status_code == 200
+
+    # /remediations and /remediate both work.
+    plural_remediate = client.post("/api/v1/remediations", json={}, headers=headers)
+    assert plural_remediate.status_code == 200
+    legacy_remediate = client.post("/api/v1/remediate", json={}, headers=headers)
+    assert legacy_remediate.status_code == 200

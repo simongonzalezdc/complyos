@@ -15,6 +15,8 @@ SOURCE_INTEL_HARDENING_MIGRATION = "20260612_source_intel_hardening"
 NOTIFICATION_OUTBOX_MIGRATION = "20260613_notification_outbox_hooks"
 NOTIFICATION_PREFERENCES_MIGRATION = "20260613_notification_preferences"
 INBOUND_WEBHOOKS_MIGRATION = "20260613_inbound_webhook_events"
+PERFORMANCE_INDEXES_MIGRATION = "20260614_performance_indexes"
+TENANT_SCOPING_INDEXES_MIGRATION = "20260615_tenant_scoping_indexes"
 
 
 class SchemaMigration(TypedDict):
@@ -143,6 +145,62 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
                 received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
+        ],
+    },
+    {
+        "migration_id": PERFORMANCE_INDEXES_MIGRATION,
+        "description": "Indexes on hot tenant/subject/foreign-key/status filter columns",
+        "statements": [
+            # Foreign-key columns scanned on every DSR export/delete and audit run.
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_user_id ON enrollments (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_course_id ON enrollments (course_id)",
+            "CREATE INDEX IF NOT EXISTS ix_learning_records_user_id "
+            "ON learning_records (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_learning_records_course_id "
+            "ON learning_records (course_id)",
+            # Tenant-scoped append-only audit tables (grow without bound until retention).
+            "CREATE INDEX IF NOT EXISTS ix_evidence_ledger_tenant_id "
+            "ON evidence_ledger (tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_action_logs_tenant_id "
+            "ON audit_action_logs (tenant_id)",
+            # Import lifecycle lookups by batch and tenant/status.
+            "CREATE INDEX IF NOT EXISTS ix_import_batches_tenant_status "
+            "ON import_batches (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_import_rows_batch_id ON import_rows (batch_id)",
+            "CREATE INDEX IF NOT EXISTS ix_import_decisions_batch_id "
+            "ON import_decisions (batch_id)",
+            # AI proposals and privacy program retention scans.
+            "CREATE INDEX IF NOT EXISTS ix_ai_proposals_tenant_status "
+            "ON ai_proposals (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_privacy_requests_tenant_status "
+            "ON privacy_requests (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_legal_holds_tenant_status "
+            "ON legal_holds (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_legal_holds_subject_id ON legal_holds (subject_id)",
+            # Notification outbox drain and source-intel review queues.
+            "CREATE INDEX IF NOT EXISTS ix_notification_events_tenant_status "
+            "ON notification_events (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_notification_deliveries_tenant_status "
+            "ON notification_deliveries (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_notification_deliveries_event_id "
+            "ON notification_deliveries (event_id)",
+            "CREATE INDEX IF NOT EXISTS ix_source_intel_proposals_tenant_id "
+            "ON source_intel_proposals (tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_source_intel_proposals_run_id "
+            "ON source_intel_proposals (run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_inbound_webhook_events_tenant_id "
+            "ON inbound_webhook_events (tenant_id)",
+        ],
+    },
+    {
+        "migration_id": TENANT_SCOPING_INDEXES_MIGRATION,
+        "description": "Tenant-scoped indexes for DSR export/delete on PII tables",
+        "statements": [
+            "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users (tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_learning_records_user_tenant "
+            "ON learning_records (user_id, tenant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_user_tenant "
+            "ON enrollments (user_id, tenant_id)",
         ],
     },
 )

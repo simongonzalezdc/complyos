@@ -18,18 +18,15 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from complyos.connectors.csv_file import (
-    ENROLLMENT_ALIASES,
-    STATUS_SYNONYMS,
-    _normalize_header,
-    _parse_date,
-    _parse_datetime,
-    _parse_float,
-    _remap_row,
-    _to_learning_status,
-)
+from complyos.connectors.normalization import ENROLLMENT_ALIASES, STATUS_SYNONYMS
+from complyos.connectors.normalization import normalize_header as _normalize_header
+from complyos.connectors.normalization import parse_date as _parse_date
+from complyos.connectors.normalization import parse_datetime as _parse_datetime
+from complyos.connectors.normalization import parse_float as _parse_float
+from complyos.connectors.normalization import remap_row as _remap_row
+from complyos.connectors.normalization import to_learning_status as _to_learning_status
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import LearningRecord, LearningRecordStatus
+from complyos.models.domain import ImportRowStatus, LearningRecord, LearningRecordStatus
 from complyos.services.context import (
     PERM_IMPORT_DECIDE,
     PERM_IMPORT_PREVIEW,
@@ -41,18 +38,16 @@ from complyos.services.context import (
 FORMULA_PREFIXES = ("=", "+", "-", "@")
 TENANT_ALIASES = {"tenant_id": ["tenantid", "tenant", "orgid", "organizationid"]}
 TRACK_ALIASES = {"track": ["track", "profile", "context"]}
-IMPORT_BATCH_STATES = {
-    "DRAFT",
-    "PREVIEWED",
-    "QUARANTINED",
-    "PROMOTION_PENDING",
-    "PROMOTED",
-    "REJECTED",
-    "EXPIRED",
-    "PROMOTION_FAILED",
+# Row states derive from the ImportRowStatus enum so the vocabulary has one
+# source of truth. (The former IMPORT_BATCH_STATES set was decorative — never
+# referenced and already drifted from the states the service actually wrote —
+# so it was removed; ImportBatchStatus in the domain model is the canonical list.)
+ROW_STATES = {status.value for status in ImportRowStatus}
+BLOCKING_ROW_STATES = {
+    ImportRowStatus.PENDING.value,
+    ImportRowStatus.REJECTED.value,
+    ImportRowStatus.NEEDS_DECISION.value,
 }
-ROW_STATES = {"PENDING", "VALID", "REJECTED", "NEEDS_DECISION", "PROMOTED", "IGNORED"}
-BLOCKING_ROW_STATES = {"REJECTED", "NEEDS_DECISION", "PENDING"}
 
 
 class ImportIssue(BaseModel):
@@ -227,6 +222,15 @@ class ImportService:
         decision_payload: dict[str, Any] | None = None,
     ) -> ImportDecisionResult:
         require_permission(context, PERM_IMPORT_DECIDE)
+        # Tenant ownership gate — mirror promote(): the per-operation
+        # batch.tenant_id == context.tenant_id check IS the isolation boundary
+        # (the repository point-lookups are by batch_id only). Without this a
+        # context scoped to tenant A could flip tenant B's import-row status.
+        batch = self.repository.get_import_batch(batch_id)
+        if batch is None:
+            raise ValueError(f"unknown import batch: {batch_id}")
+        if batch["tenant_id"] != context.tenant_id:
+            raise PermissionError("cannot decide on import batch for another tenant")
         rows = self.repository.list_import_rows(batch_id)
         row = next((item for item in rows if item["id"] == row_id), None)
         if row is None:
@@ -301,6 +305,36 @@ class ImportService:
             )
 
         rows = self.repository.list_import_rows(batch_id)
+        if not rows:
+            # An empty/partial load (PARTIAL_LOAD at preview) has no rows to gate,
+            # so the per-row blocking check below would let it "promote" zero
+            # records as complete. Plan §6.4/§6.5: a partial load may not be marked
+            # complete without an explicit operator decision. Fail closed instead.
+            self.repository.update_import_batch_status(batch_id, "QUARANTINED")
+            self.repository.save_action_log(
+                tenant_id=context.tenant_id,
+                actor_id=context.actor_id,
+                surface=context.surface,
+                action="import.promote",
+                object_type="import_batch",
+                object_id=batch_id,
+                result="blocked",
+                request_id=context.request_id,
+                metadata={"reason": "partial_load_no_rows"},
+            )
+            return ImportPromotionResult(
+                batch_id=batch_id,
+                status="QUARANTINED",
+                promoted_rows=0,
+                blocked_rows=0,
+                issues=[
+                    ImportIssue(
+                        code="PARTIAL_LOAD",
+                        severity="blocker",
+                        message="import has no data rows; cannot promote a partial load",
+                    )
+                ],
+            )
         blocking_rows = [row for row in rows if row["validation_status"] in BLOCKING_ROW_STATES]
         if blocking_rows:
             self.repository.update_import_batch_status(batch_id, "QUARANTINED")
@@ -440,8 +474,16 @@ class ImportService:
                 )
             )
 
+        # File-scoped warnings still gate every row to NEEDS_DECISION, but are
+        # reported once at the batch level rather than copied into each row
+        # (which made the stored evidence and preview O(rows x file_issues) noisy
+        # and mislabeled each row as owning a file-level problem).
+        file_decision_warning = any(
+            issue.code in {"UNEXPECTED_COLUMN", "STALE_EXPORT"} for issue in global_issues
+        )
+
         for index, raw_row in enumerate(raw_rows, start=2):
-            row_issues = list(global_issues)
+            row_issues: list[ImportIssue] = []
             mapped = _remap_row(raw_row, ENROLLMENT_ALIASES)
             tenant_map = _remap_row(raw_row, TENANT_ALIASES)
             track_map = _remap_row(raw_row, TRACK_ALIASES)
@@ -507,10 +549,11 @@ class ImportService:
             else:
                 seen_keys.add(duplicate_key)
 
+            row_issues.extend(self._backdated_date_issues(mapped, index))
+
             has_blocker = any(issue.severity == "blocker" for issue in row_issues)
-            has_decision_warning = any(
-                issue.code in {"UNEXPECTED_COLUMN", "DUPLICATE_ROW", "STALE_EXPORT"}
-                for issue in row_issues
+            has_decision_warning = file_decision_warning or any(
+                issue.code in {"DUPLICATE_ROW", "BACKDATED_DATE"} for issue in row_issues
             )
             if has_blocker:
                 status = "REJECTED"
@@ -531,12 +574,53 @@ class ImportService:
                 }
             )
 
-        issues = [
+        # File-global issues are reported once here; per-row issues follow. This
+        # also surfaces file-level issues (e.g. PARTIAL_LOAD) when there are no
+        # data rows, which the previous per-row flatten silently dropped.
+        issues = list(global_issues) + [
             issue
             for row in rows
             for issue in (ImportIssue(**item) for item in row["issues"])
         ]
         return rows, issues, unexpected_columns
+
+    @staticmethod
+    def _backdated_date_issues(mapped: dict[str, Any], row_number: int) -> list[ImportIssue]:
+        """Flag backdated due/expiry dates that could hide a real compliance gap.
+
+        A due date already in the past, or an expiry that precedes the row's own
+        assigned date, is an anomaly: it can mask an open gap as "complete" or
+        "already expired" at import time. We route the row to NEEDS_DECISION
+        (warning, same gating as DUPLICATE_ROW) so a reviewer must accept it
+        explicitly rather than letting it promote silently.
+        """
+        issues: list[ImportIssue] = []
+        today = datetime.now(UTC).date()
+        due_date = _parse_date(mapped.get("due_date"))
+        if due_date is not None and due_date < today:
+            issues.append(
+                ImportIssue(
+                    code="BACKDATED_DATE",
+                    severity="warning",
+                    row_number=row_number,
+                    column="due_date",
+                    message="due date is in the past; reviewer decision required",
+                )
+            )
+        expires_at = _parse_date(mapped.get("expires_at"))
+        assigned = _parse_datetime(mapped.get("assigned_date"))
+        assigned_date = assigned.date() if assigned is not None else None
+        if expires_at is not None and assigned_date is not None and expires_at < assigned_date:
+            issues.append(
+                ImportIssue(
+                    code="BACKDATED_DATE",
+                    severity="warning",
+                    row_number=row_number,
+                    column="expires_at",
+                    message="expiry precedes assignment date; reviewer decision required",
+                )
+            )
+        return issues
 
     @staticmethod
     def _allowed_headers() -> set[str]:

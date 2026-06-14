@@ -7,6 +7,7 @@ import respx
 from httpx import Response
 
 from complyos.notification.outbox import EmailEventSender, WebhookEventSender
+from complyos.notification.signing import sign_payload, verify_signature
 
 
 def _delivery(channel: str = "webhook") -> dict[str, object]:
@@ -42,11 +43,26 @@ async def test_webhook_event_sender_posts_signed_payload_without_exposing_secret
     assert result["channel"] == "webhook"
     request = route.calls[0].request
     body = request.read()
+    timestamp = request.headers["X-ComplyOS-Timestamp"]
+    signature = request.headers["X-ComplyOS-Signature"]
     assert request.headers["X-ComplyOS-Event-Id"] == "event-1"
     assert request.headers["X-ComplyOS-Event-Type"] == "source_intel.proposals_waiting"
-    assert request.headers["X-ComplyOS-Signature"].startswith("sha256=")
     assert b"top-secret" not in body
     assert b'"proposal_count":2' in body
+
+    # Verify the ACTUAL digest, not just the prefix: the receiving end must be
+    # able to recompute and validate the signature over the exact signed bytes.
+    expected = sign_payload("top-secret", timestamp=timestamp, body=body)
+    assert signature == expected
+    assert verify_signature("top-secret", timestamp=timestamp, body=body, signature=signature)
+    # A tampered body must NOT verify against the captured signature.
+    assert not verify_signature(
+        "top-secret", timestamp=timestamp, body=body + b"x", signature=signature
+    )
+    # A wrong secret must NOT verify (guards against signing with unexpected bytes).
+    assert not verify_signature(
+        "wrong-secret", timestamp=timestamp, body=body, signature=signature
+    )
 
 
 @pytest.mark.asyncio

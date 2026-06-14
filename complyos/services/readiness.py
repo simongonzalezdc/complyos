@@ -7,11 +7,26 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from complyos.core.repository import LocalRepository
 from complyos.services.context import PERM_READINESS_READ, ActorContext, require_permission
+
+
+class TenantMetadata(BaseModel):
+    """Data-governance metadata surfaced for a tenant (plan §15 criterion).
+
+    Maps the five buyer/auditor fields the readiness inventory must cover:
+    data region, processing purpose, data categories, retention, subprocessors.
+    """
+
+    data_region: str | None = None
+    processing_purpose: str | None = None
+    data_categories: list[str] = Field(default_factory=list)
+    retention_policy: dict[str, Any] = Field(default_factory=dict)
+    subprocessor_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReadinessControl(BaseModel):
@@ -37,6 +52,7 @@ class ReadinessReport(BaseModel):
     global_regulation_watchlist: list[str]
     forbidden_claims: list[str]
     actor_context: dict[str, str]
+    tenant_metadata: TenantMetadata = Field(default_factory=TenantMetadata)
 
 
 class ReadinessService:
@@ -56,6 +72,9 @@ class ReadinessService:
         summary: dict[str, int] = {}
         for control in controls:
             summary[control.status] = summary.get(control.status, 0) + 1
+        tenant_metadata = TenantMetadata(
+            **self.repository.get_tenant_metadata(context.tenant_id)
+        )
         return ReadinessReport(
             generated_at=datetime.now(UTC),
             tenant_id=context.tenant_id,
@@ -88,6 +107,7 @@ class ReadinessService:
                 "global privacy compliant",
             ],
             actor_context=context.public_dict(),
+            tenant_metadata=tenant_metadata,
         )
 
     def _controls(self, context: ActorContext) -> list[ReadinessControl]:

@@ -2,28 +2,39 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from complyos.api.mcp_server import _get_connector, _get_notifier
+from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.repository import LocalRepository
+from complyos.models.domain import AssignmentRule
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
     ROLE_PERMISSIONS,
     ActorContext,
     AuthorizationError,
     default_local_context,
 )
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.inbound_hooks import InboundHookService, InboundWebhookSignatureError
 from complyos.services.notifications import NotificationOutboxService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
+from complyos.services.role_admin import RoleAdminService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
+from complyos.web.rate_limit import RateLimitExceededError, check_rate_limit
 
 
 class ErrorBody(BaseModel):
@@ -76,6 +87,19 @@ class RetentionRunBody(BaseModel):
     dry_run: bool = True
 
 
+class RemediationRequestBody(BaseModel):
+    department: str | None = None
+    region: str | None = None
+    auto_remind: bool = True
+    auto_enroll: bool = False
+    notify_manager: bool = False
+
+
+class ReportExportRequestBody(BaseModel):
+    department: str | None = None
+    region: str | None = None
+
+
 class SourceIntelDecisionBody(BaseModel):
     state: str
 
@@ -85,6 +109,27 @@ class NotificationPreferenceBody(BaseModel):
     event_type: str = "*"
     enabled: bool = True
     reason: str | None = None
+
+
+class RoleBindingRequestBody(BaseModel):
+    actor_id: str
+    role: str
+    permissions_override: list[str] | None = None
+
+
+class RuleRequestBody(BaseModel):
+    name: str
+    target_criteria: dict[str, object] = Field(default_factory=dict)
+    course_ids: list[str] = Field(default_factory=list)
+    deadline_days: int = 30
+
+    def to_rule(self) -> AssignmentRule:
+        return AssignmentRule(
+            name=self.name,
+            target_criteria=dict(self.target_criteria),
+            course_ids=list(self.course_ids),
+            deadline_days_from_trigger=self.deadline_days,
+        )
 
 
 def _http_error(
@@ -110,17 +155,53 @@ def _permission_error(exc: AuthorizationError, context: ActorContext) -> HTTPExc
 
 
 def _bad_request(code: str, exc: Exception, context: ActorContext) -> HTTPException:
-    return _http_error(
-        code,
-        str(exc),
-        status.HTTP_400_BAD_REQUEST,
-        request_id=context.request_id,
+    """Map a service exception to the right client status.
+
+    A PermissionError (including AuthorizationError) is an authorization failure
+    and must be 403, not 400 — several endpoints catch (PermissionError,
+    ValueError) together, so classifying here keeps the status honest without a
+    separate except clause at every call site. Validation errors stay 400.
+    """
+    status_code = (
+        status.HTTP_403_FORBIDDEN
+        if isinstance(exc, PermissionError)
+        else status.HTTP_400_BAD_REQUEST
     )
+    return _http_error(code, str(exc), status_code, request_id=context.request_id)
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _rate_limit_guard(request: Request) -> None:
+    """Router-level dependency enforcing the in-process mutating-endpoint quota.
+
+    Runs per route so the matched path template is available for keying. On
+    exceed it returns the project's structured 429 plus a Retry-After header.
+    Read-only methods and an unset limit are no-ops (see web.rate_limit).
+    """
+    try:
+        check_rate_limit(request)
+    except RateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=ErrorBody(
+                code="rate_limited",
+                message=f"rate limit of {exc.limit} requests/min exceeded; retry later",
+                details={"limit_per_minute": exc.limit, "retry_after_seconds": exc.retry_after},
+            ).model_dump(),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
 
 
 def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
     repo = repository or LocalRepository()
-    router = APIRouter(prefix="/api/v1", tags=["ComplyOS API v1"])
+    router = APIRouter(
+        prefix="/api/v1",
+        tags=["ComplyOS API v1"],
+        dependencies=[Depends(_rate_limit_guard)],
+    )
 
     async def actor_context(
         authorization: Annotated[str | None, Header()] = None,
@@ -132,17 +213,30 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         expected_token = os.getenv("COMPLYOS_API_TOKEN")
         if expected_token:
             expected_header = f"Bearer {expected_token}"
-            if authorization != expected_header:
+            # Constant-time comparison avoids a token-length/prefix timing side
+            # channel on the only real auth gate for this PII surface.
+            if not hmac.compare_digest(authorization or "", expected_header):
                 raise _http_error(
                     "unauthorized",
                     "valid bearer token required",
                     status.HTTP_401_UNAUTHORIZED,
                 )
             auth_method = "bearer"
-        else:
-            # Local-first/dev mode remains explicit and context-backed. Production
-            # deployments must set COMPLYOS_API_TOKEN or replace this dependency.
+        elif _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"):
+            # Explicit, operator-acknowledged local/dev mode. Header-driven role
+            # and tenant are trusted only because the operator opted in.
             auth_method = "local_dev"
+        else:
+            # Fail closed: never silently honor attacker-controlled X-Actor-Role/
+            # X-Tenant-Id (which can request role=owner of any tenant) on an
+            # unauthenticated surface. Require a bearer token, or an explicit
+            # insecure opt-in for trusted local-only use.
+            raise _http_error(
+                "unauthorized",
+                "API authentication is not configured: set COMPLYOS_API_TOKEN, or "
+                "COMPLYOS_ALLOW_INSECURE_LOCAL=1 for trusted local-only use",
+                status.HTTP_401_UNAUTHORIZED,
+            )
 
         if x_actor_role not in ROLE_PERMISSIONS:
             raise _http_error(
@@ -171,6 +265,202 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             return ReadinessService(repo).check(context).model_dump(mode="json")
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    # ---- Audit/remediation parity with the CLI and MCP surfaces -------------
+    # Plan §8.2/§7 specifies plural resource names (/audits, /learners,
+    # /remediations). Those are the canonical paths; the original singular paths
+    # are kept as deprecated aliases so existing clients keep working.
+    @router.get("/audits")
+    @router.get("/audit")
+    async def audit(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            gaps, ledger = await AuditService(_get_connector(), repo).run_audit(
+                context, department=department, region=region
+            )
+            return shape_gaps(gaps, ledger)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/report")
+    async def report(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            audit_report = await AuditService(_get_connector(), repo).generate_report(
+                context, department=department, region=region
+            )
+            return shape_report(audit_report)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/exports/reports")
+    async def export_report(
+        body: ReportExportRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Remote report export gated at evidence:export. Unlike the CLI/MCP
+        # file-writing export, this returns the rendered report content in the
+        # response body and never writes to arbitrary server disk from a remote
+        # call (plan §8.2). Underprivileged callers fail closed at the service.
+        try:
+            result = await EvidenceService(_get_connector(), repo).render_report(
+                context, department=body.department, region=body.region
+            )
+            return {**result, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/learners/{user_id}/status")
+    @router.get("/users/{user_id}/status")
+    async def user_status(
+        user_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return await AuditService(_get_connector(), repo).get_status(
+                context, user_id=user_id
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/digest")
+    async def digest(
+        department: str | None = None,
+        region: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            result = await AuditService(_get_connector(), repo).get_digest(
+                context, department=department, region=region
+            )
+            return result.model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.get("/connectors")
+    async def list_connectors(
+        profile: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            connectors = ConnectorRegistry(_get_connector()).list(context, profile=profile)
+            return {"connectors": connectors, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_connector_profile", exc, context) from exc
+
+    @router.get("/connectors/health")
+    async def connector_health(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return await ConnectorRegistry(_get_connector()).health(context)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/rules/validate")
+    async def validate_rule(
+        body: RuleRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PolicyRuleService(repo).validate(context, body.to_rule())
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/rules/preview")
+    async def preview_rule(
+        body: RuleRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return PolicyRuleService(repo).preview(context, body.to_rule())
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/remediations")
+    @router.post("/remediate")
+    async def remediate(
+        body: RemediationRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            gaps, actions, ledger = await RemediationService(
+                _get_connector(), notifier=_get_notifier()
+            ).execute(
+                context,
+                department=body.department,
+                region=body.region,
+                auto_remind=body.auto_remind,
+                auto_enroll=body.auto_enroll,
+                notify_manager=body.notify_manager,
+            )
+            return shape_remediation(gaps, actions, ledger)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/sync")
+    async def sync(
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            result = await AuditService(_get_connector(), repo).sync(context)
+            return {"synced": result, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("sync_failed", exc, context) from exc
+
+    @router.get("/admin/roles")
+    async def list_role_bindings(
+        actor_id: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return {
+                "role_bindings": RoleAdminService(repo).list_role_bindings(
+                    context, actor_id=actor_id
+                ),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/admin/roles")
+    async def set_role_binding(
+        body: RoleBindingRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return RoleAdminService(repo).set_role_binding(
+                context,
+                actor_id=body.actor_id,
+                role=body.role,
+                permissions_override=body.permissions_override,
+            )
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_role_binding", exc, context) from exc
+
+    @router.delete("/admin/roles/{actor_id}")
+    async def remove_role_binding(
+        actor_id: str,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return RoleAdminService(repo).remove_role_binding(context, actor_id=actor_id)
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("role_binding_not_found", exc, context) from exc
 
     @router.post("/imports/preview")
     async def preview_import(
@@ -203,7 +493,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             ).model_dump(mode="json")
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
-        except ValueError as exc:
+        except (PermissionError, ValueError) as exc:
             raise _bad_request("bad_import_decision", exc, context) from exc
 
     @router.post("/imports/{batch_id}/promote")
@@ -223,17 +513,15 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
         limit: int = 50,
         context: ActorContext = Depends(actor_context),  # noqa: B008
     ) -> dict[str, object]:
-        if not context.has_permission("evidence:read"):
-            raise _http_error(
-                "permission_denied",
-                "evidence:read required",
-                status.HTTP_403_FORBIDDEN,
-                request_id=context.request_id,
-            )
-        return {
-            "items": repo.list_evidence_ledger(tenant_id=context.tenant_id, limit=limit),
-            "actor_context": context.public_dict(),
-        }
+        try:
+            return {
+                "items": EvidenceService(_get_connector(), repo).list_ledger(
+                    context, limit=limit
+                ),
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
 
     @router.get("/security/evidence")
     async def collect_security_evidence(
@@ -303,6 +591,7 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
                 body=await request.body(),
                 headers=request.headers,
                 signing_secret=os.getenv("COMPLYOS_INBOUND_WEBHOOK_SECRET"),
+                require_signature=not _truthy_env("COMPLYOS_ALLOW_INSECURE_LOCAL"),
             )
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc

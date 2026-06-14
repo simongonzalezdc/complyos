@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from complyos.core.repository import LocalRepository
+from complyos.notification.signing import verify_signature
 from complyos.services.context import (
     PERM_NOTIFICATIONS_MANAGE,
     ActorContext,
     require_permission,
 )
 from complyos.services.notifications import _payload_hash, _redact_payload
+
+# Replay window: a captured, validly-signed request older/newer than this is
+# rejected even though its HMAC still matches the timestamp it was signed with.
+INBOUND_SIGNATURE_MAX_AGE_SECONDS = 300
 
 
 class InboundWebhookSignatureError(PermissionError):
@@ -37,11 +42,17 @@ class InboundHookService:
         body: bytes,
         headers: Mapping[str, str],
         signing_secret: str | None = None,
+        require_signature: bool = True,
     ) -> dict[str, Any]:
         """Validate optional HMAC signature, redact payload, and store receipt."""
         require_permission(context, PERM_NOTIFICATIONS_MANAGE)
         normalized_source = _normalize_source(source)
-        signature_valid = _verify_signature(signing_secret, headers=headers, body=body)
+        signature_valid = _verify_signature(
+            signing_secret,
+            headers=headers,
+            body=body,
+            require_signature=require_signature,
+        )
         payload = _parse_body(body)
         event_type = str(payload.get("event_type") or payload.get("type") or "inbound.received")
         object_type = str(payload.get("object_type") or "inbound_event")
@@ -99,23 +110,38 @@ def _verify_signature(
     *,
     headers: Mapping[str, str],
     body: bytes,
+    require_signature: bool = True,
 ) -> bool:
     if not signing_secret:
+        # Fail closed by default: a missing secret must not silently downgrade
+        # this PII-ingestion surface to "accept anything". Callers opt into
+        # unsigned acceptance explicitly (e.g. trusted local-only use).
+        if require_signature:
+            raise InboundWebhookSignatureError(
+                "inbound webhook signing secret is not configured"
+            )
         return False
     timestamp = headers.get("x-complyos-timestamp") or headers.get("X-ComplyOS-Timestamp")
     signature = headers.get("x-complyos-signature") or headers.get("X-ComplyOS-Signature")
     if not timestamp or not signature:
         raise InboundWebhookSignatureError("missing inbound webhook signature")
-    expected = _signature(signing_secret, timestamp=timestamp, body=body)
-    if not hmac.compare_digest(expected, signature):
+    _require_fresh_timestamp(timestamp)
+    if not verify_signature(signing_secret, timestamp=timestamp, body=body, signature=signature):
         raise InboundWebhookSignatureError("invalid inbound webhook signature")
     return True
 
 
-def _signature(secret: str, *, timestamp: str, body: bytes) -> str:
-    signed = timestamp.encode("utf-8") + b"." + body
-    digest = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
+def _require_fresh_timestamp(timestamp: str) -> None:
+    """Reject signed requests outside the replay window (anti-replay defense)."""
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError as exc:
+        raise InboundWebhookSignatureError("invalid inbound webhook timestamp") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    age_seconds = abs((datetime.now(UTC) - parsed).total_seconds())
+    if age_seconds > INBOUND_SIGNATURE_MAX_AGE_SECONDS:
+        raise InboundWebhookSignatureError("inbound webhook timestamp outside tolerance window")
 
 
 def _parse_body(body: bytes) -> dict[str, Any]:

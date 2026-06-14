@@ -72,7 +72,6 @@ class TestDBUser:
         assert retrieved is not None
         assert retrieved.first_name == "Alice"
         assert retrieved.department == "Engineering"
-        assert retrieved.enrollments == []
 
         session.close()
 
@@ -126,7 +125,13 @@ class TestDBCourse:
 
 
 class TestDBEnrollment:
-    def test_enrollment_relationships(self, tmp_path):
+    def test_enrollment_persists_and_resolves_parents_by_query(self, tmp_path):
+        """Parents are resolved by explicit query, not ORM relationship navigation.
+
+        ``user_id``/``course_id`` are source-system identifiers rather than
+        enforced foreign keys, so the application looks up the learner/item by
+        id when it needs them instead of traversing a relationship attribute.
+        """
         sessionmaker = init_db(str(tmp_path / "test.db"))
         session = sessionmaker()
 
@@ -163,49 +168,49 @@ class TestDBEnrollment:
         session.commit()
 
         retrieved = session.query(DBEnrollment).filter_by(id="e1").first()
-        assert retrieved.user.first_name == "Alice"
-        assert retrieved.course.title == "Information Security Basics"
+        assert retrieved is not None
+        assert retrieved.user_id == "u1"
+        assert retrieved.course_id == "c1"
         assert retrieved.completion_percentage == 50.0
         assert retrieved.score == 85.5
+
+        parent_user = session.query(DBUser).filter_by(id=retrieved.user_id).first()
+        parent_course = session.query(DBCourse).filter_by(id=retrieved.course_id).first()
+        assert parent_user is not None and parent_user.first_name == "Alice"
+        assert parent_course is not None and parent_course.title == "Information Security Basics"
         session.close()
 
-    def test_cascade_delete(self, tmp_path):
+    def test_records_can_be_stored_without_parent_rows(self, tmp_path):
+        """Learning records/enrollments may reference subjects/items not synced locally.
+
+        ``LearningRecord`` is a normalized cross-LMS *source* record: CSV imports
+        promote them standalone, before (or without) the corresponding learner/
+        item ever being synced into ``users``/``courses``. This test locks in
+        that intentional model so a future re-introduction of a hard foreign key
+        (which would break standalone import) fails loudly here.
+        """
         sessionmaker = init_db(str(tmp_path / "test.db"))
         session = sessionmaker()
 
-        user = DBUser(
-            id="u1",
-            employee_id="E001",
-            email="alice@example.com",
-            first_name="Alice",
-            last_name="Smith",
-            department="Engineering",
-            region="US",
-            hire_date=date(2023, 1, 15),
-        )
-        course = DBCourse(
-            id="c1",
-            code="SEC-101",
-            title="Security",
-            mandatory=True,
-        )
-        session.add_all([user, course])
-        session.commit()
-
+        # No DBUser / DBCourse rows are created.
         enrollment = DBEnrollment(
-            id="e1",
-            user_id="u1",
-            course_id="c1",
+            id="e-orphan",
+            user_id="u-unsynced",
+            course_id="c-unsynced",
             status="completed",
         )
-        session.add(enrollment)
+        record = DBLearningRecord(
+            id="lr-orphan",
+            user_id="u-unsynced",
+            course_id="c-unsynced",
+            source_system="csv",
+            status="completed",
+        )
+        session.add_all([enrollment, record])
         session.commit()
 
-        # Deleting user should cascade to enrollments
-        session.delete(user)
-        session.commit()
-
-        assert session.query(DBEnrollment).filter_by(id="e1").first() is None
+        assert session.query(DBEnrollment).filter_by(id="e-orphan").first() is not None
+        assert session.query(DBLearningRecord).filter_by(id="lr-orphan").first() is not None
         session.close()
 
 

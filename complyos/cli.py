@@ -13,33 +13,35 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from complyos.api.mcp_server import (
-    _get_connector,
-    audit_compliance_gaps,
-    check_connector_health,
-    generate_audit_report,
-    get_user_compliance_status,
-)
+from complyos.api.mcp_server import _get_connector
 from complyos.config import ComplyOSConfig
+from complyos.core.audit_views import shape_gaps, shape_report
 from complyos.core.release import build_deployment_checklist
-from complyos.core.remediation import RemediationEngine
-from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
-from complyos.core.rules import AssignmentRuleEngine
 from complyos.core.time import utc_now
 from complyos.microlearning import MicrolearningAdapter
 from complyos.models.domain import AssignmentRule
 from complyos.notification.outbox import EmailEventSender, WebhookEventSender
-from complyos.notification.sender import NotificationSender
+from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
-from complyos.services.context import ROLE_PERMISSIONS, ActorContext, default_local_context
+from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
+from complyos.services.context import (
+    ROLE_PERMISSIONS,
+    ActorContext,
+    default_local_context,
+)
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.notifications import NotificationOutboxService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
+from complyos.services.role_admin import RoleAdminService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
@@ -64,6 +66,10 @@ source_intel_app = typer.Typer(
     help="No-paid source monitoring and review queue",
 )
 admin_app = typer.Typer(name="admin", help="Administrative inspection commands")
+admin_role_bindings_app = typer.Typer(
+    name="role-bindings",
+    help="Manage tenant-scoped role bindings",
+)
 governance_app = typer.Typer(name="governance", help="AI, HR, and school governance packets")
 privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and legal holds")
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
@@ -82,23 +88,7 @@ def _print_json(data: object) -> None:
 
 def _get_notifier() -> NotificationSender | None:
     """Build a NotificationSender from environment or return None."""
-    import os
-
-    host = os.getenv("COMPLYOS_SMTP_HOST")
-    port = int(os.getenv("COMPLYOS_SMTP_PORT", "587"))
-    username = os.getenv("COMPLYOS_SMTP_USERNAME")
-    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
-    from_addr = os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com")
-
-    if host and username and password:
-        return NotificationSender(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            from_address=from_addr,
-        )
-    return None
+    return build_notifier_from_env()
 
 
 def _get_webhook_notifier() -> WebhookNotifier | None:
@@ -143,7 +133,14 @@ def audit(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Audit compliance training gaps."""
-    result = asyncio.run(audit_compliance_gaps(department=department, region=region))
+
+    async def _audit():
+        gaps, ledger = await AuditService(_get_connector()).run_audit(
+            _local_cli_context(), department=department, region=region
+        )
+        return shape_gaps(gaps, ledger)
+
+    result = asyncio.run(_audit())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -179,7 +176,14 @@ def report(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Generate a structured audit report."""
-    result = asyncio.run(generate_audit_report(department=department, region=region))
+
+    async def _report():
+        report_model = await AuditService(_get_connector()).generate_report(
+            _local_cli_context(), department=department, region=region
+        )
+        return shape_report(report_model)
+
+    result = asyncio.run(_report())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -213,7 +217,13 @@ def status(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Get compliance status for a single user."""
-    result = asyncio.run(get_user_compliance_status(user_id))
+
+    async def _status():
+        return await AuditService(_get_connector()).get_status(
+            _local_cli_context(), user_id=user_id
+        )
+
+    result = asyncio.run(_status())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -255,11 +265,14 @@ def digest(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Show what changed since the last audit: new gaps, resolved gaps, trend."""
-    from complyos.api.mcp_server import generate_compliance_digest
 
-    result = asyncio.run(
-        generate_compliance_digest(department=department, region=region, db_path=db_path)
-    )
+    async def _digest():
+        digest_model = await AuditService(_get_connector(), LocalRepository(db_path)).get_digest(
+            _local_cli_context(), department=department, region=region
+        )
+        return digest_model.model_dump(mode="json")
+
+    result = asyncio.run(_digest())
 
     if json_output:
         console.print(json.dumps(result, indent=2, default=str))
@@ -316,7 +329,9 @@ def digest(
 @app.command()
 def health():
     """Check LMS connector health."""
-    result = asyncio.run(check_connector_health())
+    result = asyncio.run(
+        ConnectorRegistry(_get_connector()).health(_local_cli_context())
+    )
 
     status_color = "green" if result["status"] == "healthy" else "red"
     console.print(f"[bold]Connector:[/bold] {result['connector']}")
@@ -362,16 +377,14 @@ def connectors(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Show the connector capability matrix."""
-    from complyos.connectors.capabilities import list_connector_capabilities
-
     try:
-        items = list_connector_capabilities(profile=profile)
+        items = ConnectorRegistry(_get_connector()).list(_local_cli_context(), profile=profile)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
     if json_output:
-        console.print(json.dumps([item.to_dict() for item in items], indent=2))
+        console.print(json.dumps(items, indent=2))
         return
 
     table = Table(title="ComplyOS Connector Matrix")
@@ -385,13 +398,13 @@ def connectors(
 
     for item in items:
         table.add_row(
-            item.name,
-            item.profile,
-            item.status,
-            item.auth,
-            "yes" if item.supports_learning_records else "no",
-            "yes" if item.supports_due_dates else "no",
-            "yes" if item.supports_expiry else "no",
+            str(item["name"]),
+            str(item["profile"]),
+            str(item["status"]),
+            str(item["auth"]),
+            "yes" if item["supports_learning_records"] else "no",
+            "yes" if item["supports_due_dates"] else "no",
+            "yes" if item["supports_expiry"] else "no",
         )
     console.print(table)
 
@@ -619,8 +632,7 @@ def validate_rule(
         data = json.load(f)
 
     rule = AssignmentRule(**data)
-    engine = AssignmentRuleEngine(LocalRepository(db_path))
-    result = engine.validate_rule(rule)
+    result = PolicyRuleService(LocalRepository(db_path)).validate(_local_cli_context(), rule)
 
     if result["valid"]:
         console.print("[green]Rule is valid[/green]")
@@ -643,8 +655,7 @@ def preview_rule(
         data = json.load(f)
 
     rule = AssignmentRule(**data)
-    engine = AssignmentRuleEngine(LocalRepository(db_path))
-    result = engine.preview_rule(rule)
+    result = PolicyRuleService(LocalRepository(db_path)).preview(_local_cli_context(), rule)
 
     console.print(f"[bold]Rule:[/bold] {result['rule_name']}")
     console.print(
@@ -676,23 +687,19 @@ def remediate(
     notify_manager: bool = typer.Option(False, "--notify-manager/--no-notify-manager"),
 ):
     """Audit and remediate compliance gaps."""
-    from complyos.api.mcp_server import _get_auditor, _get_connector
 
+    # Remediation mutates state (reminders, enrollment, manager notifications), so
+    # RemediationService.execute owns the remediation:execute check on the local
+    # operator context rather than running unattributed.
     async def _remediate():
-        auditor = _get_auditor()
-        gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-        connector = _get_connector()
-        notifier = _get_notifier()
-        engine = RemediationEngine(connector, notifier=notifier)
-        actions = await engine.remediate_gaps(
-            gaps,
+        return await RemediationService(_get_connector(), notifier=_get_notifier()).execute(
+            _local_cli_context(),
+            department=department,
+            region=region,
             auto_remind=auto_remind,
             auto_enroll=auto_enroll,
             notify_manager=notify_manager,
         )
-
-        return gaps, actions, ledger
 
     gaps, actions, ledger = asyncio.run(_remediate())
     console.print(f"[bold]Gaps found:[/bold] {len(gaps)}")
@@ -722,16 +729,17 @@ def export(
     region: str | None = typer.Option(None, "--region", "-r"),
 ):
     """Export an audit report to HTML."""
-    from complyos.api.mcp_server import _get_auditor
 
     async def _export():
-        auditor = _get_auditor()
-        report = await auditor.generate_report(department=department, region=region)
-        return report
+        return await EvidenceService(_get_connector()).export_report(
+            _local_cli_context(),
+            output_path=output,
+            department=department,
+            region=region,
+        )
 
-    report = asyncio.run(_export())
-    path = export_html(report, output)
-    console.print(f"[green]Report exported to {path}[/green]")
+    result = asyncio.run(_export())
+    console.print(f"[green]Report exported to {result['output_path']}[/green]")
 
 
 @app.command()
@@ -1598,6 +1606,85 @@ def admin_roles(json_output: bool = typer.Option(False, "--json", help="Output r
     console.print(table)
 
 
+@admin_role_bindings_app.command("list")
+def admin_role_bindings_list(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    actor_id: str | None = typer.Option(None, "--actor-id", help="Filter by actor ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List tenant-scoped role bindings for the local operator's tenant."""
+    context = _local_cli_context()
+    bindings = RoleAdminService(LocalRepository(db_path)).list_role_bindings(
+        context,
+        actor_id=actor_id,
+    )
+    payload = {"role_bindings": bindings}
+    if json_output:
+        _print_json(payload)
+        return
+
+    table = Table(title="Role Bindings")
+    table.add_column("Actor")
+    table.add_column("Role")
+    table.add_column("Override")
+    table.add_column("Created By")
+    for binding in bindings:
+        override = binding.get("permissions_override") or []
+        table.add_row(
+            str(binding["actor_id"]),
+            str(binding["role"]),
+            ", ".join(override) if override else "—",
+            str(binding.get("created_by") or "—"),
+        )
+    console.print(table)
+
+
+@admin_role_bindings_app.command("set")
+def admin_role_bindings_set(
+    actor_id: str = typer.Argument(..., help="Actor ID to bind"),
+    role: str = typer.Option(..., "--role", help="Role name"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Create or replace a tenant-scoped role binding for an actor."""
+    context = _local_cli_context()
+    try:
+        binding = RoleAdminService(LocalRepository(db_path)).set_role_binding(
+            context,
+            actor_id=actor_id,
+            role=role,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if json_output:
+        _print_json(binding)
+        return
+    console.print(f"[green]Bound actor {binding['actor_id']} to role {binding['role']}[/green]")
+
+
+@admin_role_bindings_app.command("remove")
+def admin_role_bindings_remove(
+    actor_id: str = typer.Argument(..., help="Actor ID to unbind"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Remove a tenant-scoped role binding for an actor."""
+    context = _local_cli_context()
+    try:
+        result = RoleAdminService(LocalRepository(db_path)).remove_role_binding(
+            context,
+            actor_id=actor_id,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if json_output:
+        _print_json(result)
+        return
+    console.print(f"[green]Removed role binding for actor {actor_id}[/green]")
+
+
 @security_app.command("evidence")
 def security_evidence(
     period: str = typer.Option("current", "--period", help="Evidence period label"),
@@ -2037,6 +2124,7 @@ app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(ai_app, name="ai")
 app.add_typer(source_intel_app, name="source-intel")
+admin_app.add_typer(admin_role_bindings_app, name="role-bindings")
 app.add_typer(admin_app, name="admin")
 app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")

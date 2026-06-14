@@ -148,7 +148,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_READINESS_READ,
             PERM_SOURCE_INTEL_READ,
             PERM_SOURCE_INTEL_RUN,
-            PERM_NOTIFICATIONS_MANAGE,
+            # NOTE: notifications:manage intentionally withheld. The proposal-only
+            # MCP default role must not be able to send arbitrary external email
+            # (send_notification) or drain the outbox; raise COMPLYOS_MCP_ROLE for that.
         }
     ),
     "read_only": frozenset(

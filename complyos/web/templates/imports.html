@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Imports · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Imports</p>
+<h1>Import lifecycle</h1>
+<p class="lede">
+  Paste CSV rows to preview them against the import service for tenant
+  <strong>{{ context.tenant_id }}</strong>. Nothing is promoted until a reviewer
+  decides — preview is read-only and never mutates active learning records.
+</p>
+
+<section class="panel" aria-labelledby="paste-heading">
+  <h2 id="paste-heading">Paste CSV</h2>
+  <form method="post" action="{{ shell_url }}/imports/preview">
+    <label for="csv_text">CSV rows (header + data)</label>
+    <textarea id="csv_text" name="csv_text" class="field field-mono" rows="8"
+              aria-describedby="csv-help"
+              placeholder="user_id,course_id,status,completed_at&#10;u1,c1,completed,2026-01-15"></textarea>
+    <p id="csv-help" class="posture-note">
+      The first line is the header row. Unexpected columns are flagged, not
+      silently dropped.
+    </p>
+    <button type="submit" class="btn">Preview</button>
+  </form>
+</section>
+
+{% if preview %}
+<section class="panel" aria-labelledby="preview-heading">
+  <h2 id="preview-heading">Preview — batch <span class="mono">{{ preview.batch_id }}</span></h2>
+
+  <div class="metric-grid">
+    <div class="metric">
+      <div class="metric-label">Status</div>
+      <div class="metric-value metric-value-sm">{{ preview.status }}</div>
+      <p class="metric-note">{{ preview.total_rows }} row{{ '' if preview.total_rows == 1 else 's' }}</p>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Can promote</div>
+      <div class="metric-value metric-value-sm {{ '' if preview.can_promote else 'is-risk' }}">
+        {{ 'Yes' if preview.can_promote else 'No' }}
+      </div>
+      <p class="metric-note">
+        {{ 'All rows are valid' if preview.can_promote else 'Resolve issues first' }}
+      </p>
+    </div>
+  </div>
+
+  <h3 class="subhead">Rows by status</h3>
+  <table class="kv-table" aria-label="Row counts by status">
+    <thead>
+      <tr><th scope="col">Status</th><th scope="col" class="num">Rows</th></tr>
+    </thead>
+    <tbody>
+      {% for status, count in preview.row_counts.items() %}
+      <tr><td>{{ status }}</td><td class="num">{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if preview.unexpected_columns %}
+  <h3 class="subhead">Unexpected columns</h3>
+  <ul class="cell-list">
+    {% for column in preview.unexpected_columns %}
+    <li><span class="mono">{{ column }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h3 class="subhead">Issues</h3>
+  {% if preview.issues %}
+  <table class="data-table" aria-label="Import validation issues">
+    <caption class="table-caption">Validation issues raised during preview.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Code</th>
+        <th scope="col">Severity</th>
+        <th scope="col">Message</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in preview.issues %}
+      <tr>
+        <td><span class="mono">{{ issue.code }}</span></td>
+        <td><span class="tag sev-{{ 'high' if issue.severity == 'error' else 'medium' }}">{{ issue.severity }}</span></td>
+        <td>{{ issue.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="metric-note">No issues — all rows validated cleanly.</p>
+  {% endif %}
+
+  {% if promotion_status %}
+  <p class="posture-note" role="status">
+    Last promotion attempt resolved to <strong>{{ promotion_status }}</strong>.
+    A batch with blocking rows stays <span class="mono">QUARANTINED</span>.
+  </p>
+  {% endif %}
+
+  {% if rows %}
+  <h3 class="subhead">Rows &amp; decisions</h3>
+  <table class="data-table" aria-label="Import rows and decision controls">
+    <caption class="table-caption">
+      Resolve each row that needs a decision before promoting the batch.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Row</th>
+        <th scope="col">Worker</th>
+        <th scope="col">Course</th>
+        <th scope="col">Status</th>
+        <th scope="col">Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="num">{{ row.row_number }}</td>
+        <td><span class="mono">{{ row.user_id }}</span></td>
+        <td><span class="mono">{{ row.course_id }}</span></td>
+        <td>{{ row.validation_status }}</td>
+        <td>
+          <form method="post"
+                action="{{ shell_url }}/imports/{{ preview.batch_id }}/decisions"
+                class="filter-row">
+            <input type="hidden" name="row_id" value="{{ row.id }}" />
+            <label class="visually-hidden" for="decision-{{ row.id }}">
+              Decision for row {{ row.row_number }}
+            </label>
+            <select id="decision-{{ row.id }}" name="decision_type"
+                    class="field field-inline">
+              <option value="accept">Accept</option>
+              <option value="reject">Reject</option>
+              <option value="ignore_row">Ignore</option>
+              <option value="require_manual_review">Needs review</option>
+            </select>
+            <button type="submit" class="btn">Record</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="action-row">
+    <form method="post" action="{{ shell_url }}/imports/{{ preview.batch_id }}/promote">
+      <button type="submit" class="btn" {{ '' if preview.can_promote else 'disabled' }}>
+        Promote batch
+        {% if not preview.can_promote %}<span class="nav-tag">blocked</span>{% endif %}
+      </button>
+    </form>
+  </div>
+  <p class="posture-note">
+    Promotion is fail-closed: a batch with rejected, pending, or needs-decision rows
+    stays quarantined until every row is resolved.
+  </p>
+</section>
+{% endif %}
+{% endblock %}

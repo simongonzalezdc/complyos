@@ -14,26 +14,56 @@ from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
 from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
+from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
 from complyos.core.auditor import ComplianceAuditor
-from complyos.core.remediation import RemediationEngine
-from complyos.core.report_exporter import export_html
 from complyos.core.repository import LocalRepository
-from complyos.core.rules import AssignmentRuleEngine
 from complyos.models.domain import AssignmentRule
-from complyos.notification.sender import NotificationSender
+from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.services.ai_proposals import AIProposalService
-from complyos.services.context import default_local_context
+from complyos.services.audit import AuditService
+from complyos.services.connector_registry import ConnectorRegistry
+from complyos.services.context import (
+    PERM_EVIDENCE_EXPORT,
+    PERM_NOTIFICATIONS_MANAGE,
+    ROLE_PERMISSIONS,
+    ActorContext,
+    default_local_context,
+    require_permission,
+)
+from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
+from complyos.services.remediation import RemediationService
 from complyos.services.security_evidence import SecurityEvidenceService
 
 mcp = FastMCP("complyos")
 
+# Least-privileged default role for an MCP (AI-agent) caller. Proposal-only:
+# can audit, preview, and propose, but NOT delete subjects, approve controller
+# decisions, promote imports, or auto-remediate. Operators raise this explicitly
+# via COMPLYOS_MCP_ROLE when an MCP service account genuinely needs more.
+DEFAULT_MCP_ROLE = "agent_service_account"
+
 # Global auditor instance (initialized on first use)
 _auditor: ComplianceAuditor | None = None
 _auditor_signature: tuple[Any, ...] | None = None
+
+
+def _mcp_context(*, track: str = "workforce") -> ActorContext:
+    """Build the actor context for an MCP call, defaulting to least privilege.
+
+    Routing every MCP tool through one context (instead of self-assigning
+    privacy_admin/owner inline) enforces the "AI is proposal-only" guardrail at
+    the surface boundary: privileged services fail closed unless the operator
+    opts up with COMPLYOS_MCP_ROLE.
+    """
+    role = os.getenv("COMPLYOS_MCP_ROLE", DEFAULT_MCP_ROLE)
+    if role not in ROLE_PERMISSIONS:
+        raise ValueError(f"unknown COMPLYOS_MCP_ROLE: {role!r}")
+    return default_local_context(surface="mcp", track=track, role=role)
 
 
 def _workday_from_config(config: ComplyOSConfig) -> WorkdayConnector:
@@ -99,21 +129,7 @@ def _connector_signature(connector: LMSConnector) -> tuple[Any, ...]:
 
 def _get_notifier() -> NotificationSender | None:
     """Build a NotificationSender from environment or return None."""
-    host = os.getenv("COMPLYOS_SMTP_HOST")
-    port = int(os.getenv("COMPLYOS_SMTP_PORT", "587"))
-    username = os.getenv("COMPLYOS_SMTP_USERNAME")
-    password = os.getenv("COMPLYOS_SMTP_PASSWORD")
-    from_addr = os.getenv("COMPLYOS_SMTP_FROM", "complyos@example.com")
-
-    if host and username and password:
-        return NotificationSender(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            from_address=from_addr,
-        )
-    return None
+    return build_notifier_from_env()
 
 
 def _get_auditor() -> ComplianceAuditor:
@@ -143,30 +159,10 @@ async def audit_compliance_gaps(
     Returns:
         Summary of gaps found with user details and missing courses.
     """
-    auditor = _get_auditor()
-    gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-    return {
-        "gaps_found": len(gaps),
-        "users_affected": len({g.user.id for g in gaps}),
-        "evidence_hash": ledger.output_hash,
-        "gaps": [
-            {
-                "user": {
-                    "id": g.user.id,
-                    "name": g.user.full_name,
-                    "email": g.user.email,
-                    "department": g.user.department,
-                    "region": g.user.region,
-                },
-                "missing_courses": [c.title for c in g.missing_courses],
-                "rule": g.rule_name,
-                "days_overdue": g.days_overdue,
-                "severity": g.severity,
-            }
-            for g in gaps
-        ],
-    }
+    gaps, ledger = await AuditService(_get_connector()).run_audit(
+        _mcp_context(), department=department, region=region
+    )
+    return shape_gaps(gaps, ledger)
 
 
 @mcp.tool()
@@ -179,8 +175,7 @@ async def get_user_compliance_status(user_id: str) -> dict[str, Any]:
     Returns:
         User details, course-by-course status, and compliance summary.
     """
-    auditor = _get_auditor()
-    return await auditor.get_user_status(user_id)
+    return await AuditService(_get_connector()).get_status(_mcp_context(), user_id=user_id)
 
 
 @mcp.tool()
@@ -201,19 +196,10 @@ async def generate_audit_report(
         Structured report with severity breakdown, department analysis,
         top missing courses, and evidence hash.
     """
-    auditor = _get_auditor()
-    report = await auditor.generate_report(department=department, region=region)
-
-    return {
-        "generated_at": report.generated_at.isoformat(),
-        "scope": report.scope,
-        "total_users_audited": report.total_users_audited,
-        "gaps_found": report.gaps_found,
-        "gaps_by_severity": report.gaps_by_severity,
-        "gaps_by_department": report.gaps_by_department,
-        "top_missing_courses": report.top_missing_courses,
-        "evidence_hash": report.evidence_hash,
-    }
+    report = await AuditService(_get_connector()).generate_report(
+        _mcp_context(), department=department, region=region
+    )
+    return shape_report(report)
 
 
 @mcp.tool()
@@ -236,22 +222,59 @@ async def generate_compliance_digest(
         New gaps, resolved gaps, trend (baseline/improving/worsening/flat),
         severity breakdown, and evidence hash.
     """
-    from complyos.core.digest import DigestEngine
-
-    engine = DigestEngine(_get_auditor(), LocalRepository(db_path))
-    digest = await engine.generate(department=department, region=region)
+    digest = await AuditService(_get_connector(), LocalRepository(db_path)).get_digest(
+        _mcp_context(), department=department, region=region
+    )
     return digest.model_dump(mode="json")
 
 
 @mcp.tool()
+async def sync(db_path: str = "complyos.db") -> dict[str, Any]:
+    """Mutating: pull LMS data into the local SQLite cache.
+
+    Mirrors the CLI ``sync`` command and ``POST /api/v1/sync``. This clears and
+    re-populates the local cache, so it is gated at audit:run. The default
+    proposal-only MCP role (agent_service_account) holds audit:run; an unprivileged
+    role is denied at the service boundary.
+
+    Args:
+        db_path: SQLite database path.
+
+    Returns:
+        Connector name and the count of synced users, courses, enrollments,
+        and learning records.
+    """
+    result = await AuditService(_get_connector(), LocalRepository(db_path)).sync(_mcp_context())
+    return dict(result)
+
+
+@mcp.tool()
+async def list_connectors(profile: str | None = None) -> dict[str, Any]:
+    """Read-only: list the connector capability matrix.
+
+    Mirrors the CLI ``connectors`` command and ``GET /api/v1/connectors``. Does
+    not connect to or mutate any LMS; it reports configured connector
+    capabilities only.
+
+    Args:
+        profile: Optional filter (all, workforce, or campus).
+
+    Returns:
+        The connector capability matrix.
+    """
+    # ConnectorRegistry.list owns the connectors:read check.
+    return {"connectors": ConnectorRegistry(_get_connector()).list(_mcp_context(), profile=profile)}
+
+
+@mcp.tool()
 async def check_connector_health() -> dict[str, Any]:
-    """Check the health of the LMS connector.
+    """Read-only: check the health of the LMS connector.
 
     Returns:
         Connector status, authentication state, and any errors.
     """
-    connector = _get_connector()
-    return await connector.health_check()
+    # ConnectorRegistry.health owns the connectors:read check.
+    return await ConnectorRegistry(_get_connector()).health(_mcp_context())
 
 
 @mcp.tool()
@@ -274,15 +297,14 @@ async def validate_assignment_rule(
     Returns:
         Validation result with valid flag, issues list, and preview.
     """
-    repo = LocalRepository()
-    engine = AssignmentRuleEngine(repo)
     rule = AssignmentRule(
         name=name,
         target_criteria=target_criteria,
         course_ids=course_ids,
         deadline_days_from_trigger=deadline_days,
     )
-    return engine.validate_rule(rule)
+    # PolicyRuleService.validate owns the rules:preview check.
+    return PolicyRuleService(LocalRepository()).validate(_mcp_context(), rule)
 
 
 @mcp.tool()
@@ -303,15 +325,14 @@ async def preview_assignment_rule(
     Returns:
         Affected users, missing courses, and total enrollment count.
     """
-    repo = LocalRepository()
-    engine = AssignmentRuleEngine(repo)
     rule = AssignmentRule(
         name=name,
         target_criteria=target_criteria,
         course_ids=course_ids,
         deadline_days_from_trigger=deadline_days,
     )
-    return engine.preview_rule(rule)
+    # PolicyRuleService.preview owns the rules:preview check.
+    return PolicyRuleService(LocalRepository()).preview(_mcp_context(), rule)
 
 
 @mcp.tool()
@@ -336,33 +357,20 @@ async def remediate_compliance_gaps(
     Returns:
         Summary of gaps found and remediation actions taken.
     """
-    auditor = _get_auditor()
-    gaps, ledger = await auditor.audit_gaps(department=department, region=region)
-
-    connector = _get_connector()
-    notifier = _get_notifier()
-    engine = RemediationEngine(connector, notifier=notifier)
-    actions = await engine.remediate_gaps(
-        gaps,
+    # Mutating remediation (reminders, auto-enroll, manager notifications) must
+    # be explicitly authorized; the proposal-only default role cannot execute it.
+    # RemediationService.execute owns the remediation:execute check.
+    gaps, actions, ledger = await RemediationService(
+        _get_connector(), notifier=_get_notifier()
+    ).execute(
+        _mcp_context(),
+        department=department,
+        region=region,
         auto_remind=auto_remind,
         auto_enroll=auto_enroll,
         notify_manager=notify_manager,
     )
-
-    return {
-        "gaps_found": len(gaps),
-        "actions_taken": len(actions),
-        "actions": [
-            {
-                "type": a.action_type,
-                "user_id": a.user_id,
-                "course_id": a.course_id,
-                "status": a.status,
-            }
-            for a in actions
-        ],
-        "evidence_hash": ledger.output_hash,
-    }
+    return shape_remediation(gaps, actions, ledger)
 
 
 @mcp.tool()
@@ -381,15 +389,15 @@ async def export_audit_report_html(
     Returns:
         Path to the generated file and report summary.
     """
-    auditor = _get_auditor()
-    report = await auditor.generate_report(department=department, region=region)
-    path = export_html(report, output_path)
-    return {
-        "output_path": path,
-        "gaps_found": report.gaps_found,
-        "total_users": report.total_users_audited,
-        "evidence_hash": report.evidence_hash,
-    }
+    # Route through EvidenceService.export_report so the evidence:export choke-point
+    # gates this PII export. The default proposal-only MCP role lacks evidence:export
+    # and is therefore denied; raise COMPLYOS_MCP_ROLE to a role that holds it.
+    return await EvidenceService(_get_connector()).export_report(
+        _mcp_context(),
+        output_path=output_path,
+        department=department,
+        region=region,
+    )
 
 
 @mcp.tool()
@@ -414,6 +422,10 @@ async def export_compliance_dashboard(
     Returns:
         Path to the generated dashboard and summary stats.
     """
+    # A dashboard is a PII-bearing report export, so it shares the report choke-point's
+    # evidence:export requirement (not audit:read). The default proposal-only MCP role
+    # is therefore denied; raise COMPLYOS_MCP_ROLE to a role that holds evidence:export.
+    require_permission(_mcp_context(), PERM_EVIDENCE_EXPORT)
     from complyos.core.dashboard import generate_dashboard
 
     auditor = _get_auditor()
@@ -435,7 +447,12 @@ async def send_notification(
     subject: str,
     body: str,
 ) -> dict[str, Any]:
-    """Send a custom email notification.
+    """Mutating side effect: send a custom external email notification.
+
+    Gated at notifications:manage. The default proposal-only MCP role
+    (agent_service_account) lacks notifications:manage and is therefore DENIED,
+    so a connected agent cannot send arbitrary external email; raise
+    COMPLYOS_MCP_ROLE to a role that holds notifications:manage to allow it.
 
     Args:
         to_address: Recipient email address
@@ -445,6 +462,8 @@ async def send_notification(
     Returns:
         Dict with 'sent' boolean and optional 'error' string.
     """
+    # Fail closed before resolving SMTP credentials or sending any email.
+    require_permission(_mcp_context(), PERM_NOTIFICATIONS_MANAGE)
     notifier = _get_notifier()
     if notifier is None:
         return {"sent": False, "error": "SMTP not configured"}
@@ -461,7 +480,7 @@ async def check_readiness(db_path: str = "complyos.db") -> dict[str, Any]:
     Returns:
         Readiness posture, control statuses, global watchlist, and forbidden claim language.
     """
-    context = default_local_context(surface="mcp")
+    context = _mcp_context()
     return ReadinessService(LocalRepository(db_path)).check(context).model_dump(mode="json")
 
 
@@ -486,7 +505,7 @@ async def preview_import_batch(
     Returns:
         Import batch id, validation counts, issues, and can_promote flag.
     """
-    context = default_local_context(surface="mcp", track=profile)
+    context = _mcp_context(track=profile)
     request = ImportPreviewRequest(
         source_system=source_system,
         profile=profile,
@@ -514,7 +533,7 @@ async def promote_import_batch(
     Returns:
         Promotion status, promoted row count, blocked row count, and evidence id.
     """
-    context = default_local_context(surface="mcp", track=profile)
+    context = _mcp_context(track=profile)
     return (
         ImportService(LocalRepository(db_path))
         .promote(context, batch_id)
@@ -545,7 +564,7 @@ async def decide_import_row(
     Returns:
         Decision result and resulting row status.
     """
-    context = default_local_context(surface="mcp", track=profile)
+    context = _mcp_context(track=profile)
     return (
         ImportService(LocalRepository(db_path))
         .decide(
@@ -575,9 +594,11 @@ async def list_evidence_ledger(
     Returns:
         Evidence ledger entries.
     """
+    context = _mcp_context()
+    context = context.model_copy(update={"tenant_id": tenant_id})
     return {
-        "items": LocalRepository(db_path).list_evidence_ledger(
-            tenant_id=tenant_id,
+        "items": EvidenceService(_get_connector(), LocalRepository(db_path)).list_ledger(
+            context,
             limit=limit,
         )
     }
@@ -601,7 +622,7 @@ async def propose_field_mapping(
     Returns:
         Proposal id, suggested mappings, hashes, and provenance.
     """
-    context = default_local_context(surface="mcp")
+    context = _mcp_context()
     return AIProposalService(LocalRepository(db_path)).propose_mapping(
         context,
         headers=headers,
@@ -623,7 +644,7 @@ async def approve_ai_proposal(
     Returns:
         Approved proposal metadata and provenance.
     """
-    context = default_local_context(surface="mcp")
+    context = _mcp_context()
     return (
         AIProposalService(LocalRepository(db_path))
         .approve(context, proposal_id)
@@ -638,7 +659,7 @@ async def collect_security_evidence(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Collect a readiness-only security/SOC2 evidence packet for auditor review."""
-    context = default_local_context(surface="mcp", track=profile, role="compliance_manager")
+    context = _mcp_context(track=profile)
     return (
         SecurityEvidenceService(LocalRepository(db_path))
         .collect_packet(context, period=period)
@@ -653,7 +674,7 @@ async def collect_governance_packet(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Collect a readiness-only AI, HR-boundary, and school governance packet."""
-    context = default_local_context(surface="mcp", track=profile, role="compliance_manager")
+    context = _mcp_context(track=profile)
     return (
         GovernancePacketService(LocalRepository(db_path))
         .collect_packet(context, lane=lane)
@@ -683,7 +704,7 @@ async def create_privacy_request(
     Returns:
         Privacy request metadata.
     """
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .create_request(
@@ -704,7 +725,7 @@ async def export_privacy_subject(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Export subject data for a scoped privacy request."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .export_subject(context, request_id)
@@ -720,7 +741,7 @@ async def approve_privacy_request(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Record controller approval before exporting or deleting subject data."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .approve_request(context, request_id, approval_note=approval_note)
@@ -735,7 +756,7 @@ async def delete_privacy_subject(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Delete subject data unless blocked by an active legal hold."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .delete_subject(context, request_id)
@@ -752,7 +773,7 @@ async def create_legal_hold(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Create an active legal hold that blocks deletion workflows."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .create_legal_hold(context, subject_id=subject_id, scope=scope, reason=reason)
@@ -767,7 +788,7 @@ async def release_legal_hold(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Release a legal hold."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .release_legal_hold(context, hold_id)
@@ -786,7 +807,7 @@ async def configure_privacy_retention(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Configure tenant retention settings for privacy program evidence."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .configure_retention_policy(
@@ -808,7 +829,7 @@ async def run_privacy_retention(
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
     """Run retention cleanup for closed privacy program artifacts."""
-    context = default_local_context(surface="mcp", track=profile, role="privacy_admin")
+    context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .run_retention_cleanup(context, dry_run=dry_run)

@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+from html import escape as _html_escape
 from typing import Any
 
 from complyos.models.domain import AuditReport
+
+# Spreadsheet apps (Excel/Sheets/Numbers) treat a cell whose text begins with
+# any of these as a live formula. A report that round-trips through CSV/clipboard
+# must neutralize them so attacker-controlled learner/source fields cannot run.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: object) -> str:
+    """Escape a user/source-derived field for inclusion in exported output.
+
+    Neutralizes spreadsheet formula injection (prefixes the value with a single
+    quote so Excel/Sheets treat it as text) and HTML-escapes it so it cannot
+    inject markup/script into the rendered report. Applied to every field that
+    originates from LMS/import data rather than from ComplyOS itself.
+    """
+    text = "" if value is None else str(value)
+    if text and text[0] in _FORMULA_PREFIXES:
+        text = "'" + text
+    return _html_escape(text, quote=True)
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -162,14 +182,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-def export_html(report: AuditReport, output_path: str = "report.html") -> str:
-    """Export an AuditReport to a styled HTML file.
+def render_html(report: AuditReport) -> str:
+    """Render an AuditReport to a styled HTML string (no disk write).
 
-    Returns the path to the generated file.
+    This is the in-memory half of the export so a remote surface (API) can
+    return report content in the response body without writing to server disk,
+    while file-writing surfaces (CLI/MCP) reuse it via ``export_html``.
     """
     severity_counts = report.gaps_by_severity
     dept_rows = "\n".join(
-        f"<tr><td>{dept}</td><td>{count}</td></tr>"
+        f"<tr><td>{_safe_cell(dept)}</td><td>{int(count)}</td></tr>"
         for dept, count in report.gaps_by_department.items()
     )
     if not dept_rows:
@@ -181,9 +203,9 @@ def export_html(report: AuditReport, output_path: str = "report.html") -> str:
     if not gap_rows:
         gap_rows = '<tr><td colspan="5">No gaps found</td></tr>'
 
-    html = HTML_TEMPLATE.format(
+    return HTML_TEMPLATE.format(
         generated_at=report.generated_at.isoformat(),
-        scope=report.scope or "all",
+        scope=_safe_cell(report.scope or "all"),
         total_users=report.total_users_audited,
         gaps_found=report.gaps_found,
         critical_count=severity_counts.get("critical", 0),
@@ -195,6 +217,14 @@ def export_html(report: AuditReport, output_path: str = "report.html") -> str:
         evidence_hash=report.evidence_hash,
     )
 
+
+def export_html(report: AuditReport, output_path: str = "report.html") -> str:
+    """Export an AuditReport to a styled HTML file.
+
+    Returns the path to the generated file.
+    """
+    html = render_html(report)
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
 
@@ -203,15 +233,17 @@ def export_html(report: AuditReport, output_path: str = "report.html") -> str:
 
 def _gap_row(gap: Any) -> str:
     severity = gap.severity
-    badge_class = f"badge-{severity}"
-    courses = ", ".join(c.title for c in gap.missing_courses)
-    overdue = str(gap.days_overdue) if gap.days_overdue else "—"
+    # severity drives a CSS class, so it is escaped both as the class token and
+    # as visible text to keep an unexpected value from breaking out of the tag.
+    badge_class = f"badge-{_safe_cell(severity)}"
+    courses = ", ".join(_safe_cell(c.title) for c in gap.missing_courses)
+    overdue = str(int(gap.days_overdue)) if gap.days_overdue else "—"
     return (
         f"<tr>"
-        f"<td>{gap.user.first_name} {gap.user.last_name}</td>"
-        f"<td>{gap.user.department}</td>"
+        f"<td>{_safe_cell(gap.user.first_name)} {_safe_cell(gap.user.last_name)}</td>"
+        f"<td>{_safe_cell(gap.user.department)}</td>"
         f"<td>{courses}</td>"
-        f'<td><span class="badge {badge_class}">{severity}</span></td>'
+        f'<td><span class="badge {badge_class}">{_safe_cell(severity)}</span></td>'
         f"<td>{overdue}</td>"
         f"</tr>"
     )

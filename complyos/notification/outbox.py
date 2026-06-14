@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
+
+from complyos.notification.signing import sign_payload
 
 
 class WebhookEventSender:
@@ -50,7 +50,7 @@ class WebhookEventSender:
             "Idempotency-Key": str(delivery["id"]),
         }
         if self.signing_secret:
-            headers["X-ComplyOS-Signature"] = _signature(
+            headers["X-ComplyOS-Signature"] = sign_payload(
                 self.signing_secret,
                 timestamp=timestamp,
                 body=body,
@@ -158,12 +158,6 @@ def _event_body(event: dict[str, Any]) -> bytes:
         "payload_hash": event["payload_hash"],
     }
     return json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")
-
-
-def _signature(secret: str, *, timestamp: str, body: bytes) -> str:
-    signed = timestamp.encode("utf-8") + b"." + body
-    digest = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
 
 
 def _email_recipients(payload: dict[str, Any], default_recipients: list[str]) -> list[str]:

@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import LearningRecord, LearningRecordStatus, User
+from complyos.models.domain import LearningRecord, LearningRecordStatus, PrivacyRequest, User
 from complyos.services.context import default_local_context
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.privacy import PrivacyProgramService
@@ -91,6 +91,37 @@ def test_privacy_request_export_delete_and_legal_hold_flow(tmp_path) -> None:
     assert repo.get_user("u-privacy") is None
 
 
+def test_privacy_request_controller_approval_gate() -> None:
+    """The approval gate is a typed predicate on the model, not a dict lookup."""
+    base = {
+        "id": "r1",
+        "tenant_id": "t",
+        "subject_id": "s",
+        "request_type": "deletion",
+        "status": "PENDING_CONTROLLER_APPROVAL",
+        "opened_by": "op",
+        "created_at": datetime.now(UTC),
+    }
+    assert PrivacyRequest(**base).is_controller_approved() is False
+    approved = PrivacyRequest(
+        **base, result_summary={"controller_approval": {"status": "approved"}}
+    )
+    assert approved.is_controller_approved() is True
+
+
+def test_invalid_request_type_and_hold_scope_are_rejected(tmp_path) -> None:
+    """Validation is enum-driven (PrivacyRequestType / LegalHoldScope)."""
+    repo = LocalRepository(str(tmp_path / "invalid.db"))
+    service = PrivacyProgramService(repo)
+    context = default_local_context(role="privacy_admin")
+
+    with pytest.raises(ValueError, match="unsupported privacy request type"):
+        service.create_request(context, subject_id="u1", request_type="nonsense")
+
+    with pytest.raises(ValueError, match="unsupported legal hold scope"):
+        service.create_legal_hold(context, subject_id="u1", scope="nonsense", reason="x")
+
+
 def test_privacy_request_is_tenant_scoped(tmp_path) -> None:
     repo = LocalRepository(str(tmp_path / "tenant.db"))
     _save_subject(repo, tenant_id="tenant-a")
@@ -102,6 +133,44 @@ def test_privacy_request_is_tenant_scoped(tmp_path) -> None:
 
     with pytest.raises(PermissionError):
         service.export_subject(tenant_b, request.request_id)
+
+
+def test_get_privacy_posture_is_tenant_scoped(tmp_path) -> None:
+    """The posture read returns only the calling tenant's holds + policy."""
+    repo = LocalRepository(str(tmp_path / "posture-tenant.db"))
+    service = PrivacyProgramService(repo)
+    tenant_a = default_local_context(tenant_id="tenant-a", role="privacy_admin")
+    tenant_b = default_local_context(tenant_id="tenant-b", role="privacy_admin")
+
+    hold_a = service.create_legal_hold(
+        tenant_a, subject_id="s-a", scope="subject", reason="hold-a"
+    )
+    service.create_legal_hold(tenant_b, subject_id="s-b", scope="subject", reason="hold-b")
+    service.configure_retention_policy(
+        tenant_a,
+        raw_import_days=30,
+        evidence_days=2555,
+        action_log_days=2555,
+        ai_proposal_days=180,
+    )
+
+    posture = service.get_privacy_posture(tenant_a)
+
+    hold_ids = {hold["id"] for hold in posture.active_legal_holds}
+    assert hold_ids == {hold_a.hold_id}  # tenant-b's hold is not visible
+    assert posture.retention_policy["raw_import_days"] == 30
+    assert posture.tenant_id == "tenant-a"
+
+
+def test_get_privacy_posture_fails_closed_without_permission(tmp_path) -> None:
+    """A role lacking privacy:request cannot read the posture (fails closed)."""
+    repo = LocalRepository(str(tmp_path / "posture-denied.db"))
+    service = PrivacyProgramService(repo)
+    # read_only carries readiness/evidence reads but NOT privacy:request.
+    context = default_local_context(role="read_only")
+
+    with pytest.raises(PermissionError):
+        service.get_privacy_posture(context)
 
 
 def test_privacy_workflows_enqueue_notification_events(tmp_path) -> None:
@@ -184,28 +253,28 @@ def test_retention_cleanup_dry_run_then_apply_removes_closed_privacy_cases(tmp_p
         privacy_request_days=30,
     )
     repo.save_privacy_request(
-        {
-            "id": "old-closed",
-            "tenant_id": "tenant-a",
-            "subject_id": "u-old",
-            "request_type": "access",
-            "status": "COMPLETED",
-            "opened_by": "operator",
-            "created_at": now - timedelta(days=60),
-            "result_summary": {"controller_approval": {"status": "approved"}},
-        }
+        PrivacyRequest(
+            id="old-closed",
+            tenant_id="tenant-a",
+            subject_id="u-old",
+            request_type="access",
+            status="COMPLETED",
+            opened_by="operator",
+            created_at=now - timedelta(days=60),
+            result_summary={"controller_approval": {"status": "approved"}},
+        )
     )
     repo.save_privacy_request(
-        {
-            "id": "recent-closed",
-            "tenant_id": "tenant-a",
-            "subject_id": "u-recent",
-            "request_type": "access",
-            "status": "COMPLETED",
-            "opened_by": "operator",
-            "created_at": now - timedelta(days=5),
-            "result_summary": {"controller_approval": {"status": "approved"}},
-        }
+        PrivacyRequest(
+            id="recent-closed",
+            tenant_id="tenant-a",
+            subject_id="u-recent",
+            request_type="access",
+            status="COMPLETED",
+            opened_by="operator",
+            created_at=now - timedelta(days=5),
+            result_summary={"controller_approval": {"status": "approved"}},
+        )
     )
 
     dry_run = service.run_retention_cleanup(context, dry_run=True)

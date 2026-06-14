@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Evidence · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Evidence</p>
+<h1>Evidence ledger</h1>
+<p class="lede">
+  Append-only evidence entries for tenant
+  <strong>{{ context.tenant_id }}</strong>. Each row pins a tamper-evident hash
+  over the audited data and its transformation, most recent first.
+</p>
+
+<section class="panel" aria-labelledby="ledger-heading">
+  <h2 id="ledger-heading">Ledger entries</h2>
+  <table class="data-table" aria-label="Evidence ledger">
+    <caption class="table-caption">
+      Cryptographic evidence trail for audit and import actions.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Recorded</th>
+        <th scope="col">Action</th>
+        <th scope="col">Evidence hash</th>
+        <th scope="col">Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in entries %}
+      <tr>
+        <td class="mono nowrap">{{ entry.timestamp }}</td>
+        <td><span class="tag">{{ entry.query_type }}</span></td>
+        <td><code class="mono hash-cell">{{ entry.output_hash }}</code></td>
+        <td>{{ entry.output_summary }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty-cell">
+          No evidence entries yet. They accrue as audits and imports run.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
