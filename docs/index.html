@@ -1379,7 +1379,8 @@
           <p>
             The authenticated web shell at <code>/shell</code>, CLI, API v1, and MCP all route through
             the same service-backed control plane — no mutating capability is shell-only or MCP-only.
-            Privacy, retention, security-evidence, and governance workflows are exposed everywhere.
+            Privacy and retention workflows reach every surface, including the web shell; security-evidence
+            and governance packets are exposed through the CLI, API v1, and MCP.
             The honest boundary is still clear: ComplyOS prepares evidence; lawyers, auditors, and
             customers approve the claims.
           </p>
@@ -1533,7 +1534,8 @@
           ComplyOS gives small teams a CSV path and gives larger teams a clean integration story. The
           same records power the authenticated web shell (9 modules on live service data), CLI audits,
           API v1 routes, MCP tools, privacy workflows, security evidence packets, and governance packets
-          — all enforced through one service layer, one authorization choke-point, and 659 adversarial tests.
+          — all enforced through one service layer, one authorization choke-point, and a 659-test suite
+          with an adversarial security layer (BOLA/IDOR, cross-surface denial, injection).
         </p>
         <div class="hero-actions">
           <a class="button" href="./release-checklist.md">Run the release checks</a>
