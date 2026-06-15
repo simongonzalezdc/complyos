@@ -270,6 +270,61 @@ class LegalHoldScope(StrEnum):
     SYSTEM = "system"
 
 
+class LegalHoldStatus(StrEnum):
+    """Lifecycle states for a legal hold record.
+
+    The create path lands on ``ACTIVE``; ``RELEASED`` is terminal. The string
+    values are persisted and read back from the repository, so changing them
+    would be a storage migration.
+    """
+
+    ACTIVE = "ACTIVE"
+    RELEASED = "RELEASED"
+
+
+class RetentionPolicy(BaseModel):
+    """Typed retention-policy envelope.
+
+    Five named dataset windows — the same shape the privacy program writes
+    through ``configure_retention_policy``. Days are non-negative; unknown
+    keys are rejected so a typo'd dataset name is caught at the boundary
+    instead of silently never expiring anything.
+    """
+
+    privacy_request_days: int = 365
+    raw_import_days: int = 30
+    ai_proposal_days: int = 180
+    evidence_days: int = 2555
+    action_log_days: int = 2555
+
+    @classmethod
+    def from_mapping(cls, values: dict[str, Any] | None) -> RetentionPolicy:
+        """Coerce a stored ``{name: days}`` mapping into the typed model.
+
+        Unknown keys are dropped (a stored policy from an older schema still
+        loads), but missing keys take the documented default so the cleanup
+        path always sees a complete window.
+        """
+        if not values:
+            return cls()
+        known = {
+            field: int(values[field])
+            for field in cls.model_fields
+            if field in values
+        }
+        return cls(**known)
+
+    def as_mapping(self) -> dict[str, int]:
+        return {field: int(getattr(self, field)) for field in type(self).model_fields}
+
+    def window_for(self, dataset: str) -> int:
+        """Return the retention window in days for the given dataset name."""
+        try:
+            return int(getattr(self, dataset))
+        except AttributeError as exc:
+            raise KeyError(f"unknown retention dataset: {dataset!r}") from exc
+
+
 class PrivacyRequest(BaseModel):
     """A tenant-scoped data-subject / privacy request case.
 

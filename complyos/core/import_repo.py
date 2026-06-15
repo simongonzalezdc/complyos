@@ -41,10 +41,25 @@ class ImportRepositoryMixin(RepositoryBase, RepositoryMappers):
             session.add(db_batch)
             session.commit()
 
-    def get_import_batch(self, batch_id: str) -> dict[str, Any] | None:
+    def get_import_batch(
+        self, batch_id: str, *, tenant_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Look up an import batch by id, optionally scoping to a tenant.
+
+        When ``tenant_id`` is provided, the lookup returns ``None`` for any
+        batch that exists but belongs to a different tenant. This is defense
+        in depth on top of the service-layer post-fetch tenant check; the
+        service layer remains the single authorization choke-point, but the
+        repository no longer hands back a row that can only be rejected
+        after a cross-tenant dict construction.
+        """
         with self._session() as session:
             batch = session.get(DBImportBatch, batch_id)
-            return self._to_import_batch_dict(batch) if batch else None
+            if batch is None:
+                return None
+            if tenant_id is not None and batch.tenant_id != tenant_id:
+                return None
+            return self._to_import_batch_dict(batch)
 
     def get_import_batch_by_idempotency_key(
         self, tenant_id: str, idempotency_key: str
@@ -97,14 +112,23 @@ class ImportRepositoryMixin(RepositoryBase, RepositoryMappers):
                 )
             session.commit()
 
-    def list_import_rows(self, batch_id: str) -> list[dict[str, Any]]:
+    def list_import_rows(
+        self, batch_id: str, *, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List import rows for a batch, optionally scoped to a tenant.
+
+        When ``tenant_id`` is provided, the underlying batch lookup also
+        gates on tenant; a cross-tenant request returns an empty list rather
+        than leaking row payloads.
+        """
         with self._session() as session:
-            rows = (
-                session.query(DBImportRow)
-                .where(DBImportRow.batch_id == batch_id)
-                .order_by(DBImportRow.row_number)
-                .all()
-            )
+            query = session.query(DBImportRow).where(DBImportRow.batch_id == batch_id)
+            if tenant_id is not None:
+                query = query.join(
+                    DBImportBatch,
+                    DBImportRow.batch_id == DBImportBatch.id,
+                ).where(DBImportBatch.tenant_id == tenant_id)
+            rows = query.order_by(DBImportRow.row_number).all()
             return [self._to_import_row_dict(row) for row in rows]
 
     def update_import_row_status(self, batch_id: str, row_id: str, status: str) -> None:

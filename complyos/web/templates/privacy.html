@@ -29,7 +29,7 @@
     <tbody>
       {% for hold in holds %}
       <tr>
-        <td><span class="mono">{{ hold.id }}</span></td>
+        <td><span class="mono">{{ hold.hold_id }}</span></td>
         <td><span class="tag">{{ hold.scope }}</span></td>
         <td><span class="mono">{{ hold.subject_id or '—' }}</span></td>
         <td>{{ hold.reason }}</td>

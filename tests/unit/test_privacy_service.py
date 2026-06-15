@@ -156,9 +156,9 @@ def test_get_privacy_posture_is_tenant_scoped(tmp_path) -> None:
 
     posture = service.get_privacy_posture(tenant_a)
 
-    hold_ids = {hold["id"] for hold in posture.active_legal_holds}
+    hold_ids = {hold.hold_id for hold in posture.active_legal_holds}
     assert hold_ids == {hold_a.hold_id}  # tenant-b's hold is not visible
-    assert posture.retention_policy["raw_import_days"] == 30
+    assert posture.retention_policy.raw_import_days == 30
     assert posture.tenant_id == "tenant-a"
 
 
@@ -232,8 +232,8 @@ def test_retention_policy_is_tenant_scoped_and_records_audit_log(tmp_path) -> No
     )
 
     assert result.tenant_id == "tenant-a"
-    assert result.policy["raw_import_days"] == 30
-    assert result.policy["evidence_days"] == 2555
+    assert result.policy.raw_import_days == 30
+    assert result.policy.evidence_days == 2555
     assert repo.get_retention_policy("tenant-a")["ai_proposal_days"] == 180
     assert repo.list_action_logs(tenant_id="tenant-a")[0]["action"] == "privacy.retention.configure"
 

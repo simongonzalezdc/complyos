@@ -53,3 +53,33 @@ def test_unknown_mcp_role_is_rejected(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="unknown COMPLYOS_MCP_ROLE"):
         _mcp_context()
+
+
+def test_mcp_default_tenant_is_local_default(monkeypatch) -> None:
+    """Without COMPLYOS_MCP_TENANT_ID, MCP keeps the single-tenant default."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.delenv("COMPLYOS_MCP_TENANT_ID", raising=False)
+    from complyos.api.mcp_server import _mcp_context
+
+    context = _mcp_context()
+    assert context.tenant_id == "local-default"
+
+
+def test_mcp_tenant_id_env_var_pins_context(monkeypatch) -> None:
+    """COMPLYOS_MCP_TENANT_ID overrides the default tenant for every MCP call."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.setenv("COMPLYOS_MCP_TENANT_ID", "tenant-acme")
+    from complyos.api.mcp_server import _mcp_context
+
+    context = _mcp_context()
+    assert context.tenant_id == "tenant-acme"
+
+
+def test_mcp_tenant_id_env_var_blocks_cross_tenant_arg(monkeypatch) -> None:
+    """A per-tool tenant_id that disagrees with the pinned tenant is rejected."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.setenv("COMPLYOS_MCP_TENANT_ID", "tenant-acme")
+    from complyos.api.mcp_server import _mcp_context
+
+    with pytest.raises(ValueError, match="conflicts with COMPLYOS_MCP_TENANT_ID"):
+        _mcp_context(tenant_id="tenant-other")

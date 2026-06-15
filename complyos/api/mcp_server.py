@@ -52,18 +52,34 @@ _auditor: ComplianceAuditor | None = None
 _auditor_signature: tuple[Any, ...] | None = None
 
 
-def _mcp_context(*, track: str = "workforce") -> ActorContext:
+def _mcp_context(
+    *, track: str = "workforce", tenant_id: str | None = None
+) -> ActorContext:
     """Build the actor context for an MCP call, defaulting to least privilege.
 
     Routing every MCP tool through one context (instead of self-assigning
     privacy_admin/owner inline) enforces the "AI is proposal-only" guardrail at
     the surface boundary: privileged services fail closed unless the operator
     opts up with COMPLYOS_MCP_ROLE.
+
+    Tenant scope: an operator deploying the MCP for one specific tenant should
+    set ``COMPLYOS_MCP_TENANT_ID`` so the agent cannot be asked to operate on
+    a different tenant via per-tool arguments. When unset, the default
+    ``local-default`` tenant is used (single-tenant runtime, frozen default §3).
     """
     role = os.getenv("COMPLYOS_MCP_ROLE", DEFAULT_MCP_ROLE)
     if role not in ROLE_PERMISSIONS:
         raise ValueError(f"unknown COMPLYOS_MCP_ROLE: {role!r}")
-    return default_local_context(surface="mcp", track=track, role=role)
+    env_tenant = os.getenv("COMPLYOS_MCP_TENANT_ID")
+    if tenant_id is not None and env_tenant and tenant_id != env_tenant:
+        raise ValueError(
+            "tenant_id argument conflicts with COMPLYOS_MCP_TENANT_ID; "
+            f"got {tenant_id!r} but MCP is pinned to {env_tenant!r}"
+        )
+    effective_tenant = env_tenant or tenant_id or "local-default"
+    return default_local_context(
+        surface="mcp", track=track, role=role, tenant_id=effective_tenant
+    )
 
 
 def _workday_from_config(config: ComplyOSConfig) -> WorkdayConnector:
@@ -594,8 +610,7 @@ async def list_evidence_ledger(
     Returns:
         Evidence ledger entries.
     """
-    context = _mcp_context()
-    context = context.model_copy(update={"tenant_id": tenant_id})
+    context = _mcp_context(tenant_id=tenant_id)
     return {
         "items": EvidenceService(_get_connector(), LocalRepository(db_path)).list_ledger(
             context,

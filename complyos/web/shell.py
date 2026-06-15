@@ -602,7 +602,7 @@ def build_shell_router(
                 "active": "privacy",
                 "context": context,
                 "holds": posture.active_legal_holds,
-                "retention_policy": sorted(posture.retention_policy.items()),
+                "retention_policy": sorted(posture.retention_policy.as_mapping().items()),
             },
         )
 
