@@ -7,47 +7,164 @@
 
 **HR/L&D compliance operations and learning-evidence MCP/API/CLI toolkit**
 
-ComplyOS turns HRIS, LMS, and CSV learning records into tenant-scoped evidence, gap reports, DSR workflows, retention cleanup, and readiness packets for HR, People Ops, L&D, security, and campus teams. It is readiness/control-mapping software, not a certification badge or automated employment-decision system.
+ComplyOS is a Python (3.11+) toolkit that transforms HRIS, LMS, and CSV learning records into tenant-scoped evidence, gap reports, DSR workflows, retention cleanup, and readiness packets for HR, People Ops, L&D, security, and campus teams. It provides compliance automation through evidence-backed audits, import governance, and privacy workflows, accessible via API, CLI, MCP, and an authenticated web shell.
 
-ComplyOS is also the **live compliance/evidence module** inside the working-title
-[LearningOps Suite](docs/learningops-suite-v0.md): a modular HR/L&D automation
-suite for intake, rosters, scheduling, regulatory awareness, instructional
-design, training specialist workflows, microlearning, evaluation, and manager
-briefs. The suite uses explicit maturity labels so live capability, contract
-interfaces, synthetic demos, and roadmap modules are not blended.
+## What is this?
 
-Regulatory awareness is defined as [RegWatch v0](docs/regwatch-v0.md): official
-source monitoring, source provenance, coverage-gap disclosure, and
-human-approved proposals before any rule, training, or notification changes
-state. The Source Intelligence spine now includes DB-backed schedules, job
-execution receipts, review UI, API/CLI export packets, and local fallbacks so
-external API procurement does not block hardening.
+ComplyOS is **readiness/control-mapping software**—not a certification badge or automated employment-decision system. It treats compliance as an evidence problem, ensuring every audit, report, and workflow is backed by verifiable, tenant-scoped data.
 
-LearningOps demo packets are synthetic and explicitly labeled:
+ComplyOS is the **live compliance/evidence module** inside the working-title [LearningOps Suite](docs/learningops-suite-v0.md): a modular HR/L&D automation suite for intake, rosters, scheduling, regulatory awareness, instructional design, training specialist workflows, microlearning, evaluation, and manager briefs.
 
-- [Training from scratch](docs/demos/training-from-scratch.md)
-- [Fix messy existing training operations](docs/demos/fix-messy-training-ops.md)
+Regulatory awareness is powered by [RegWatch v0](docs/regwatch-v0.md): official source monitoring, source provenance, coverage-gap disclosure, and human-approved proposals before any rule, training, or notification changes state. The Source Intelligence spine includes DB-backed schedules, job execution receipts, review UI, API/CLI export packets, and local fallbacks so external API procurement does not block hardening.
 
-The landing/design direction is captured in [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md).
+## Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [License](#license)
 
----
+## Features
 
-## Why ComplyOS?
+ComplyOS provides a comprehensive suite for compliance automation and HR technology workflows:
 
-Enterprise compliance tracking still runs on CSV exports, stale dashboards, screenshots, and "I thought they completed that" moments. ComplyOS treats learning compliance as an evidence problem:
-
-- **Evidence-backed audits** — Reports cite tenant-scoped SHA256 evidence entries and action logs.
-- **Import governance** — Preview/quarantine/promote CSV rows instead of letting bad exports mutate truth.
-- **Privacy workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and dry-run retention cleanup.
-- **Security and governance packets** — Collect readiness-only SOC 2-style control evidence and AI/school/FCRA boundary packets for review.
-- **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream rule or module changes.
-- **Notification outbox, email, and signed hooks** — Queue email, Slack, Teams, or customer webhook deliveries with payload hashes, retry state, dry-run drain, channel/event kill switches, and HMAC headers instead of coupling jobs to network uptime.
-- **Authenticated web shell** — Nine live modules (Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration) served at `/shell` from the same service layer. Signed-session cookie auth, WCAG 2.2 AA contrast enforced by tests. Not a mock: every module reads real service data.
-- **Proposal-only AI layer** — AI can suggest field mappings, anomaly summaries, gap explanations, remediation-message drafts, and duplicate clusters, but cannot mark a learner compliant, promote imports, execute remediation, or change rules. PII is redacted before hashing. Every proposal has a reject + expiry lifecycle and full provenance hashes.
+- **Evidence-backed audits** — Reports cite tenant-scoped SHA256 evidence entries and action logs for full auditability.
+- **Import governance** — Preview, quarantine, and promote CSV rows with a controlled pipeline instead of allowing bad exports to mutate source data.
+- **Privacy & data-subject workflows** — Create DSR cases, require controller approval, block deletion on legal hold, and run dry-run retention cleanup.
+- **Security & governance packets** — Collect readiness-only SOC 2-style control evidence, AI boundary assessments, school vendor packets, and FCRA employment-decision boundary documentation.
+- **Source-intelligence review spine** — Schedule local checks, store review proposals, decide them through RBAC, and export audit packets before any downstream change.
+- **Notification outbox, email, and signed hooks** — Queue deliveries with payload hashes, retry state, dry-run drain, channel/event kill switches, and HMAC headers.
+- **Authenticated web shell** — Nine live modules (Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration) at `/shell` with signed-session cookie auth, reading real service data. Enforced **WCAG 2.2 AA accessibility** compliance via tests.
+- **Proposal-only AI layer** — AI can suggest field mappings, anomaly summaries, gap explanations, remediation drafts, and duplicate clusters, but **cannot** mutate compliance state. PII is redacted before hashing; every proposal has reject/expiry lifecycle and full provenance.
 - **Agent-native surfaces** — Use the same service-backed workflows through CLI, API v1, MCP tools, or the web shell.
-- **Local-first** — SQLite by default, PostgreSQL-ready URLs when deployment needs them.
+- **Local-first** — SQLite by default, with PostgreSQL-ready URLs for production deployment.
+- **Enterprise hardening** — Includes security fixes like cross-tenant IDOR protection, adversarial test suite (BOLA/IDOR, injection, denial), and controlled migration/rollback procedures.
 
----
+## Installation
+
+### Prerequisites
+- Python 3.11 or higher
+- `uv` (recommended) or `pip`
+
+### Install with uv (Recommended)
+```bash
+git clone <forgejo-complyos-remote>
+cd complyos
+uv sync --all-extras --dev
+```
+
+### Install with pip
+```bash
+git clone <forgejo-complyos-remote>
+cd complyos
+pip install -e ".[dev]"
+```
+
+### Verify Installation
+```bash
+complyos --version
+```
+
+## Quick Start
+
+### 1. Initialize a Profile
+```bash
+# Workforce profile (HRIS-focused)
+complyos init --profile workforce
+
+# Campus profile (academic-focused)
+complyos init --profile campus --output campus.yaml
+```
+
+### 2. Run an Audit
+```bash
+# Basic compliance audit
+complyos audit
+
+# Filtered audit by department
+complyos audit --department Engineering
+
+# Generate structured JSON report
+complyos report --department Engineering --json
+```
+
+### 3. Serve the Web Interface
+```bash
+# Start the authenticated web shell and API
+complyos serve-dashboard --host 127.0.0.1 --port 8000
+
+# Access the shell in your browser
+# http://127.0.0.1:8000/shell
+# Login with your API token
+```
+
+### 4. Manage Notifications
+```bash
+# List pending notification events
+complyos notifications list --db complyos.db --json
+
+# Drain the notification outbox (dry-run)
+complyos notifications drain --db complyos.db --dry-run --json
+
+# Send notifications
+complyos notifications drain --db complyos.db --send --json
+```
+
+## Usage
+
+### Core CLI Commands
+
+#### Compliance Operations
+```bash
+# Check a single user's compliance status
+complyos status u1
+
+# Get a digest of changes since the last audit (new/resolved gaps, trend)
+complyos digest
+
+# Generate an interactive HTML dashboard
+complyos dashboard --open
+
+# Run scheduled audits (for cron/systemd/Forgejo Actions)
+complyos run-schedule --config complyos.yaml
+```
+
+#### Data Management
+```bash
+# Inspect connector capabilities for a profile
+complyos connectors --profile workforce --json
+
+# Run release-readiness checks
+complyos release-check --json
+
+# Collect readiness/control packets for review
+complyos readiness export --json
+```
+
+### API v1 (FastAPI)
+The API is available at `/api/v1` when the server is running. Key endpoints include:
+- `GET /api/v1/audit` — Run compliance audits
+- `GET /api/v1/report` — Generate reports
+- `POST /api/v1/privacy/dsr` — Create data-subject requests
+- `GET /api/v1/notifications/outbox` — Manage notifications
+
+### MCP Tools (FastMCP)
+ComplyOS exposes the same service workflows as MCP tools for AI agent integration, enabling programmatic access to compliance operations.
+
+### Web Shell
+Access the authenticated web interface at `/shell` for:
+- **Dashboard Overview** with real-time compliance metrics
+- **Gap Analysis** with drill-down into specific learners and requirements
+- **Import Management** with quarantine/promote workflows
+- **Evidence Collection** for SOC 2 and other readiness packets
+- **Privacy & Retention** management with DSR workflows
+- **Source Intelligence** for regulatory monitoring and proposal review
+- **Administration** for tenant settings and user permissions
+
+All modules read from live service data and enforce RBAC permissions.
 
 ## Architecture
 
@@ -78,264 +195,83 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
                     └────────────────────────────────────────────────┘
 ```
 
-### Tenant model
+### Tenant Model
+ComplyOS runs **single-tenant at runtime** with a **tenant-aware data model**: every persisted row carries a `tenant_id` so the schema is ready for migration without backfills. Multi-tenant/SaaS hosting is not built. See [docs/multi-tenancy.md](docs/multi-tenancy.md) for the full posture.
 
-ComplyOS runs **single-tenant at runtime** with a **tenant-aware data model**: every persisted row carries a `tenant_id` so the schema is ready for a later migration without backfills. Multi-tenant / SaaS hosting is not built — see [docs/multi-tenancy.md](docs/multi-tenancy.md) for the full posture, what is guaranteed today, and what must change before shared deployment is safe.
+### Security Posture
+- **Cross-tenant IDOR protection** with explicit permission checks on all service methods
+- **Adversarial test suite** covering BOLA/IDOR, injection, denial, and export attacks
+- **Proposal-only AI layer** with PII redaction and prompt-injection guards
+- **Migration/rollback procedures** documented for safe deployments
 
----
+## FAQ
 
-## Source of truth
+### How does ComplyOS handle data privacy and GDPR compliance?
+ComplyOS includes built-in data-subject request (DSR) workflows, configurable data retention policies, and privacy impact assessments. All PII in AI proposals is redacted before processing. See the [privacy data map](docs/privacy-data-map.md) and [data-subject request workflow](docs/data-subject-request-workflow.md) for details.
 
-Forgejo is the source-of-truth remote for ComplyOS. Do not push ComplyOS changes to GitHub unless the repository owner explicitly asks for a mirror or legacy export.
+### Can I use ComplyOS with my existing HRIS/LMS systems?
+Yes. ComplyOS supports CSV imports and has connector interfaces for Workday, SAP SuccessFactors, CSOD, and other systems. The connector capability matrix is profile-specific—run `complyos connectors --profile yourprofile` to see what's supported.
 
-## Quick Start
+### Is the AI layer compliant with AI governance requirements?
+The AI layer is designed as "proposal-only" with strict guards: it cannot mutate compliance state, all suggestions have reject/expiry lifecycles, and full provenance is tracked. This aligns with [AI governance impact assessments](docs/ai-governance-impact-assessment.md).
 
-### Installation
+### How do I handle regulatory changes?
+RegWatch v0 monitors official sources and creates human-approved proposals before any rule changes. This ensures changes go through proper review and approval workflows.
 
-```bash
-# Clone from the Forgejo remote you were granted
-git clone <forgejo-complyos-remote>
-cd complyos
+### What's the difference between the web shell and API?
+The web shell provides a visual interface for all workflows with real-time dashboards, while the API provides programmatic access for integration with other systems. Both use the same service layer and permissions.
 
-# Install with uv (recommended)
-uv sync --all-extras --dev
+### How is accessibility handled?
+The web shell enforces WCAG 2.2 AA compliance through automated contrast audits and accessibility tests. This ensures the interface is usable for people with disabilities.
 
-# Or with pip
-pip install -e ".[dev]"
-```
+## Contributing
 
-### CLI Usage
+We welcome contributions to ComplyOS! Please follow these guidelines:
 
-```bash
-# Initialize profile-specific starter configs
-complyos init --profile workforce
-complyos init --profile campus --output campus.yaml
+1. **Code Quality**: Follow the existing code style. We use Ruff for linting and formatting.
+   ```bash
+   ruff check .
+   ruff format .
+   ```
 
-# Inspect profile-specific connector capability matrices
-complyos connectors --profile workforce
-complyos connectors --profile campus --json
+2. **Testing**: Write tests for new features and ensure existing tests pass.
+   ```bash
+   pytest
+   pytest --cov=complyos --cov-report=html
+   ```
 
-# Run a compliance audit
-complyos audit
+3. **Documentation**: Update relevant documentation for any feature changes, especially in the `docs/` directory.
 
-# Filter by department
-complyos audit --department Engineering
+4. **Pull Requests**: 
+   - Keep PRs focused on single features or fixes
+   - Reference related issues
+   - Ensure all CI checks pass
+   - Update the CHANGELOG if applicable
 
-# Generate a structured report
-complyos report --department Engineering --json
+5. **Commit Messages**: Use conventional commits format.
 
-# Check a single user's status
-complyos status u1
+6. **Architecture Decisions**: For significant changes, document your rationale in an [ADR](docs/adr/).
 
-# What changed since the last audit? (new gaps, resolved gaps, trend)
-complyos digest
-
-# Generate a self-contained HTML dashboard (summary, trend, filterable table)
-complyos dashboard --open
-
-# Serve the live dashboard API and authenticated web shell locally
-complyos serve-dashboard --host 127.0.0.1 --port 8000
-# Then open http://127.0.0.1:8000/shell in your browser (login with your API token)
-
-# Run configured scheduled audits once from cron/systemd/Forgejo Actions
-complyos run-schedule --config complyos.yaml
-
-# Queue and drain notification outbox events without inline network coupling
-complyos notifications list --db complyos.db --json
-complyos notifications preference-set --db complyos.db --channel email --event-type audit.completed --disabled --reason "quiet hours" --json
-complyos notifications drain --db complyos.db --dry-run --json
-complyos notifications drain --db complyos.db --send --json
-
-# Check release-readiness artifacts
-complyos release-check --json
-
-# Collect readiness/control packets for review
-complyos security evidence --period current --json
-complyos governance packet --lane workforce --json
-
-# Operate privacy/DSR and retention workflows through service gates
-complyos privacy request <subject-id> --type access --json
-complyos privacy approve <request-id> --note "controller approved" --json
-complyos privacy export <request-id> --json
-complyos privacy retention configure --raw-import-days 30 --evidence-days 2555 --action-log-days 2555 --ai-proposal-days 180 --privacy-request-days 365 --json
-complyos privacy retention run --dry-run --json
-
-# Export a self-contained HTML audit report
-complyos export --output report.html
-
-# Sync LMS data to local SQLite
-complyos sync
-
-# Validate an assignment rule before deploying
-complyos validate-rule rule.json
-
-# Preview who would be affected by a rule
-complyos preview-rule rule.json
-
-# Check connector health
-complyos health
-
-# Send reminders / manager notifications for current gaps
-complyos remediate --dry-run
-```
-
-### Notification and Hook Operations
-
-ComplyOS now treats notifications and hooks as durable infrastructure, not inline
-side effects. Audit, privacy, retention, and source-intelligence workflows enqueue
-tenant-scoped `notification_events`; a separate worker drains `email`, `slack`,
-`teams`, or generic `webhook` deliveries.
-
-Provider-neutral controls that are implemented now:
-
-- durable outbox tables for events and deliveries;
-- retry, skip, sent, and dead-letter delivery states;
-- SMTP-backed email delivery via `COMPLYOS_SMTP_*` and
-  `COMPLYOS_NOTIFICATION_EMAIL_TO`;
-- Slack, Teams, and generic webhook delivery via `COMPLYOS_SLACK_WEBHOOK_URL`,
-  `COMPLYOS_TEAMS_WEBHOOK_URL`, and `COMPLYOS_WEBHOOK_URL`;
-- optional outbound HMAC signing via `COMPLYOS_WEBHOOK_SECRET`;
-- channel/event preferences and tenant kill switches through
-  `complyos notifications preference-set` and
-  `/api/v1/notifications/preferences`;
-- generic inbound hook receipts through `POST /api/v1/hooks/inbound/{source}`;
-- optional inbound HMAC validation via `COMPLYOS_INBOUND_WEBHOOK_SECRET`;
-- systemd, cron, and Forgejo Action worker templates under `deploy/`.
-
-Still intentionally deferred: real customer webhook URLs, real SMTP credentials,
-paid regulatory APIs, and provider-specific LMS/HRIS parsers.
-
-### MCP Server
-
-```bash
-# Start the MCP server
-complyos mcp
-```
-
-Then configure your MCP client (Claude Code, Cursor, etc.) to point to the server.
-
----
-
-## Connectors
-
-| Platform | Status | Auth |
-|----------|--------|------|
-| CSV export (any LMS/HRIS) | ✅ Supported | None |
-| Workday Learning | ✅ Supported | Basic Auth (env vars) |
-| SAP SuccessFactors Learning | ✅ Supported | OAuth 2.0 |
-| Cornerstone OnDemand Learning | ✅ Supported | OAuth 2.0 |
-| Canvas, Moodle, Blackboard, D2L Brightspace | Roadmap / profile targets | Varies |
-| Mock (seed data) | ✅ Built-in | None |
-
-### CSV Configuration
-
-No API access needed — point ComplyOS at a directory containing your LMS
-export as `users.csv`, `courses.csv`, and `enrollments.csv`:
-
-```bash
-export COMPLYOS_CSV_DIR=./examples/csv   # try it with the bundled sample data
-complyos audit
-
-# Try profile-specific sample exports
-COMPLYOS_CSV_DIR=examples/csv-workforce complyos audit
-COMPLYOS_CSV_DIR=examples/csv-campus complyos audit
-```
-
-Common column-name variants are recognized automatically (`User ID`,
-`Email Address`, `Learner ID`, `Completion Status`, `Deadline`, ...), so
-exports from Canvas, Cornerstone, Moodle, Docebo, and similar systems work
-without reformatting. The CSV source is read-only: audits and reports work
-fully, but reminder remediation requires an API-backed connector.
-
-### Workday Configuration
-
-Set environment variables:
-
-```bash
-export WORKDAY_BASE_URL="https://your-workday-instance.com"
-export WORKDAY_USERNAME="your-user"
-export WORKDAY_PASSWORD="your-pass"
-```
-
----
-
-## Development
-
-```bash
-# Run tests
-uv run --extra dev pytest -q
-
-# Run with coverage
-uv run --extra dev pytest --cov=complyos --cov-report=term-missing
-
-# Lint
-uv run --extra dev ruff check .
-
-# Type check
-uv run --extra dev mypy complyos
-```
-
----
-
-## Domain Model
-
-ComplyOS normalizes Workforce and Campus source data into one shared audit
-model. The cross-LMS connector contract normalizes transcripts, enrollments,
-assignments, submissions, completions, exemptions, and recertifications into
-`LearningRecord`. The existing `Enrollment` model remains for compatibility with
-the current audit engine.
-
-```python
-LearningRecord(
-    id="lr1",
-    user_id="u1",
-    course_id="c1",
-    source_system="cornerstone",
-    source_record_id="csod-transcript-1",
-    status="completed",
-    expires_at="2026-01-20",
-)
-
-ComplianceGap(
-    user=User(id="u1", department="Engineering", ...),
-    missing_courses=[Course(code="SEC-101", mandatory=True)],
-    severity="high",  # critical | high | medium | low
-    days_overdue=14,
-    rule_name="Mandatory Compliance Training",
-)
-```
-
-Every audit produces a tenant-scoped `EvidenceLedgerEntry` with SHA256 hashes for auditor/counsel review. Action logs record who did what without turning readiness software into a legal-status claim.
-
----
-
-## Roadmap
-
-- [x] Phase 1 — Core auditor, MCP server, CLI, Workday connector, tests
-- [x] Phase 2 — SQLite persistence, assignment rules engine, sync command
-- [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML dashboard
-- [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
-- [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
-- [x] Enterprise readiness foundation — tenant-scoped evidence, API/MCP/CLI parity for privacy workflows, retention cleanup, security evidence packet, and governance packet
-- [x] Source Intelligence hardening — DB-backed runs/proposals/schedules/job executions, review UI, export packets, migration ledger, deployment check, and external APIs kept list-only
-- [x] Notification outbox hooks — DB-backed events/deliveries/preferences, source-intel/audit/privacy event enqueue, email/webhook drain, signed outbound and inbound hook payloads, worker templates, and no-secret logs
-- [x] Enterprise control-plane — service boundary with ActorContext + 30-permission catalog + require_permission choke-point across all services; API v1 (FastAPI) with bearer-token auth, structured errors, rate limiting, admin/roles routes, and OpenAPI snapshot test; CLI/MCP/API v1 surface parity enforced by adversarial tests (BOLA/IDOR, secrets audit, cross-surface denial, export formula/XSS neutralization); authenticated web shell at /shell with nine live modules (Overview, Gaps, Imports, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration) and WCAG 2.2 AA enforcement; proposal-only AI layer with PII redaction, reject/expiry lifecycle, and provenance hashes.
-
-Remaining work is mostly outside application code: real webhook URLs/SMTP credentials, paid regulatory APIs, provider-specific LMS/HRIS event parsers, counsel-approved terms, customer-specific retention schedules, production security receipts, backup/restore evidence, access-review evidence, accessibility audit/VPAT where needed, and auditor review.
-
----
+Please review our [SECURITY.md](SECURITY.md) for security-related contributions and [AGENTS.md](AGENTS.md) for agent-related work.
 
 ## License
 
-ComplyOS uses **Business Source License 1.1**, SPDX identifier `BUSL-1.1`.
-Avoid the shorthand "BSL" here: `BSL-1.0` usually means the unrelated Boost
-Software License.
+ComplyOS is licensed under the [Business Source License 1.1](LICENSE).
 
-This is a source-available license. The source code is visible and may be
-copied, modified, redistributed, and used for non-production purposes.
-Production use requires a commercial license unless a future Additional Use
-Grant says otherwise.
+This means:
+- You can use, modify, and distribute the software
+- You cannot use it to offer a competing hosted/managed service
+- After 4 years, the license converts to a permissive open-source license (Apache 2.0 or similar)
+- See the LICENSE file for the complete terms
 
-On 2030-06-11, or the fourth anniversary of the first public distribution of
-a specific version under this license, whichever comes first, that version
-converts to **Apache License 2.0**.
+The BUSL-1.1 license allows free use while protecting the project's sustainability. For commercial use beyond the license terms, please contact the repository owner.
+
+---
+
+**Source of truth**: Forgejo is the source-of-truth remote for ComplyOS. Do not push changes to GitHub unless the repository owner explicitly asks for a mirror or legacy export.
+
+**Demo packets** are synthetic and explicitly labeled:
+- [Training from scratch](docs/demos/training-from-scratch.md)
+- [Fix messy existing training operations](docs/demos/fix-messy-training-ops.md)
+
+**Design direction** is captured in [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md).
