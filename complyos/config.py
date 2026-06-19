@@ -95,6 +95,12 @@ def generate_config(
                 "client_id": "${CORNERSTONE_CLIENT_ID}",
                 "client_secret": "${CORNERSTONE_CLIENT_SECRET}",
             },
+            "canvas": {
+                "base_url": "${CANVAS_BASE_URL}",
+                "api_token": "${CANVAS_API_TOKEN}",
+                "course_id": "${CANVAS_COURSE_ID}",
+                "account_id": "${CANVAS_ACCOUNT_ID}",
+            },
         },
         "database": {"path": db_path},
         "defaults": {

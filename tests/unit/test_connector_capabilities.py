@@ -27,7 +27,13 @@ def test_canvas_capabilities_include_learning_records_and_due_dates():
     assert canvas.profile == "campus"
     assert canvas.supports_learning_records is True
     assert canvas.supports_due_dates is True
-    assert canvas.status == "planned"
+    assert canvas.supports_exemptions is True
+    assert canvas.supports_scores is True
+    # Canvas has no native recertification/expiry field.
+    assert canvas.supports_expiry is False
+    # Canvas connector is implemented (Bearer API token).
+    assert canvas.status == "supported"
+    assert canvas.auth == "token"
 
 
 def test_csv_is_supported_for_both_tracks():

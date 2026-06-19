@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 
 from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.canvas import CanvasConnector
 from complyos.connectors.cornerstone import CornerstoneConnector
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
@@ -113,6 +114,16 @@ def _cornerstone_from_config(config: ComplyOSConfig) -> CornerstoneConnector:
     )
 
 
+def _canvas_from_config(config: ComplyOSConfig) -> CanvasConnector:
+    connector_config = config.connector.get("canvas", {})
+    return CanvasConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        api_token=resolve_env_placeholder(connector_config.get("api_token")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+        account_id=resolve_env_placeholder(connector_config.get("account_id")),
+    )
+
+
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector from env first, then config."""
     if os.getenv("COMPLYOS_CSV_DIR"):
@@ -131,6 +142,8 @@ def _get_connector() -> LMSConnector:
         return _successfactors_from_config(config)
     if connector_type == "cornerstone":
         return _cornerstone_from_config(config)
+    if connector_type == "canvas":
+        return _canvas_from_config(config)
     return MockConnector()
 
 
