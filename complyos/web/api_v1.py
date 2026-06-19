@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
@@ -14,6 +15,8 @@ from complyos.core.audit_views import shape_gaps, shape_remediation, shape_repor
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import AssignmentRule
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.analytics import Granularity, TrendAnalyticsService
+from complyos.services.attestations import AttestationService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -100,6 +103,10 @@ class ReportExportRequestBody(BaseModel):
     region: str | None = None
 
 
+class BiFeedExportRequestBody(BaseModel):
+    format: str = "csv"
+
+
 class SourceIntelDecisionBody(BaseModel):
     state: str
 
@@ -115,6 +122,22 @@ class RoleBindingRequestBody(BaseModel):
     actor_id: str
     role: str
     permissions_override: list[str] | None = None
+
+
+class AttestationRequirementBody(BaseModel):
+    course_id: str
+    code: str
+    title: str
+    category: str
+    description: str | None = None
+
+
+class AttestationRecordBody(BaseModel):
+    user_id: str
+    requirement_id: str
+    policy_version: str
+    expires_at: date | None = None
+    on_behalf: bool = False
 
 
 class RuleRequestBody(BaseModel):
@@ -342,6 +365,53 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             return result.model_dump(mode="json")
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    @router.get("/analytics/trends")
+    async def analytics_trends(
+        granularity: str = "monthly",
+        horizon_days: int = 30,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Tenant-scoped, period-bucketed trend metrics gated at analytics:read.
+        # Scope comes from the context tenant, never a query param, so a caller
+        # can only ever read their own tenant's records (plan §8.2 parity).
+        try:
+            bucket = Granularity(granularity)
+        except ValueError as exc:
+            raise _http_error(
+                "invalid_granularity",
+                "granularity must be 'weekly' or 'monthly'",
+                status.HTTP_400_BAD_REQUEST,
+                request_id=context.request_id,
+            ) from exc
+        try:
+            result = TrendAnalyticsService(repo).compute(
+                context, granularity=bucket, horizon_days=horizon_days
+            )
+            return {**result.model_dump(mode="json"), "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/exports/bi-feed")
+    async def export_bi_feed(
+        body: BiFeedExportRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Remote BI-feed export gated at evidence:export. Returns the rendered
+        # CSV/JSON content in the response body and never writes to server disk
+        # from a remote call. CSV is formula-injection neutralized at the writer.
+        try:
+            result = TrendAnalyticsService(repo).export_bi_feed(context, fmt=body.format)
+            return {**result, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _http_error(
+                "invalid_format",
+                str(exc),
+                status.HTTP_400_BAD_REQUEST,
+                request_id=context.request_id,
+            ) from exc
 
     @router.get("/connectors")
     async def list_connectors(
@@ -807,6 +877,62 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             raise _permission_error(exc, context) from exc
         except ValueError as exc:
             raise _bad_request("retention_run_failed", exc, context) from exc
+
+    # ---- AI-use-policy attestation / AI-literacy requirement tracking --------
+    @router.post("/attestations/requirements")
+    async def define_attestation_requirement(
+        body: AttestationRequirementBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return AttestationService(repo).define_requirement(
+                context,
+                course_id=body.course_id,
+                code=body.code,
+                title=body.title,
+                category=body.category,
+                description=body.description,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_attestation_requirement", exc, context) from exc
+
+    @router.post("/attestations")
+    async def record_attestation(
+        body: AttestationRecordBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return AttestationService(repo).record(
+                context,
+                user_id=body.user_id,
+                requirement_id=body.requirement_id,
+                policy_version=body.policy_version,
+                expires_at=body.expires_at,
+                on_behalf=body.on_behalf,
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("attestation_record_failed", exc, context) from exc
+
+    @router.get("/attestations")
+    async def list_attestations(
+        user_id: str | None = None,
+        requirement_id: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            records = AttestationService(repo).list_attestations(
+                context, user_id=user_id, requirement_id=requirement_id
+            )
+            return {
+                "items": [record.model_dump(mode="json") for record in records],
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
 
     return router
 

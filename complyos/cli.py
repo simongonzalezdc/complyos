@@ -26,6 +26,8 @@ from complyos.notification.sender import NotificationSender, build_notifier_from
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.analytics import Granularity, TrendAnalyticsService
+from complyos.services.attestations import AttestationService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -75,6 +77,10 @@ privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
 security_app = typer.Typer(name="security", help="Security evidence and assurance readiness")
 notifications_app = typer.Typer(name="notifications", help="Drain notification outbox deliveries")
+attestations_app = typer.Typer(
+    name="attestations",
+    help="Define and record AI-use-policy / AI-literacy attestations",
+)
 console = Console()
 
 
@@ -514,6 +520,15 @@ def run_schedule(
         "--enqueue-notifications/--no-enqueue-notifications",
         help="Queue audit notification events without sending network calls",
     ),
+    enqueue_expiring_soon: bool = typer.Option(
+        True,
+        "--enqueue-expiring-soon/--no-enqueue-expiring-soon",
+        help="Queue a proactive upcoming-expiry reminder event (no network calls)",
+    ),
+    expiry_window: Annotated[
+        list[int] | None,
+        typer.Option("--expiry-window", help="Expiry reminder window in days (default 30/60/90)"),
+    ] = None,
     notify_channel: Annotated[
         list[str] | None,
         typer.Option("--notify-channel", help="Notification channel to enqueue"),
@@ -556,6 +571,21 @@ def run_schedule(
         return results
 
     results = asyncio.run(_run())
+
+    # Upcoming-expiry reminders run on every scheduled pass, independent of
+    # whether an audit job was due: a recertification can lapse on a day no audit
+    # is scheduled, so the proactive reminder must not be gated on audit results.
+    if enqueue_expiring_soon:
+        reminder_event = notification_service.enqueue_expiring_soon_reminder(
+            context,
+            windows_days=expiry_window,
+            channels=channels,
+        )
+        if reminder_event is not None:
+            console.print(
+                f"[green]Expiring-soon reminder enqueued:[/green] {reminder_event['id']}"
+            )
+
     if not results:
         console.print("[yellow]No scheduled audit jobs were due[/yellow]")
         return
@@ -768,6 +798,91 @@ def dashboard(
         import webbrowser
 
         webbrowser.open(f"file://{os.path.abspath(path)}")
+
+
+@app.command()
+def analytics(
+    granularity: str = typer.Option(
+        "monthly", "--granularity", "-g", help="Period bucket: weekly or monthly"
+    ),
+    horizon_days: int = typer.Option(
+        30, "--horizon-days", help="Expiring-soon horizon in days"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Period-bucketed trend analytics over learning records (tenant-scoped)."""
+    try:
+        bucket = Granularity(granularity)
+    except ValueError:
+        console.print("[red]granularity must be 'weekly' or 'monthly'[/red]")
+        raise typer.Exit(1) from None
+
+    service = TrendAnalyticsService(LocalRepository(db_path))
+    result = service.compute(
+        _local_cli_context(), granularity=bucket, horizon_days=horizon_days
+    )
+
+    if json_output:
+        console.print(json.dumps(result.model_dump(mode="json"), indent=2, default=str))
+        return
+
+    console.print(f"[bold]Tenant:[/bold] {result.tenant_id}")
+    console.print(f"[bold]Granularity:[/bold] {result.granularity.value}")
+    console.print(f"[bold]Total records:[/bold] {result.total_records}")
+    console.print(
+        f"[bold]Overall completion rate:[/bold] "
+        f"{result.overall_completion_rate * 100:.1f}%"
+    )
+
+    if result.item_period_metrics:
+        table = Table(title="Per-Period Metrics by Learning Item")
+        table.add_column("Period")
+        table.add_column("Item")
+        table.add_column("Due", justify="right")
+        table.add_column("Completed", justify="right")
+        table.add_column("Open Gaps", justify="right")
+        table.add_column("Completion Rate", justify="right")
+        for metric in result.item_period_metrics:
+            table.add_row(
+                metric.period,
+                metric.course_code,
+                str(metric.due_count),
+                str(metric.completed_count),
+                str(metric.open_gap_count),
+                f"{metric.completion_rate * 100:.0f}%",
+            )
+        console.print(table)
+
+    if result.expiring_soon:
+        table = Table(title=f"Expiring Within {result.horizon_days} Days")
+        table.add_column("Item")
+        table.add_column("Expiring", justify="right")
+        for bucket_row in result.expiring_soon:
+            table.add_row(bucket_row.course_code, str(bucket_row.expiring_count))
+        console.print(table)
+
+
+@app.command("export-bi")
+def export_bi(
+    output: str = typer.Argument("bi-feed.csv", help="Output file path"),
+    fmt: str = typer.Option("csv", "--format", "-f", help="Feed format: csv or json"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+):
+    """Export the BI-ready learner x requirement feed (CSV or JSON)."""
+    service = TrendAnalyticsService(LocalRepository(db_path))
+    try:
+        result = service.export_bi_feed(
+            _local_cli_context(), fmt=fmt, output_path=output
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]BI feed ({result['row_count']} rows) exported to "
+        f"{result['output_path']}[/green]"
+    )
 
 
 @app.command("serve-dashboard")
@@ -1889,6 +2004,80 @@ def notifications_drain(
     console.print(table)
 
 
+@notifications_app.command("expiring-soon")
+def notifications_expiring_soon(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    window: Annotated[
+        list[int] | None,
+        typer.Option("--window", help="Reminder window in days (repeatable; default 30/60/90)"),
+    ] = None,
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
+    enqueue: bool = typer.Option(
+        True,
+        "--enqueue/--preview",
+        help="Enqueue a reminder event by default; use --preview to only compute",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Enqueue a proactive reminder for certifications expiring within the windows.
+
+    Forward-looking counterpart to ``audit``: surfaces not-yet-expired records and
+    queues one reminder event to the outbox (drain delivers it). ``--preview``
+    computes the set without enqueuing. Legal-hold subjects are excluded.
+    """
+    context = _local_cli_context(role="compliance_manager")
+    service = NotificationOutboxService(LocalRepository(db_path))
+    channels = notify_channel or ["email", "slack", "teams"]
+    reminder = service.compute_expiring_soon(context, windows_days=window)
+    event = None
+    if enqueue and reminder.total_expiring:
+        event = service.enqueue_expiring_soon_reminder(
+            context,
+            windows_days=window,
+            channels=channels,
+        )
+
+    if json_output:
+        _print_json(
+            {
+                "reminder": reminder.model_dump(mode="json"),
+                "enqueued_event_id": event["id"] if event else None,
+            }
+        )
+        return
+
+    console.print(f"[bold]Windows (days):[/bold] {'/'.join(str(w) for w in reminder.windows_days)}")
+    console.print(f"[bold]Total expiring soon:[/bold] {reminder.total_expiring}")
+    if event is not None:
+        console.print(f"[green]Reminder event enqueued:[/green] {event['id']}")
+    elif enqueue:
+        console.print("[cyan]Nothing expiring within the windows — no event enqueued.[/cyan]")
+    else:
+        console.print("[cyan]Preview only — no event enqueued.[/cyan]")
+
+    for group in reminder.groups:
+        if not group.count:
+            continue
+        table = Table(title=f"Expiring within {group.window_days} days ({group.count})")
+        table.add_column("User")
+        table.add_column("Department")
+        table.add_column("Course")
+        table.add_column("Expires")
+        table.add_column("Days Left")
+        for entry in group.entries:
+            table.add_row(
+                f"{entry.user_name} ({entry.user_email})",
+                entry.department,
+                entry.course_title,
+                entry.expires_at.isoformat(),
+                str(entry.days_until_expiry),
+            )
+        console.print(table)
+
+
 @governance_app.command("packet")
 def governance_packet(
     lane: str = typer.Option("workforce", "--lane", help="workforce, campus, or combined"),
@@ -2119,6 +2308,114 @@ def deployment_check(
     console.print(table)
 
 
+@attestations_app.command("define-requirement")
+def attestations_define_requirement(
+    course_id: str = typer.Argument(..., help="Learning item id for the requirement"),
+    code: str = typer.Option(..., "--code", help="Short requirement code, e.g. AI-USE-2026"),
+    title: str = typer.Option(..., "--title", help="Human-readable requirement title"),
+    category: str = typer.Option(
+        ..., "--category", help="ai_use_policy or ai_literacy"
+    ),
+    description: str | None = typer.Option(None, "--description", help="Optional description"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Define an attestation requirement as a mandatory learning item (rules:write)."""
+    context = _local_cli_context()
+    course = AttestationService(LocalRepository(db_path)).define_requirement(
+        context,
+        course_id=course_id,
+        code=code,
+        title=title,
+        category=category,
+        description=description,
+    )
+    if json_output:
+        _print_json(course.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Defined attestation requirement[/green] {course.code} "
+        f"({course.category}) as mandatory learning item {course.id}."
+    )
+
+
+@attestations_app.command("record")
+def attestations_record(
+    user_id: str = typer.Argument(..., help="Learner who attested"),
+    requirement_id: str = typer.Option(
+        ..., "--requirement", help="Attestation requirement (learning item) id"
+    ),
+    policy_version: str = typer.Option(
+        ..., "--policy-version", help="The named policy version the learner accepted"
+    ),
+    expires_at: str | None = typer.Option(
+        None, "--expires-at", help="ISO date for annual re-attestation (YYYY-MM-DD)"
+    ),
+    on_behalf: bool = typer.Option(
+        False, "--on-behalf", help="Admin is recording on the learner's behalf"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Record a learner's attestation; writes a learning record + evidence (attestation:record)."""
+    from datetime import date as _date
+
+    context = _local_cli_context()
+    parsed_expiry = _date.fromisoformat(expires_at) if expires_at else None
+    result = AttestationService(LocalRepository(db_path)).record(
+        context,
+        user_id=user_id,
+        requirement_id=requirement_id,
+        policy_version=policy_version,
+        expires_at=parsed_expiry,
+        on_behalf=on_behalf,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Recorded attestation[/green] for learner {result.learner_id} "
+        f"to {result.requirement_code} (policy {result.policy_version}). "
+        f"Evidence id: {result.evidence_id}."
+    )
+
+
+@attestations_app.command("list")
+def attestations_list(
+    user_id: str | None = typer.Option(None, "--user", help="Filter by learner id"),
+    requirement_id: str | None = typer.Option(
+        None, "--requirement", help="Filter by requirement id"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List recorded attestations for the tenant (attestation:read)."""
+    context = _local_cli_context()
+    records = AttestationService(LocalRepository(db_path)).list_attestations(
+        context, user_id=user_id, requirement_id=requirement_id
+    )
+    if json_output:
+        _print_json({"items": [record.model_dump(mode="json") for record in records]})
+        return
+    table = Table(title="Attestations")
+    table.add_column("Learner")
+    table.add_column("Requirement")
+    table.add_column("Category")
+    table.add_column("Policy version")
+    table.add_column("Attested at")
+    table.add_column("Expires")
+    for record in records:
+        table.add_row(
+            record.learner_id,
+            record.requirement_code,
+            record.category.value,
+            record.policy_version,
+            str(record.attested_at),
+            str(record.expires_at) if record.expires_at else "-",
+        )
+    console.print(table)
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
@@ -2130,6 +2427,7 @@ app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")
 app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
+app.add_typer(attestations_app, name="attestations")
 
 
 if __name__ == "__main__":

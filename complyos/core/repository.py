@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from complyos.core.import_repo import ImportRepositoryMixin
@@ -268,6 +268,68 @@ class LocalRepository(
                 raise
         return evidence_id
 
+    def record_attestation(
+        self,
+        *,
+        record: LearningRecord,
+        tenant_id: str,
+        evidence_entry: dict[str, Any],
+    ) -> str:
+        """Upsert an attestation's learning record and its evidence atomically.
+
+        Mirrors ``promote_import_learning_records``: the readiness record (a
+        completed/met ``LearningRecord``) and the immutable evidence-ledger entry
+        capturing who/what/when/policy-version are written in one transaction, so
+        a half-recorded attestation can never exist. Both rows carry the passed
+        ``tenant_id`` so the attestation is scoped to the recording tenant and the
+        learner's existing tenant is not silently overwritten by a default.
+        """
+        evidence_id = str(uuid.uuid4())
+        with self._session() as session:
+            try:
+                db_record = session.get(DBLearningRecord, record.id)
+                if db_record is None:
+                    db_record = DBLearningRecord(id=record.id)
+                    session.add(db_record)
+
+                db_record.user_id = record.user_id
+                db_record.course_id = record.course_id
+                db_record.tenant_id = tenant_id
+                db_record.source_system = record.source_system
+                db_record.source_record_id = record.source_record_id
+                db_record.status = record.status.value
+                db_record.assigned_date = record.assigned_date
+                db_record.due_date = record.due_date
+                db_record.completed_date = record.completed_date
+                db_record.completion_percentage = record.completion_percentage
+                db_record.score = record.score
+                db_record.exempt = record.exempt
+                db_record.expires_at = record.expires_at
+                db_record.raw_source_hash = record.raw_source_hash
+                db_record.source_payload = record.source_payload
+
+                session.add(
+                    DBEvidenceLedger(
+                        id=evidence_id,
+                        tenant_id=tenant_id,
+                        timestamp=evidence_entry["timestamp"],
+                        query_type=evidence_entry["query_type"],
+                        query_params=json.dumps(
+                            evidence_entry["query_params"],
+                            sort_keys=True,
+                        ),
+                        raw_data_hash=evidence_entry["raw_data_hash"],
+                        transformation_steps=json.dumps(evidence_entry["transformation_steps"]),
+                        output_hash=evidence_entry["output_hash"],
+                        output_summary=evidence_entry["output_summary"],
+                    )
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+        return evidence_id
+
     def list_learning_records(
         self,
         *,
@@ -288,6 +350,78 @@ class LocalRepository(
             if source_system:
                 query = query.where(DBLearningRecord.source_system == source_system)
             return [self._to_learning_record(r) for r in query.all()]
+
+    def list_expiring_learning_records(
+        self,
+        *,
+        tenant_id: str,
+        as_of: date,
+        horizon: date,
+    ) -> list[tuple[LearningRecord, User, Course]]:
+        """Return not-yet-expired records (with owner + item) expiring by ``horizon``.
+
+        Tenant-scoped: filters on the learning record's ``tenant_id`` column so a
+        reminder for one tenant can never read another tenant's records. A record
+        qualifies when it carries an ``expires_at`` in the closed window
+        ``[as_of, horizon]`` and is not exempt — already-expired records
+        (``expires_at < as_of``) are intentionally excluded because they are the
+        auditor's job, not a proactive reminder. The owning user and the learning
+        item are returned alongside so the caller can build a recipient-addressed,
+        typed reminder without a second round-trip.
+        """
+        with self._session() as session:
+            rows = (
+                session.query(DBLearningRecord, DBUser, DBCourse)
+                .join(DBUser, DBLearningRecord.user_id == DBUser.id)
+                .join(DBCourse, DBLearningRecord.course_id == DBCourse.id)
+                .where(
+                    DBLearningRecord.tenant_id == tenant_id,
+                    DBLearningRecord.exempt.is_(False),
+                    DBLearningRecord.expires_at.is_not(None),
+                    DBLearningRecord.expires_at >= as_of,
+                    DBLearningRecord.expires_at <= horizon,
+                )
+                .all()
+            )
+            return [
+                (
+                    self._to_learning_record(record),
+                    self._to_user(user),
+                    self._to_course(course),
+                )
+                for record, user, course in rows
+            ]
+
+    def list_learning_records_with_owner(
+        self,
+        *,
+        tenant_id: str,
+    ) -> list[tuple[LearningRecord, User, Course]]:
+        """Return every learning record for a tenant with its owner and item.
+
+        Tenant-scoped: filters on the learning record's ``tenant_id`` column so a
+        report for one tenant can never read another tenant's records. The owning
+        user and learning item are joined in so a caller (analytics, BI feed) can
+        build denormalized learner x requirement rows without a second round-trip.
+        Records whose owner or item was never independently synced are dropped by
+        the inner join — the BI feed only emits rows it can fully attribute.
+        """
+        with self._session() as session:
+            rows = (
+                session.query(DBLearningRecord, DBUser, DBCourse)
+                .join(DBUser, DBLearningRecord.user_id == DBUser.id)
+                .join(DBCourse, DBLearningRecord.course_id == DBCourse.id)
+                .where(DBLearningRecord.tenant_id == tenant_id)
+                .all()
+            )
+            return [
+                (
+                    self._to_learning_record(record),
+                    self._to_user(user),
+                    self._to_course(course),
+                )
+                for record, user, course in rows
+            ]
 
     # ------------------------------------------------------------------
     # Sync helpers

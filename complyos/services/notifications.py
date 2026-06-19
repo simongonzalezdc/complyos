@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
+from complyos.core.expiry_reminder import (
+    DEFAULT_EXPIRY_WINDOWS_DAYS,
+    ExpiringSoonReminder,
+    build_expiring_soon_reminder,
+)
 from complyos.core.repository import LocalRepository
 from complyos.core.time import utc_now
 from complyos.services.context import (
@@ -79,6 +84,77 @@ class NotificationOutboxService:
             },
         )
         return event
+
+    def compute_expiring_soon(
+        self,
+        context: ActorContext,
+        *,
+        windows_days: list[int] | None = None,
+        as_of: date | None = None,
+    ) -> ExpiringSoonReminder:
+        """Compute the proactive expiring-soon set for the current tenant.
+
+        Forward-looking counterpart to the auditor's already-expired gaps:
+        learning records whose ``expires_at`` lands inside one of ``windows_days``
+        (default 30/60/90) and has *not* yet passed. Tenant-scoped at the
+        repository query; records owned by a subject under an active legal hold —
+        or any record when a tenant/system-wide hold is active — are excluded so a
+        hold cannot leak into outbound reminders. Computes only; no event is
+        enqueued (see :meth:`enqueue_expiring_soon_reminder`).
+        """
+        require_permission(context, PERM_NOTIFICATIONS_MANAGE)
+        windows = list(windows_days) if windows_days else list(DEFAULT_EXPIRY_WINDOWS_DAYS)
+        reference = as_of or utc_now().date()
+        horizon = reference + timedelta(days=max(windows))
+        records = self.repository.list_expiring_learning_records(
+            tenant_id=context.tenant_id,
+            as_of=reference,
+            horizon=horizon,
+        )
+        holds = self.repository.resolve_active_holds(tenant_id=context.tenant_id)
+        if holds.tenant_blocked:
+            records = []
+        elif holds.held_subject_ids:
+            records = [
+                triple for triple in records if triple[1].id not in holds.held_subject_ids
+            ]
+        return build_expiring_soon_reminder(
+            tenant_id=context.tenant_id,
+            records=records,
+            windows_days=windows,
+            as_of=reference,
+        )
+
+    def enqueue_expiring_soon_reminder(
+        self,
+        context: ActorContext,
+        *,
+        windows_days: list[int] | None = None,
+        channels: list[str],
+        as_of: date | None = None,
+    ) -> dict[str, Any] | None:
+        """Compute the expiring-soon set and enqueue one reminder event.
+
+        Routes the typed reminder through :meth:`enqueue_event`, so it inherits
+        redaction, ``notification_preferences`` suppression, per-channel delivery
+        rows, and the audit action log — the outbox drain stays the only delivery
+        path (this never sends directly). Returns ``None`` when nothing is
+        expiring, so a scheduled run does not enqueue empty noise.
+        """
+        require_permission(context, PERM_NOTIFICATIONS_MANAGE)
+        reminder = self.compute_expiring_soon(
+            context, windows_days=windows_days, as_of=as_of
+        )
+        if reminder.total_expiring == 0:
+            return None
+        return self.enqueue_event(
+            context,
+            event_type="learning.recertification_expiring_soon",
+            object_type="expiring_soon_reminder",
+            object_id=reminder.generated_at.isoformat(),
+            payload=reminder.model_dump(mode="json"),
+            channels=channels,
+        )
 
     def set_preference(
         self,

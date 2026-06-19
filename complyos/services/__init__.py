@@ -1,6 +1,7 @@
 """Application service boundary for ComplyOS surfaces."""
 
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.attestations import AttestationService
 from complyos.services.context import (
     ALL_PERMISSIONS,
     ROLE_PERMISSIONS,
@@ -17,6 +18,7 @@ __all__ = [
     "ALL_PERMISSIONS",
     "ROLE_PERMISSIONS",
     "ActorContext",
+    "AttestationService",
     "AuthorizationError",
     "ImportService",
     "ReadinessService",

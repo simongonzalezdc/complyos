@@ -109,7 +109,7 @@ WCAG 2.2 AA accessibility and color-contrast are enforced by tests. Roles lackin
 
 ## MCP tools (full list)
 
-All 30 tools call the same application services as CLI and API. The default `agent_service_account`
+All 32 tools call the same application services as CLI and API. The default `agent_service_account`
 role is granted audit, preview, and proposal capabilities only.
 
 **Read-only / proposal-safe (available to default role):**
@@ -117,7 +117,8 @@ role is granted audit, preview, and proposal capabilities only.
 `generate_compliance_digest`, `sync`, `list_connectors`, `check_connector_health`,
 `validate_assignment_rule`, `preview_assignment_rule`, `check_readiness`,
 `preview_import_batch`, `list_evidence_ledger`, `propose_field_mapping`,
-`collect_security_evidence`, `collect_governance_packet`, `create_privacy_request`.
+`collect_security_evidence`, `collect_governance_packet`, `create_privacy_request`,
+`list_attestations`.
 
 **Mutating / privileged (require elevated `COMPLYOS_MCP_ROLE`):**
 `remediate_compliance_gaps` (`remediation:execute`),
@@ -133,7 +134,8 @@ role is granted audit, preview, and proposal capabilities only.
 `create_legal_hold` (`legal_hold:manage`),
 `release_legal_hold` (`legal_hold:manage`),
 `configure_privacy_retention` (`privacy:retention:manage`),
-`run_privacy_retention` (`privacy:retention:manage`).
+`run_privacy_retention` (`privacy:retention:manage`),
+`record_attestation` (`attestation:record`).
 
 ## Complete API v1 endpoints
 
@@ -199,6 +201,11 @@ role is granted audit, preview, and proposal capabilities only.
 - `POST /api/v1/privacy/legal-holds/{hold_id}/release`
 - `POST /api/v1/privacy/retention-policy`
 - `POST /api/v1/privacy/retention-policy/run`
+
+**Attestations**
+- `POST /api/v1/attestations/requirements`
+- `POST /api/v1/attestations`
+- `GET /api/v1/attestations`
 
 **Admin**
 - `GET /api/v1/admin/roles`

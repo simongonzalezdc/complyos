@@ -65,10 +65,22 @@ class PrivacyRepositoryMixin(RepositoryBase, RepositoryMappers):
             )
             session.commit()
 
-    def get_privacy_request(self, request_id: str) -> PrivacyRequest | None:
+    def get_privacy_request(
+        self, request_id: str, *, tenant_id: str | None = None
+    ) -> PrivacyRequest | None:
+        """Look up a privacy request by id, optionally scoped to a tenant.
+
+        When ``tenant_id`` is provided, the lookup returns ``None`` for any
+        request that exists but belongs to a different tenant. Defense in
+        depth on top of the service-layer post-fetch tenant check.
+        """
         with self._session() as session:
             request = session.get(DBPrivacyRequest, request_id)
-            return self._to_privacy_request(request) if request else None
+            if request is None:
+                return None
+            if tenant_id is not None and request.tenant_id != tenant_id:
+                return None
+            return self._to_privacy_request(request)
 
     def update_privacy_request_status(
         self,
@@ -231,10 +243,22 @@ class PrivacyRepositoryMixin(RepositoryBase, RepositoryMappers):
             )
             session.commit()
 
-    def get_legal_hold(self, hold_id: str) -> dict[str, Any] | None:
+    def get_legal_hold(
+        self, hold_id: str, *, tenant_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Look up a legal hold by id, optionally scoped to a tenant.
+
+        When ``tenant_id`` is provided, the lookup returns ``None`` for any
+        hold that exists but belongs to a different tenant. Defense in depth
+        on top of the service-layer post-fetch tenant check.
+        """
         with self._session() as session:
             hold = session.get(DBLegalHold, hold_id)
-            return self._to_legal_hold_dict(hold) if hold else None
+            if hold is None:
+                return None
+            if tenant_id is not None and hold.tenant_id != tenant_id:
+                return None
+            return self._to_legal_hold_dict(hold)
 
     def list_active_legal_holds(
         self,

@@ -53,3 +53,57 @@ def test_unknown_mcp_role_is_rejected(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="unknown COMPLYOS_MCP_ROLE"):
         _mcp_context()
+
+
+async def test_default_mcp_role_blocks_recording_attestation(tmp_path, monkeypatch) -> None:
+    """The AI/agent default role must never be able to mark a learner attested."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    from complyos.api.mcp_server import record_attestation
+
+    with pytest.raises(AuthorizationError) as exc:
+        await record_attestation(
+            user_id="u1",
+            requirement_id="ai-pol",
+            policy_version="ai-use-policy-2026.1",
+            db_path=str(tmp_path / "att.db"),
+        )
+    assert exc.value.permission == "attestation:record"
+
+
+async def test_default_mcp_role_may_list_attestations(tmp_path, monkeypatch) -> None:
+    """The agent role may read attestations so it can report un-attested learners."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    from complyos.api.mcp_server import list_attestations
+
+    result = await list_attestations(db_path=str(tmp_path / "att-list.db"))
+    assert result["items"] == []
+
+
+def test_mcp_default_tenant_is_local_default(monkeypatch) -> None:
+    """Without COMPLYOS_MCP_TENANT_ID, MCP keeps the single-tenant default."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.delenv("COMPLYOS_MCP_TENANT_ID", raising=False)
+    from complyos.api.mcp_server import _mcp_context
+
+    context = _mcp_context()
+    assert context.tenant_id == "local-default"
+
+
+def test_mcp_tenant_id_env_var_pins_context(monkeypatch) -> None:
+    """COMPLYOS_MCP_TENANT_ID overrides the default tenant for every MCP call."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.setenv("COMPLYOS_MCP_TENANT_ID", "tenant-acme")
+    from complyos.api.mcp_server import _mcp_context
+
+    context = _mcp_context()
+    assert context.tenant_id == "tenant-acme"
+
+
+def test_mcp_tenant_id_env_var_blocks_cross_tenant_arg(monkeypatch) -> None:
+    """A per-tool tenant_id that disagrees with the pinned tenant is rejected."""
+    monkeypatch.delenv("COMPLYOS_MCP_ROLE", raising=False)
+    monkeypatch.setenv("COMPLYOS_MCP_TENANT_ID", "tenant-acme")
+    from complyos.api.mcp_server import _mcp_context
+
+    with pytest.raises(ValueError, match="conflicts with COMPLYOS_MCP_TENANT_ID"):
+        _mcp_context(tenant_id="tenant-other")

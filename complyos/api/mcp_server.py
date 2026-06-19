@@ -9,9 +9,13 @@ from fastmcp import FastMCP
 
 from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.blackboard import BlackboardConnector
+from complyos.connectors.brightspace import BrightspaceConnector
+from complyos.connectors.canvas import CanvasConnector
 from complyos.connectors.cornerstone import CornerstoneConnector
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
+from complyos.connectors.moodle import MoodleConnector
 from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
@@ -20,6 +24,7 @@ from complyos.core.repository import LocalRepository
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.attestations import AttestationService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -52,18 +57,34 @@ _auditor: ComplianceAuditor | None = None
 _auditor_signature: tuple[Any, ...] | None = None
 
 
-def _mcp_context(*, track: str = "workforce") -> ActorContext:
+def _mcp_context(
+    *, track: str = "workforce", tenant_id: str | None = None
+) -> ActorContext:
     """Build the actor context for an MCP call, defaulting to least privilege.
 
     Routing every MCP tool through one context (instead of self-assigning
     privacy_admin/owner inline) enforces the "AI is proposal-only" guardrail at
     the surface boundary: privileged services fail closed unless the operator
     opts up with COMPLYOS_MCP_ROLE.
+
+    Tenant scope: an operator deploying the MCP for one specific tenant should
+    set ``COMPLYOS_MCP_TENANT_ID`` so the agent cannot be asked to operate on
+    a different tenant via per-tool arguments. When unset, the default
+    ``local-default`` tenant is used (single-tenant runtime, frozen default §3).
     """
     role = os.getenv("COMPLYOS_MCP_ROLE", DEFAULT_MCP_ROLE)
     if role not in ROLE_PERMISSIONS:
         raise ValueError(f"unknown COMPLYOS_MCP_ROLE: {role!r}")
-    return default_local_context(surface="mcp", track=track, role=role)
+    env_tenant = os.getenv("COMPLYOS_MCP_TENANT_ID")
+    if tenant_id is not None and env_tenant and tenant_id != env_tenant:
+        raise ValueError(
+            "tenant_id argument conflicts with COMPLYOS_MCP_TENANT_ID; "
+            f"got {tenant_id!r} but MCP is pinned to {env_tenant!r}"
+        )
+    effective_tenant = env_tenant or tenant_id or "local-default"
+    return default_local_context(
+        surface="mcp", track=track, role=role, tenant_id=effective_tenant
+    )
 
 
 def _workday_from_config(config: ComplyOSConfig) -> WorkdayConnector:
@@ -97,6 +118,46 @@ def _cornerstone_from_config(config: ComplyOSConfig) -> CornerstoneConnector:
     )
 
 
+def _canvas_from_config(config: ComplyOSConfig) -> CanvasConnector:
+    connector_config = config.connector.get("canvas", {})
+    return CanvasConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        api_token=resolve_env_placeholder(connector_config.get("api_token")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+        account_id=resolve_env_placeholder(connector_config.get("account_id")),
+    )
+
+
+def _brightspace_from_config(config: ComplyOSConfig) -> BrightspaceConnector:
+    connector_config = config.connector.get("brightspace", {})
+    return BrightspaceConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        token_url=resolve_env_placeholder(connector_config.get("token_url")),
+        org_unit_id=resolve_env_placeholder(connector_config.get("org_unit_id")),
+    )
+
+
+def _moodle_from_config(config: ComplyOSConfig) -> MoodleConnector:
+    connector_config = config.connector.get("moodle", {})
+    return MoodleConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        token=resolve_env_placeholder(connector_config.get("token")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+    )
+
+
+def _blackboard_from_config(config: ComplyOSConfig) -> BlackboardConnector:
+    connector_config = config.connector.get("blackboard", {})
+    return BlackboardConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+    )
+
+
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector from env first, then config."""
     if os.getenv("COMPLYOS_CSV_DIR"):
@@ -115,6 +176,14 @@ def _get_connector() -> LMSConnector:
         return _successfactors_from_config(config)
     if connector_type == "cornerstone":
         return _cornerstone_from_config(config)
+    if connector_type == "canvas":
+        return _canvas_from_config(config)
+    if connector_type == "brightspace":
+        return _brightspace_from_config(config)
+    if connector_type == "moodle":
+        return _moodle_from_config(config)
+    if connector_type == "blackboard":
+        return _blackboard_from_config(config)
     return MockConnector()
 
 
@@ -594,8 +663,7 @@ async def list_evidence_ledger(
     Returns:
         Evidence ledger entries.
     """
-    context = _mcp_context()
-    context = context.model_copy(update={"tenant_id": tenant_id})
+    context = _mcp_context(tenant_id=tenant_id)
     return {
         "items": EvidenceService(_get_connector(), LocalRepository(db_path)).list_ledger(
             context,
@@ -833,6 +901,83 @@ async def run_privacy_retention(
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .run_retention_cleanup(context, dry_run=dry_run)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def list_attestations(
+    user_id: str | None = None,
+    requirement_id: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """List recorded AI-use-policy / AI-literacy attestations (read-only).
+
+    Read-only: the default proposal-only agent role may list attestations so it
+    can report which learners are un-attested, but it cannot record one (see
+    record_attestation).
+
+    Args:
+        user_id: Optional learner filter.
+        requirement_id: Optional requirement (learning item) filter.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The tenant's attestation records.
+    """
+    context = _mcp_context(track=profile)
+    records = AttestationService(LocalRepository(db_path)).list_attestations(
+        context, user_id=user_id, requirement_id=requirement_id
+    )
+    return {"items": [record.model_dump(mode="json") for record in records]}
+
+
+@mcp.tool()
+async def record_attestation(
+    user_id: str,
+    requirement_id: str,
+    policy_version: str,
+    expires_at: str | None = None,
+    on_behalf: bool = False,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: record that a learner attested to a named AI-use policy version.
+
+    An attestation is human-recorded evidence that a *person* read and accepted a
+    policy. The default proposal-only MCP role lacks ``attestation:record`` and is
+    therefore denied — AI can never mark a learner attested. Raise
+    COMPLYOS_MCP_ROLE to a human-operated role (e.g. compliance_manager) only when
+    a human is genuinely recording the attestation through the agent surface.
+
+    Args:
+        user_id: Learner who attested.
+        requirement_id: Attestation requirement (learning item) id.
+        policy_version: The named policy version the learner accepted.
+        expires_at: Optional ISO date for annual re-attestation.
+        on_behalf: True when an admin records on the learner's behalf.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The recorded attestation, its learning-record id, and its evidence id.
+    """
+    from datetime import date as _date
+
+    context = _mcp_context(track=profile)
+    parsed_expiry = _date.fromisoformat(expires_at) if expires_at else None
+    return (
+        AttestationService(LocalRepository(db_path))
+        .record(
+            context,
+            user_id=user_id,
+            requirement_id=requirement_id,
+            policy_version=policy_version,
+            expires_at=parsed_expiry,
+            on_behalf=on_behalf,
+        )
         .model_dump(mode="json")
     )
 

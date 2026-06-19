@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 PERM_AUDIT_READ = "audit:read"
 PERM_AUDIT_RUN = "audit:run"
+PERM_ANALYTICS_READ = "analytics:read"
 PERM_EVIDENCE_READ = "evidence:read"
 PERM_EVIDENCE_EXPORT = "evidence:export"
 PERM_IMPORT_PREVIEW = "import:preview"
@@ -41,12 +42,15 @@ PERM_SOURCE_INTEL_READ = "source_intel:read"
 PERM_SOURCE_INTEL_RUN = "source_intel:run"
 PERM_SOURCE_INTEL_DECIDE = "source_intel:decide"
 PERM_NOTIFICATIONS_MANAGE = "notifications:manage"
+PERM_ATTESTATION_RECORD = "attestation:record"
+PERM_ATTESTATION_READ = "attestation:read"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
     {
         PERM_AUDIT_READ,
         PERM_AUDIT_RUN,
+        PERM_ANALYTICS_READ,
         PERM_EVIDENCE_READ,
         PERM_EVIDENCE_EXPORT,
         PERM_IMPORT_PREVIEW,
@@ -74,6 +78,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_SOURCE_INTEL_RUN,
         PERM_SOURCE_INTEL_DECIDE,
         PERM_NOTIFICATIONS_MANAGE,
+        PERM_ATTESTATION_RECORD,
+        PERM_ATTESTATION_READ,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -85,6 +91,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {
             PERM_AUDIT_READ,
             PERM_AUDIT_RUN,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_EVIDENCE_EXPORT,
             PERM_RULES_READ,
@@ -105,6 +112,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_SOURCE_INTEL_RUN,
             PERM_SOURCE_INTEL_DECIDE,
             PERM_NOTIFICATIONS_MANAGE,
+            PERM_ATTESTATION_RECORD,
+            PERM_ATTESTATION_READ,
         }
     ),
     "privacy_admin": frozenset(
@@ -127,18 +136,21 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "reviewer": frozenset(
         {
             PERM_AUDIT_READ,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_EVIDENCE_EXPORT,
             PERM_READINESS_READ,
             PERM_SECURITY_EVIDENCE_READ,
             PERM_GOVERNANCE_READ,
             PERM_SOURCE_INTEL_READ,
+            PERM_ATTESTATION_READ,
         }
     ),
     "agent_service_account": frozenset(
         {
             PERM_AUDIT_READ,
             PERM_AUDIT_RUN,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_IMPORT_PREVIEW,
             PERM_RULES_PREVIEW,
@@ -148,13 +160,25 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_READINESS_READ,
             PERM_SOURCE_INTEL_READ,
             PERM_SOURCE_INTEL_RUN,
+            PERM_ATTESTATION_READ,
             # NOTE: notifications:manage intentionally withheld. The proposal-only
             # MCP default role must not be able to send arbitrary external email
             # (send_notification) or drain the outbox; raise COMPLYOS_MCP_ROLE for that.
+            # NOTE: attestation:record intentionally withheld. An attestation is
+            # human-recorded evidence that a person accepted a policy; the AI/agent
+            # default role must never be able to mark a learner attested. It may
+            # read (attestation:read) so it can report un-attested learners.
         }
     ),
     "read_only": frozenset(
-        {PERM_AUDIT_READ, PERM_EVIDENCE_READ, PERM_READINESS_READ, PERM_SOURCE_INTEL_READ}
+        {
+            PERM_AUDIT_READ,
+            PERM_ANALYTICS_READ,
+            PERM_EVIDENCE_READ,
+            PERM_READINESS_READ,
+            PERM_SOURCE_INTEL_READ,
+            PERM_ATTESTATION_READ,
+        }
     ),
 }
 

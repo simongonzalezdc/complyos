@@ -13,7 +13,13 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from complyos.core.repository import LocalRepository
-from complyos.models.domain import LegalHoldScope, PrivacyRequest, PrivacyRequestType
+from complyos.models.domain import (
+    LegalHoldScope,
+    LegalHoldStatus,
+    PrivacyRequest,
+    PrivacyRequestType,
+    RetentionPolicy,
+)
 from complyos.services.context import (
     PERM_LEGAL_HOLD_MANAGE,
     PERM_PRIVACY_APPROVE,
@@ -68,9 +74,9 @@ class LegalHoldResult(BaseModel):
     hold_id: str
     tenant_id: str
     subject_id: str | None
-    scope: str
+    scope: LegalHoldScope
     reason: str
-    status: str
+    status: LegalHoldStatus
     created_at: datetime | None = None
     released_at: datetime | None = None
     actor_context: dict[str, str] = Field(default_factory=dict)
@@ -78,7 +84,7 @@ class LegalHoldResult(BaseModel):
 
 class RetentionPolicyResult(BaseModel):
     tenant_id: str
-    policy: dict[str, int]
+    policy: RetentionPolicy
     updated_at: datetime
     actor_context: dict[str, str] = Field(default_factory=dict)
 
@@ -86,7 +92,7 @@ class RetentionPolicyResult(BaseModel):
 class RetentionCleanupResult(BaseModel):
     tenant_id: str
     dry_run: bool
-    policy: dict[str, int]
+    policy: RetentionPolicy
     cutoff_by_dataset: dict[str, datetime]
     eligible_counts: dict[str, int] = Field(default_factory=dict)
     deleted_counts: dict[str, int] = Field(default_factory=dict)
@@ -98,8 +104,8 @@ class PrivacyPostureResult(BaseModel):
     """Read-only privacy posture: active legal holds + the retention policy."""
 
     tenant_id: str
-    active_legal_holds: list[dict[str, Any]] = Field(default_factory=list)
-    retention_policy: dict[str, Any] = Field(default_factory=dict)
+    active_legal_holds: list[LegalHoldResult] = Field(default_factory=list)
+    retention_policy: RetentionPolicy = Field(default_factory=RetentionPolicy)
     generated_at: datetime
     actor_context: dict[str, str] = Field(default_factory=dict)
 
@@ -187,10 +193,23 @@ class PrivacyProgramService:
         require_permission(context, PERM_PRIVACY_REQUEST)
         holds = self.repository.list_active_legal_holds(tenant_id=context.tenant_id)
         retention_policy = self.repository.get_retention_policy(context.tenant_id)
+        typed_holds: list[LegalHoldResult] = [
+            LegalHoldResult(
+                hold_id=str(hold.get("id") or hold.get("hold_id") or ""),
+                tenant_id=hold["tenant_id"],
+                subject_id=hold.get("subject_id"),
+                scope=LegalHoldScope(hold["scope"]),
+                reason=hold.get("reason", ""),
+                status=LegalHoldStatus(hold.get("status", "ACTIVE")),
+                created_at=hold.get("created_at"),
+                released_at=hold.get("released_at"),
+            )
+            for hold in holds
+        ]
         return PrivacyPostureResult(
             tenant_id=context.tenant_id,
-            active_legal_holds=holds,
-            retention_policy=retention_policy,
+            active_legal_holds=typed_holds,
+            retention_policy=RetentionPolicy.from_mapping(retention_policy),
             generated_at=datetime.now(UTC),
             actor_context=context.public_dict(),
         )
@@ -453,9 +472,9 @@ class PrivacyProgramService:
             hold_id=hold_id,
             tenant_id=context.tenant_id,
             subject_id=subject_id,
-            scope=scope,
+            scope=LegalHoldScope(scope),
             reason=reason,
-            status="ACTIVE",
+            status=LegalHoldStatus.ACTIVE,
             created_at=created_at,
             actor_context=context.public_dict(),
         )
@@ -499,9 +518,9 @@ class PrivacyProgramService:
             hold_id=hold_id,
             tenant_id=context.tenant_id,
             subject_id=hold["subject_id"],
-            scope=hold["scope"],
+            scope=LegalHoldScope(hold["scope"]),
             reason=hold["reason"],
-            status="RELEASED",
+            status=LegalHoldStatus.RELEASED,
             created_at=hold["created_at"],
             released_at=released_at,
             actor_context=context.public_dict(),
@@ -548,7 +567,7 @@ class PrivacyProgramService:
         )
         return RetentionPolicyResult(
             tenant_id=context.tenant_id,
-            policy=values,
+            policy=RetentionPolicy.from_mapping(values),
             updated_at=updated_at,
             actor_context=context.public_dict(),
         )
@@ -669,7 +688,7 @@ class PrivacyProgramService:
         return RetentionCleanupResult(
             tenant_id=context.tenant_id,
             dry_run=dry_run,
-            policy=normalized_policy,
+            policy=RetentionPolicy.from_mapping(normalized_policy),
             cutoff_by_dataset=cutoff_by_dataset,
             eligible_counts=eligible_counts,
             deleted_counts=deleted_counts,
