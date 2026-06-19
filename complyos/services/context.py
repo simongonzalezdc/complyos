@@ -42,6 +42,8 @@ PERM_SOURCE_INTEL_READ = "source_intel:read"
 PERM_SOURCE_INTEL_RUN = "source_intel:run"
 PERM_SOURCE_INTEL_DECIDE = "source_intel:decide"
 PERM_NOTIFICATIONS_MANAGE = "notifications:manage"
+PERM_ATTESTATION_RECORD = "attestation:record"
+PERM_ATTESTATION_READ = "attestation:read"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
@@ -76,6 +78,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_SOURCE_INTEL_RUN,
         PERM_SOURCE_INTEL_DECIDE,
         PERM_NOTIFICATIONS_MANAGE,
+        PERM_ATTESTATION_RECORD,
+        PERM_ATTESTATION_READ,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -108,6 +112,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_SOURCE_INTEL_RUN,
             PERM_SOURCE_INTEL_DECIDE,
             PERM_NOTIFICATIONS_MANAGE,
+            PERM_ATTESTATION_RECORD,
+            PERM_ATTESTATION_READ,
         }
     ),
     "privacy_admin": frozenset(
@@ -137,6 +143,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_SECURITY_EVIDENCE_READ,
             PERM_GOVERNANCE_READ,
             PERM_SOURCE_INTEL_READ,
+            PERM_ATTESTATION_READ,
         }
     ),
     "agent_service_account": frozenset(
@@ -153,9 +160,14 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_READINESS_READ,
             PERM_SOURCE_INTEL_READ,
             PERM_SOURCE_INTEL_RUN,
+            PERM_ATTESTATION_READ,
             # NOTE: notifications:manage intentionally withheld. The proposal-only
             # MCP default role must not be able to send arbitrary external email
             # (send_notification) or drain the outbox; raise COMPLYOS_MCP_ROLE for that.
+            # NOTE: attestation:record intentionally withheld. An attestation is
+            # human-recorded evidence that a person accepted a policy; the AI/agent
+            # default role must never be able to mark a learner attested. It may
+            # read (attestation:read) so it can report un-attested learners.
         }
     ),
     "read_only": frozenset(
@@ -165,6 +177,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_EVIDENCE_READ,
             PERM_READINESS_READ,
             PERM_SOURCE_INTEL_READ,
+            PERM_ATTESTATION_READ,
         }
     ),
 }

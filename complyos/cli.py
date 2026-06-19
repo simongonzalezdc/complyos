@@ -27,6 +27,7 @@ from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
 from complyos.services.analytics import Granularity, TrendAnalyticsService
+from complyos.services.attestations import AttestationService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -76,6 +77,10 @@ privacy_app = typer.Typer(name="privacy", help="Privacy requests, retention, and
 privacy_retention_app = typer.Typer(name="retention", help="Configure retention policies")
 security_app = typer.Typer(name="security", help="Security evidence and assurance readiness")
 notifications_app = typer.Typer(name="notifications", help="Drain notification outbox deliveries")
+attestations_app = typer.Typer(
+    name="attestations",
+    help="Define and record AI-use-policy / AI-literacy attestations",
+)
 console = Console()
 
 
@@ -2303,6 +2308,114 @@ def deployment_check(
     console.print(table)
 
 
+@attestations_app.command("define-requirement")
+def attestations_define_requirement(
+    course_id: str = typer.Argument(..., help="Learning item id for the requirement"),
+    code: str = typer.Option(..., "--code", help="Short requirement code, e.g. AI-USE-2026"),
+    title: str = typer.Option(..., "--title", help="Human-readable requirement title"),
+    category: str = typer.Option(
+        ..., "--category", help="ai_use_policy or ai_literacy"
+    ),
+    description: str | None = typer.Option(None, "--description", help="Optional description"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Define an attestation requirement as a mandatory learning item (rules:write)."""
+    context = _local_cli_context()
+    course = AttestationService(LocalRepository(db_path)).define_requirement(
+        context,
+        course_id=course_id,
+        code=code,
+        title=title,
+        category=category,
+        description=description,
+    )
+    if json_output:
+        _print_json(course.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Defined attestation requirement[/green] {course.code} "
+        f"({course.category}) as mandatory learning item {course.id}."
+    )
+
+
+@attestations_app.command("record")
+def attestations_record(
+    user_id: str = typer.Argument(..., help="Learner who attested"),
+    requirement_id: str = typer.Option(
+        ..., "--requirement", help="Attestation requirement (learning item) id"
+    ),
+    policy_version: str = typer.Option(
+        ..., "--policy-version", help="The named policy version the learner accepted"
+    ),
+    expires_at: str | None = typer.Option(
+        None, "--expires-at", help="ISO date for annual re-attestation (YYYY-MM-DD)"
+    ),
+    on_behalf: bool = typer.Option(
+        False, "--on-behalf", help="Admin is recording on the learner's behalf"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Record a learner's attestation; writes a learning record + evidence (attestation:record)."""
+    from datetime import date as _date
+
+    context = _local_cli_context()
+    parsed_expiry = _date.fromisoformat(expires_at) if expires_at else None
+    result = AttestationService(LocalRepository(db_path)).record(
+        context,
+        user_id=user_id,
+        requirement_id=requirement_id,
+        policy_version=policy_version,
+        expires_at=parsed_expiry,
+        on_behalf=on_behalf,
+    )
+    if json_output:
+        _print_json(result.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Recorded attestation[/green] for learner {result.learner_id} "
+        f"to {result.requirement_code} (policy {result.policy_version}). "
+        f"Evidence id: {result.evidence_id}."
+    )
+
+
+@attestations_app.command("list")
+def attestations_list(
+    user_id: str | None = typer.Option(None, "--user", help="Filter by learner id"),
+    requirement_id: str | None = typer.Option(
+        None, "--requirement", help="Filter by requirement id"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List recorded attestations for the tenant (attestation:read)."""
+    context = _local_cli_context()
+    records = AttestationService(LocalRepository(db_path)).list_attestations(
+        context, user_id=user_id, requirement_id=requirement_id
+    )
+    if json_output:
+        _print_json({"items": [record.model_dump(mode="json") for record in records]})
+        return
+    table = Table(title="Attestations")
+    table.add_column("Learner")
+    table.add_column("Requirement")
+    table.add_column("Category")
+    table.add_column("Policy version")
+    table.add_column("Attested at")
+    table.add_column("Expires")
+    for record in records:
+        table.add_row(
+            record.learner_id,
+            record.requirement_code,
+            record.category.value,
+            record.policy_version,
+            str(record.attested_at),
+            str(record.expires_at) if record.expires_at else "-",
+        )
+    console.print(table)
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
@@ -2314,6 +2427,7 @@ app.add_typer(governance_app, name="governance")
 app.add_typer(security_app, name="security")
 app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
+app.add_typer(attestations_app, name="attestations")
 
 
 if __name__ == "__main__":

@@ -35,6 +35,26 @@ class User(BaseModel):
         return f"{self.first_name} {self.last_name}"
 
 
+class AttestationCategory(StrEnum):
+    """Learning-item categories that are recorded by human attestation, not a
+    course completion feed.
+
+    An attestation requirement is modeled as a ``Course`` (learning item) whose
+    ``category`` is one of these values and which is ``mandatory``. The auditor
+    then treats a learner with no completed/met record for that item exactly
+    like any other missing mandatory training (a ``ComplianceGap``). These
+    string values are persisted on the course and read back, so changing them
+    is a data change, not just a rename.
+    """
+
+    AI_USE_POLICY = "ai_use_policy"
+    AI_LITERACY = "ai_literacy"
+
+    @classmethod
+    def values(cls) -> frozenset[str]:
+        return frozenset(member.value for member in cls)
+
+
 class Course(BaseModel):
     id: str
     code: str
@@ -43,6 +63,11 @@ class Course(BaseModel):
     duration_minutes: int | None = None
     mandatory: bool = False
     category: str | None = None
+
+    @property
+    def is_attestation_requirement(self) -> bool:
+        """True when this learning item is satisfied by a human attestation."""
+        return self.category in AttestationCategory.values()
 
 
 class EnrollmentStatus(StrEnum):
@@ -218,6 +243,36 @@ class EvidenceLedgerEntry(BaseModel):
     transformation_steps: list[str]
     output_hash: str
     output_summary: str
+
+
+class AttestationRecord(BaseModel):
+    """Typed result of recording one learner's policy attestation.
+
+    An attestation is *human-recorded evidence* that a named person read and
+    accepted a specific policy version (or completed an AI-literacy item). It is
+    NOT an AI decision: the actor who recorded it is captured (`recorded_by`),
+    and the AI/proposal service can never reach this path. Recording one writes
+    a normalized ``LearningRecord`` (status completed/met) plus an immutable
+    ``EvidenceLedgerEntry``; the two ids below tie the readiness record back to
+    its evidence.
+
+    Claim boundary: this attests that a person acknowledged a policy version —
+    it is readiness/evidence, never "certified" or "compliant".
+    """
+
+    learning_record_id: str
+    evidence_id: str
+    tenant_id: str
+    learner_id: str
+    requirement_id: str
+    requirement_code: str
+    category: AttestationCategory
+    policy_version: str
+    attested_at: datetime
+    recorded_by: str
+    recorded_on_behalf: bool
+    expires_at: date | None = None
+    output_hash: str
 
 
 # ---------------------------------------------------------------------------

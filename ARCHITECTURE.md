@@ -60,7 +60,7 @@ Every business workflow routes through the **application service layer**. Servic
 | `request_id` | Per-request correlation UUID |
 | `auth_method` | `"bearer"` / `"session"` / `"local_dev"` |
 
-### Permission Catalog (31 permissions)
+### Permission Catalog (33 permissions)
 
 ```
 audit:read              audit:run              analytics:read
@@ -78,6 +78,7 @@ privacy:delete          privacy:retention:manage
 legal_hold:manage
 source_intel:read       source_intel:run       source_intel:decide
 notifications:manage
+attestation:record      attestation:read
 admin:manage
 ```
 
@@ -85,7 +86,7 @@ admin:manage
 
 | Role | Permissions |
 |------|------------|
-| `owner` | All 31 |
+| `owner` | All 33 |
 | `admin` | All except `admin:manage` |
 | `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications |
 | `privacy_admin` | Evidence:read, readiness:read, privacy (all), legal hold, notifications |

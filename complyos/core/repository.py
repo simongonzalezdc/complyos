@@ -268,6 +268,68 @@ class LocalRepository(
                 raise
         return evidence_id
 
+    def record_attestation(
+        self,
+        *,
+        record: LearningRecord,
+        tenant_id: str,
+        evidence_entry: dict[str, Any],
+    ) -> str:
+        """Upsert an attestation's learning record and its evidence atomically.
+
+        Mirrors ``promote_import_learning_records``: the readiness record (a
+        completed/met ``LearningRecord``) and the immutable evidence-ledger entry
+        capturing who/what/when/policy-version are written in one transaction, so
+        a half-recorded attestation can never exist. Both rows carry the passed
+        ``tenant_id`` so the attestation is scoped to the recording tenant and the
+        learner's existing tenant is not silently overwritten by a default.
+        """
+        evidence_id = str(uuid.uuid4())
+        with self._session() as session:
+            try:
+                db_record = session.get(DBLearningRecord, record.id)
+                if db_record is None:
+                    db_record = DBLearningRecord(id=record.id)
+                    session.add(db_record)
+
+                db_record.user_id = record.user_id
+                db_record.course_id = record.course_id
+                db_record.tenant_id = tenant_id
+                db_record.source_system = record.source_system
+                db_record.source_record_id = record.source_record_id
+                db_record.status = record.status.value
+                db_record.assigned_date = record.assigned_date
+                db_record.due_date = record.due_date
+                db_record.completed_date = record.completed_date
+                db_record.completion_percentage = record.completion_percentage
+                db_record.score = record.score
+                db_record.exempt = record.exempt
+                db_record.expires_at = record.expires_at
+                db_record.raw_source_hash = record.raw_source_hash
+                db_record.source_payload = record.source_payload
+
+                session.add(
+                    DBEvidenceLedger(
+                        id=evidence_id,
+                        tenant_id=tenant_id,
+                        timestamp=evidence_entry["timestamp"],
+                        query_type=evidence_entry["query_type"],
+                        query_params=json.dumps(
+                            evidence_entry["query_params"],
+                            sort_keys=True,
+                        ),
+                        raw_data_hash=evidence_entry["raw_data_hash"],
+                        transformation_steps=json.dumps(evidence_entry["transformation_steps"]),
+                        output_hash=evidence_entry["output_hash"],
+                        output_summary=evidence_entry["output_summary"],
+                    )
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+        return evidence_id
+
     def list_learning_records(
         self,
         *,

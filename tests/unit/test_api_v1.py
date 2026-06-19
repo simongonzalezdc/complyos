@@ -827,3 +827,67 @@ def test_api_v1_export_bi_feed_denied_for_underprivileged(monkeypatch, tmp_path)
 
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "permission_denied"
+
+
+def test_api_v1_attestation_define_record_list_flow(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-attest.db"))
+    _seed_analytics_repo(repo)  # seeds learner u1 in local-default
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    define = client.post(
+        "/api/v1/attestations/requirements",
+        json={
+            "course_id": "ai-pol",
+            "code": "AI-USE-2026",
+            "title": "AI Use Policy",
+            "category": "ai_use_policy",
+        },
+        headers=headers,
+    )
+    assert define.status_code == 200
+    assert define.json()["mandatory"] is True
+
+    record = client.post(
+        "/api/v1/attestations",
+        json={
+            "user_id": "u1",
+            "requirement_id": "ai-pol",
+            "policy_version": "ai-use-policy-2026.1",
+        },
+        headers=headers,
+    )
+    assert record.status_code == 200
+    body = record.json()
+    assert body["learner_id"] == "u1"
+    assert body["evidence_id"]
+    # The recording actor is captured from the request context (X-Actor-Id default).
+    assert body["recorded_by"] == "api-actor"
+
+    listing = client.get("/api/v1/attestations?user_id=u1", headers=headers)
+    assert listing.status_code == 200
+    items = listing.json()["items"]
+    assert len(items) == 1
+    assert items[0]["policy_version"] == "ai-use-policy-2026.1"
+
+
+def test_api_v1_attestation_record_denied_for_agent_role(monkeypatch, tmp_path) -> None:
+    """An agent_service_account caller cannot record an attestation over the API."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-attest-denied.db"))
+    _seed_analytics_repo(repo)
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "agent_service_account"}
+
+    response = client.post(
+        "/api/v1/attestations",
+        json={
+            "user_id": "u1",
+            "requirement_id": "ai-pol",
+            "policy_version": "ai-use-policy-2026.1",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "permission_denied"

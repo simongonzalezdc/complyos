@@ -24,6 +24,7 @@ from complyos.core.repository import LocalRepository
 from complyos.models.domain import AssignmentRule
 from complyos.notification.sender import NotificationSender, build_notifier_from_env
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.attestations import AttestationService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -900,6 +901,83 @@ async def run_privacy_retention(
     return (
         PrivacyProgramService(LocalRepository(db_path))
         .run_retention_cleanup(context, dry_run=dry_run)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def list_attestations(
+    user_id: str | None = None,
+    requirement_id: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """List recorded AI-use-policy / AI-literacy attestations (read-only).
+
+    Read-only: the default proposal-only agent role may list attestations so it
+    can report which learners are un-attested, but it cannot record one (see
+    record_attestation).
+
+    Args:
+        user_id: Optional learner filter.
+        requirement_id: Optional requirement (learning item) filter.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The tenant's attestation records.
+    """
+    context = _mcp_context(track=profile)
+    records = AttestationService(LocalRepository(db_path)).list_attestations(
+        context, user_id=user_id, requirement_id=requirement_id
+    )
+    return {"items": [record.model_dump(mode="json") for record in records]}
+
+
+@mcp.tool()
+async def record_attestation(
+    user_id: str,
+    requirement_id: str,
+    policy_version: str,
+    expires_at: str | None = None,
+    on_behalf: bool = False,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: record that a learner attested to a named AI-use policy version.
+
+    An attestation is human-recorded evidence that a *person* read and accepted a
+    policy. The default proposal-only MCP role lacks ``attestation:record`` and is
+    therefore denied — AI can never mark a learner attested. Raise
+    COMPLYOS_MCP_ROLE to a human-operated role (e.g. compliance_manager) only when
+    a human is genuinely recording the attestation through the agent surface.
+
+    Args:
+        user_id: Learner who attested.
+        requirement_id: Attestation requirement (learning item) id.
+        policy_version: The named policy version the learner accepted.
+        expires_at: Optional ISO date for annual re-attestation.
+        on_behalf: True when an admin records on the learner's behalf.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The recorded attestation, its learning-record id, and its evidence id.
+    """
+    from datetime import date as _date
+
+    context = _mcp_context(track=profile)
+    parsed_expiry = _date.fromisoformat(expires_at) if expires_at else None
+    return (
+        AttestationService(LocalRepository(db_path))
+        .record(
+            context,
+            user_id=user_id,
+            requirement_id=requirement_id,
+            policy_version=policy_version,
+            expires_at=parsed_expiry,
+            on_behalf=on_behalf,
+        )
         .model_dump(mode="json")
     )
 
