@@ -14,6 +14,7 @@ from complyos.core.audit_views import shape_gaps, shape_remediation, shape_repor
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import AssignmentRule
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.analytics import Granularity, TrendAnalyticsService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -98,6 +99,10 @@ class RemediationRequestBody(BaseModel):
 class ReportExportRequestBody(BaseModel):
     department: str | None = None
     region: str | None = None
+
+
+class BiFeedExportRequestBody(BaseModel):
+    format: str = "csv"
 
 
 class SourceIntelDecisionBody(BaseModel):
@@ -342,6 +347,53 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             return result.model_dump(mode="json")
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    @router.get("/analytics/trends")
+    async def analytics_trends(
+        granularity: str = "monthly",
+        horizon_days: int = 30,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Tenant-scoped, period-bucketed trend metrics gated at analytics:read.
+        # Scope comes from the context tenant, never a query param, so a caller
+        # can only ever read their own tenant's records (plan §8.2 parity).
+        try:
+            bucket = Granularity(granularity)
+        except ValueError as exc:
+            raise _http_error(
+                "invalid_granularity",
+                "granularity must be 'weekly' or 'monthly'",
+                status.HTTP_400_BAD_REQUEST,
+                request_id=context.request_id,
+            ) from exc
+        try:
+            result = TrendAnalyticsService(repo).compute(
+                context, granularity=bucket, horizon_days=horizon_days
+            )
+            return {**result.model_dump(mode="json"), "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+
+    @router.post("/exports/bi-feed")
+    async def export_bi_feed(
+        body: BiFeedExportRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        # Remote BI-feed export gated at evidence:export. Returns the rendered
+        # CSV/JSON content in the response body and never writes to server disk
+        # from a remote call. CSV is formula-injection neutralized at the writer.
+        try:
+            result = TrendAnalyticsService(repo).export_bi_feed(context, fmt=body.format)
+            return {**result, "actor_context": context.public_dict()}
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _http_error(
+                "invalid_format",
+                str(exc),
+                status.HTTP_400_BAD_REQUEST,
+                request_id=context.request_id,
+            ) from exc
 
     @router.get("/connectors")
     async def list_connectors(

@@ -60,10 +60,10 @@ Every business workflow routes through the **application service layer**. Servic
 | `request_id` | Per-request correlation UUID |
 | `auth_method` | `"bearer"` / `"session"` / `"local_dev"` |
 
-### Permission Catalog (30 permissions)
+### Permission Catalog (31 permissions)
 
 ```
-audit:read              audit:run
+audit:read              audit:run              analytics:read
 evidence:read           evidence:export
 import:preview          import:decide          import:promote
 rules:read              rules:preview          rules:write
@@ -85,15 +85,15 @@ admin:manage
 
 | Role | Permissions |
 |------|------------|
-| `owner` | All 30 |
+| `owner` | All 31 |
 | `admin` | All except `admin:manage` |
-| `compliance_manager` | Audit, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications |
+| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications |
 | `privacy_admin` | Evidence:read, readiness:read, privacy (all), legal hold, notifications |
 | `import_approver` | import:preview/decide/promote, evidence:read |
 | `importer` | import:preview/decide, evidence:read |
-| `reviewer` | audit:read, evidence, readiness, security/governance read, source-intel:read |
-| `agent_service_account` | audit:read/run, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run (**no** notifications:manage — MCP default role is proposal-only) |
-| `read_only` | audit:read, evidence:read, readiness:read, source-intel:read |
+| `reviewer` | audit:read, analytics:read, evidence, readiness, security/governance read, source-intel:read |
+| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run (**no** notifications:manage — MCP default role is proposal-only) |
+| `read_only` | audit:read, analytics:read, evidence:read, readiness:read, source-intel:read |
 
 ## Application Services
 
@@ -102,6 +102,7 @@ All surfaces instantiate services with a repository and call them with an `Actor
 | Service | Responsibility |
 |---------|---------------|
 | `AuditService` | Run audits, generate reports, compute gaps |
+| `TrendAnalyticsService` | Period-bucketed trend metrics and the BI-ready learner x requirement feed |
 | `EvidenceService` | Evidence ledger, render reports |
 | `RemediationService` | Propose and execute remediation actions |
 | `ImportService` | Preview / quarantine / decide / promote import batches |

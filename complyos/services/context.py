@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 PERM_AUDIT_READ = "audit:read"
 PERM_AUDIT_RUN = "audit:run"
+PERM_ANALYTICS_READ = "analytics:read"
 PERM_EVIDENCE_READ = "evidence:read"
 PERM_EVIDENCE_EXPORT = "evidence:export"
 PERM_IMPORT_PREVIEW = "import:preview"
@@ -47,6 +48,7 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
     {
         PERM_AUDIT_READ,
         PERM_AUDIT_RUN,
+        PERM_ANALYTICS_READ,
         PERM_EVIDENCE_READ,
         PERM_EVIDENCE_EXPORT,
         PERM_IMPORT_PREVIEW,
@@ -85,6 +87,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {
             PERM_AUDIT_READ,
             PERM_AUDIT_RUN,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_EVIDENCE_EXPORT,
             PERM_RULES_READ,
@@ -127,6 +130,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "reviewer": frozenset(
         {
             PERM_AUDIT_READ,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_EVIDENCE_EXPORT,
             PERM_READINESS_READ,
@@ -139,6 +143,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {
             PERM_AUDIT_READ,
             PERM_AUDIT_RUN,
+            PERM_ANALYTICS_READ,
             PERM_EVIDENCE_READ,
             PERM_IMPORT_PREVIEW,
             PERM_RULES_PREVIEW,
@@ -154,7 +159,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         }
     ),
     "read_only": frozenset(
-        {PERM_AUDIT_READ, PERM_EVIDENCE_READ, PERM_READINESS_READ, PERM_SOURCE_INTEL_READ}
+        {
+            PERM_AUDIT_READ,
+            PERM_ANALYTICS_READ,
+            PERM_EVIDENCE_READ,
+            PERM_READINESS_READ,
+            PERM_SOURCE_INTEL_READ,
+        }
     ),
 }
 

@@ -1,7 +1,16 @@
-"""Export audit reports to HTML."""
+"""Export audit reports to HTML, plus the shared safe-cell neutralization.
+
+``_neutralize_formula`` is the single home for spreadsheet formula-injection
+defense: it prefixes a leading dangerous character with a quote so a cell can
+never execute when opened or pasted into Excel/Sheets/Numbers. The HTML export
+layers HTML-escaping on top via ``_safe_cell``; the CSV/BI export reuses the
+same neutralization (the ``csv`` module owns CSV quoting, so no HTML-escape).
+"""
 
 from __future__ import annotations
 
+import csv
+import io
 from html import escape as _html_escape
 from typing import Any
 
@@ -13,18 +22,48 @@ from complyos.models.domain import AuditReport
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
+def _neutralize_formula(value: object) -> str:
+    """Quote-prefix a value if it would be read as a spreadsheet formula.
+
+    The single source of truth for formula-injection neutralization, shared by
+    the HTML and CSV/BI export paths so the defense can never drift between them.
+    """
+    text = "" if value is None else str(value)
+    if text and text[0] in _FORMULA_PREFIXES:
+        text = "'" + text
+    return text
+
+
 def _safe_cell(value: object) -> str:
-    """Escape a user/source-derived field for inclusion in exported output.
+    """Escape a user/source-derived field for inclusion in exported HTML.
 
     Neutralizes spreadsheet formula injection (prefixes the value with a single
     quote so Excel/Sheets treat it as text) and HTML-escapes it so it cannot
     inject markup/script into the rendered report. Applied to every field that
     originates from LMS/import data rather than from ComplyOS itself.
     """
-    text = "" if value is None else str(value)
-    if text and text[0] in _FORMULA_PREFIXES:
-        text = "'" + text
-    return _html_escape(text, quote=True)
+    return _html_escape(_neutralize_formula(value), quote=True)
+
+
+def write_safe_csv(
+    columns: list[str],
+    rows: list[dict[str, object]],
+) -> str:
+    """Render rows to a CSV string with every cell formula-neutralized.
+
+    Column order is fixed by ``columns`` so a BI/spreadsheet consumer sees a
+    stable schema. Every value is run through ``_neutralize_formula`` before the
+    ``csv`` writer quotes it, so an attacker-controlled field beginning with
+    ``=``/``+``/``-``/``@`` (or a leading tab/CR) lands as inert text, not a live
+    formula. The ``csv`` module owns CSV-level quoting/escaping; this never
+    hand-rolls delimiter handling.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([_neutralize_formula(row.get(column, "")) for column in columns])
+    return buffer.getvalue()
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">

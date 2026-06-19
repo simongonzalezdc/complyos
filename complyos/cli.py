@@ -26,6 +26,7 @@ from complyos.notification.sender import NotificationSender, build_notifier_from
 from complyos.notification.webhooks import WebhookNotifier
 from complyos.regwatch import RegWatchAdapter
 from complyos.services.ai_proposals import AIProposalService
+from complyos.services.analytics import Granularity, TrendAnalyticsService
 from complyos.services.audit import AuditService
 from complyos.services.connector_registry import ConnectorRegistry
 from complyos.services.context import (
@@ -792,6 +793,91 @@ def dashboard(
         import webbrowser
 
         webbrowser.open(f"file://{os.path.abspath(path)}")
+
+
+@app.command()
+def analytics(
+    granularity: str = typer.Option(
+        "monthly", "--granularity", "-g", help="Period bucket: weekly or monthly"
+    ),
+    horizon_days: int = typer.Option(
+        30, "--horizon-days", help="Expiring-soon horizon in days"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Period-bucketed trend analytics over learning records (tenant-scoped)."""
+    try:
+        bucket = Granularity(granularity)
+    except ValueError:
+        console.print("[red]granularity must be 'weekly' or 'monthly'[/red]")
+        raise typer.Exit(1) from None
+
+    service = TrendAnalyticsService(LocalRepository(db_path))
+    result = service.compute(
+        _local_cli_context(), granularity=bucket, horizon_days=horizon_days
+    )
+
+    if json_output:
+        console.print(json.dumps(result.model_dump(mode="json"), indent=2, default=str))
+        return
+
+    console.print(f"[bold]Tenant:[/bold] {result.tenant_id}")
+    console.print(f"[bold]Granularity:[/bold] {result.granularity.value}")
+    console.print(f"[bold]Total records:[/bold] {result.total_records}")
+    console.print(
+        f"[bold]Overall completion rate:[/bold] "
+        f"{result.overall_completion_rate * 100:.1f}%"
+    )
+
+    if result.item_period_metrics:
+        table = Table(title="Per-Period Metrics by Learning Item")
+        table.add_column("Period")
+        table.add_column("Item")
+        table.add_column("Due", justify="right")
+        table.add_column("Completed", justify="right")
+        table.add_column("Open Gaps", justify="right")
+        table.add_column("Completion Rate", justify="right")
+        for metric in result.item_period_metrics:
+            table.add_row(
+                metric.period,
+                metric.course_code,
+                str(metric.due_count),
+                str(metric.completed_count),
+                str(metric.open_gap_count),
+                f"{metric.completion_rate * 100:.0f}%",
+            )
+        console.print(table)
+
+    if result.expiring_soon:
+        table = Table(title=f"Expiring Within {result.horizon_days} Days")
+        table.add_column("Item")
+        table.add_column("Expiring", justify="right")
+        for bucket_row in result.expiring_soon:
+            table.add_row(bucket_row.course_code, str(bucket_row.expiring_count))
+        console.print(table)
+
+
+@app.command("export-bi")
+def export_bi(
+    output: str = typer.Argument("bi-feed.csv", help="Output file path"),
+    fmt: str = typer.Option("csv", "--format", "-f", help="Feed format: csv or json"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+):
+    """Export the BI-ready learner x requirement feed (CSV or JSON)."""
+    service = TrendAnalyticsService(LocalRepository(db_path))
+    try:
+        result = service.export_bi_feed(
+            _local_cli_context(), fmt=fmt, output_path=output
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]BI feed ({result['row_count']} rows) exported to "
+        f"{result['output_path']}[/green]"
+    )
 
 
 @app.command("serve-dashboard")

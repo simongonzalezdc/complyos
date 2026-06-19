@@ -330,6 +330,37 @@ class LocalRepository(
                 for record, user, course in rows
             ]
 
+    def list_learning_records_with_owner(
+        self,
+        *,
+        tenant_id: str,
+    ) -> list[tuple[LearningRecord, User, Course]]:
+        """Return every learning record for a tenant with its owner and item.
+
+        Tenant-scoped: filters on the learning record's ``tenant_id`` column so a
+        report for one tenant can never read another tenant's records. The owning
+        user and learning item are joined in so a caller (analytics, BI feed) can
+        build denormalized learner x requirement rows without a second round-trip.
+        Records whose owner or item was never independently synced are dropped by
+        the inner join — the BI feed only emits rows it can fully attribute.
+        """
+        with self._session() as session:
+            rows = (
+                session.query(DBLearningRecord, DBUser, DBCourse)
+                .join(DBUser, DBLearningRecord.user_id == DBUser.id)
+                .join(DBCourse, DBLearningRecord.course_id == DBCourse.id)
+                .where(DBLearningRecord.tenant_id == tenant_id)
+                .all()
+            )
+            return [
+                (
+                    self._to_learning_record(record),
+                    self._to_user(user),
+                    self._to_course(course),
+                )
+                for record, user, course in rows
+            ]
+
     # ------------------------------------------------------------------
     # Sync helpers
     # ------------------------------------------------------------------

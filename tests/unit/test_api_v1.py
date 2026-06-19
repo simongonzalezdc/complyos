@@ -729,3 +729,101 @@ def test_api_v1_plural_resource_aliases_reachable(monkeypatch, tmp_path) -> None
     assert plural_remediate.status_code == 200
     legacy_remediate = client.post("/api/v1/remediate", json={}, headers=headers)
     assert legacy_remediate.status_code == 200
+
+
+def _seed_analytics_repo(repo: LocalRepository) -> None:
+    from datetime import date
+
+    from complyos.models.domain import (
+        Course,
+        LearningRecord,
+        LearningRecordStatus,
+        User,
+    )
+
+    repo.save_user(
+        User(
+            id="u1",
+            employee_id="E001",
+            email="alice@example.com",
+            first_name="Alice",
+            last_name="Smith",
+            department="Engineering",
+            region="US",
+            hire_date=date(2023, 1, 1),
+            custom_attributes={"tenant_id": "local-default"},
+        )
+    )
+    repo.save_course(Course(id="c1", code="SEC-101", title="Security", mandatory=True))
+    repo.save_learning_record(
+        LearningRecord(
+            id="lr1",
+            user_id="u1",
+            course_id="c1",
+            source_system="csv",
+            status=LearningRecordStatus.COMPLETED,
+            due_date=date(2026, 5, 1),
+            completed_date=datetime(2026, 4, 1, tzinfo=UTC),
+        )
+    )
+
+
+def test_api_v1_analytics_trends(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-analytics.db"))
+    _seed_analytics_repo(repo)
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"}
+
+    response = client.get("/api/v1/analytics/trends?granularity=monthly", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tenant_id"] == "local-default"
+    assert body["total_records"] == 1
+    assert body["granularity"] == "monthly"
+    assert "actor_context" in body
+
+
+def test_api_v1_analytics_trends_rejects_bad_granularity(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-bad-gran.db"))))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"}
+
+    response = client.get("/api/v1/analytics/trends?granularity=daily", headers=headers)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_granularity"
+
+
+def test_api_v1_export_bi_feed_csv(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    repo = LocalRepository(str(tmp_path / "api-bi.db"))
+    _seed_analytics_repo(repo)
+    client = TestClient(create_api_v1_app(repo))
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "compliance_manager"}
+
+    response = client.post(
+        "/api/v1/exports/bi-feed", json={"format": "csv"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["format"] == "csv"
+    assert body["row_count"] == 1
+    assert body["columns"][0] == "tenant_id"
+    assert "learner_id" in body["content"]
+
+
+def test_api_v1_export_bi_feed_denied_for_underprivileged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-bi-denied.db"))))
+    # read_only has analytics:read but NOT evidence:export.
+    headers = {"Authorization": "Bearer test-token", "X-Actor-Role": "read_only"}
+
+    response = client.post(
+        "/api/v1/exports/bi-feed", json={"format": "csv"}, headers=headers
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "permission_denied"

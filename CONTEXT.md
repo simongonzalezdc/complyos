@@ -81,8 +81,8 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 ### Built
 
 **Service / authorization layer**
-- Every business workflow routes through application services that call `require_permission(context, PERM_*)` — a single authorization choke-point. Services: AuditService, EvidenceService, RemediationService, ImportService, ConnectorRegistry, PolicyRuleService, AIProposalService, PrivacyProgramService, ReadinessService, SecurityEvidenceService, GovernancePacketService, SourceIntelService, NotificationOutboxService, InboundHookService, RoleAdminService.
-- An `ActorContext` (tenant_id, actor_id, role, permissions, surface, request_id) is carried into every service call. Roles map to a 30-permission catalog (`complyos/services/context.py`).
+- Every business workflow routes through application services that call `require_permission(context, PERM_*)` — a single authorization choke-point. Services: AuditService, EvidenceService, RemediationService, ImportService, ConnectorRegistry, PolicyRuleService, AIProposalService, PrivacyProgramService, ReadinessService, SecurityEvidenceService, GovernancePacketService, SourceIntelService, NotificationOutboxService, InboundHookService, RoleAdminService, TrendAnalyticsService.
+- An `ActorContext` (tenant_id, actor_id, role, permissions, surface, request_id) is carried into every service call. Roles map to a 31-permission catalog (`complyos/services/context.py`).
 - `LocalRepository` is decomposed into cohesive mixins — PrivacyRepositoryMixin, ImportRepositoryMixin, SourceIntelRepositoryMixin, NotificationRepositoryMixin, RoleBindingRepositoryMixin — behind a typed `RepositoryBase`.
 
 **Surfaces (all call the same services; cross-surface parity enforced by tests)**
