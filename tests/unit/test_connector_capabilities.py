@@ -36,6 +36,52 @@ def test_canvas_capabilities_include_learning_records_and_due_dates():
     assert canvas.auth == "token"
 
 
+def test_campus_lms_connectors_are_supported():
+    items = _by_name(profile="campus")
+
+    assert items["brightspace"].status == "supported"
+    assert items["moodle"].status == "supported"
+    assert items["blackboard"].status == "supported"
+
+
+def test_brightspace_capabilities_reflect_final_grade_pull():
+    brightspace = _by_name(profile="campus")["brightspace"]
+
+    assert brightspace.auth == "oauth2"
+    assert brightspace.supports_learning_records is True
+    assert brightspace.supports_scores is True
+    # Final-grade values carry no per-item due date or exemption flag.
+    assert brightspace.supports_due_dates is False
+    assert brightspace.supports_exemptions is False
+    # Brightspace has no native recertification/expiry field.
+    assert brightspace.supports_expiry is False
+
+
+def test_moodle_capabilities_reflect_completion_pull():
+    moodle = _by_name(profile="campus")["moodle"]
+
+    assert moodle.auth == "token"
+    assert moodle.supports_learning_records is True
+    # The completion path gives a completed flag + timestamp only.
+    assert moodle.supports_scores is False
+    assert moodle.supports_due_dates is False
+    assert moodle.supports_exemptions is False
+    assert moodle.supports_expiry is False
+
+
+def test_blackboard_capabilities_reflect_gradebook_pull():
+    blackboard = _by_name(profile="campus")["blackboard"]
+
+    assert blackboard.auth == "oauth2"
+    assert blackboard.supports_learning_records is True
+    assert blackboard.supports_scores is True
+    # Gradebook columns carry grading.due; grades carry an exempt flag.
+    assert blackboard.supports_due_dates is True
+    assert blackboard.supports_exemptions is True
+    # Blackboard has no native recertification/expiry field.
+    assert blackboard.supports_expiry is False
+
+
 def test_csv_is_supported_for_both_tracks():
     csv = _by_name()["csv"]
 

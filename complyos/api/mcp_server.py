@@ -9,10 +9,13 @@ from fastmcp import FastMCP
 
 from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
+from complyos.connectors.blackboard import BlackboardConnector
+from complyos.connectors.brightspace import BrightspaceConnector
 from complyos.connectors.canvas import CanvasConnector
 from complyos.connectors.cornerstone import CornerstoneConnector
 from complyos.connectors.csv_file import CSVConnector
 from complyos.connectors.mock import MockConnector
+from complyos.connectors.moodle import MoodleConnector
 from complyos.connectors.successfactors import SuccessFactorsConnector
 from complyos.connectors.workday import WorkdayConnector
 from complyos.core.audit_views import shape_gaps, shape_remediation, shape_report
@@ -124,6 +127,36 @@ def _canvas_from_config(config: ComplyOSConfig) -> CanvasConnector:
     )
 
 
+def _brightspace_from_config(config: ComplyOSConfig) -> BrightspaceConnector:
+    connector_config = config.connector.get("brightspace", {})
+    return BrightspaceConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        token_url=resolve_env_placeholder(connector_config.get("token_url")),
+        org_unit_id=resolve_env_placeholder(connector_config.get("org_unit_id")),
+    )
+
+
+def _moodle_from_config(config: ComplyOSConfig) -> MoodleConnector:
+    connector_config = config.connector.get("moodle", {})
+    return MoodleConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        token=resolve_env_placeholder(connector_config.get("token")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+    )
+
+
+def _blackboard_from_config(config: ComplyOSConfig) -> BlackboardConnector:
+    connector_config = config.connector.get("blackboard", {})
+    return BlackboardConnector(
+        base_url=resolve_env_placeholder(connector_config.get("base_url")),
+        client_id=resolve_env_placeholder(connector_config.get("client_id")),
+        client_secret=resolve_env_placeholder(connector_config.get("client_secret")),
+        course_id=resolve_env_placeholder(connector_config.get("course_id")),
+    )
+
+
 def _get_connector() -> LMSConnector:
     """Get the appropriate LMS connector from env first, then config."""
     if os.getenv("COMPLYOS_CSV_DIR"):
@@ -144,6 +177,12 @@ def _get_connector() -> LMSConnector:
         return _cornerstone_from_config(config)
     if connector_type == "canvas":
         return _canvas_from_config(config)
+    if connector_type == "brightspace":
+        return _brightspace_from_config(config)
+    if connector_type == "moodle":
+        return _moodle_from_config(config)
+    if connector_type == "blackboard":
+        return _blackboard_from_config(config)
     return MockConnector()
 
 

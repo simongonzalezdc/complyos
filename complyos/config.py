@@ -101,6 +101,24 @@ def generate_config(
                 "course_id": "${CANVAS_COURSE_ID}",
                 "account_id": "${CANVAS_ACCOUNT_ID}",
             },
+            "brightspace": {
+                "base_url": "${BRIGHTSPACE_BASE_URL}",
+                "client_id": "${BRIGHTSPACE_CLIENT_ID}",
+                "client_secret": "${BRIGHTSPACE_CLIENT_SECRET}",
+                "token_url": "${BRIGHTSPACE_TOKEN_URL}",
+                "org_unit_id": "${BRIGHTSPACE_ORG_UNIT_ID}",
+            },
+            "moodle": {
+                "base_url": "${MOODLE_BASE_URL}",
+                "token": "${MOODLE_TOKEN}",
+                "course_id": "${MOODLE_COURSE_ID}",
+            },
+            "blackboard": {
+                "base_url": "${BLACKBOARD_BASE_URL}",
+                "client_id": "${BLACKBOARD_CLIENT_ID}",
+                "client_secret": "${BLACKBOARD_CLIENT_SECRET}",
+                "course_id": "${BLACKBOARD_COURSE_ID}",
+            },
         },
         "database": {"path": db_path},
         "defaults": {
