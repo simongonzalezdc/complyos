@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from complyos.core.import_repo import ImportRepositoryMixin
@@ -288,6 +288,47 @@ class LocalRepository(
             if source_system:
                 query = query.where(DBLearningRecord.source_system == source_system)
             return [self._to_learning_record(r) for r in query.all()]
+
+    def list_expiring_learning_records(
+        self,
+        *,
+        tenant_id: str,
+        as_of: date,
+        horizon: date,
+    ) -> list[tuple[LearningRecord, User, Course]]:
+        """Return not-yet-expired records (with owner + item) expiring by ``horizon``.
+
+        Tenant-scoped: filters on the learning record's ``tenant_id`` column so a
+        reminder for one tenant can never read another tenant's records. A record
+        qualifies when it carries an ``expires_at`` in the closed window
+        ``[as_of, horizon]`` and is not exempt — already-expired records
+        (``expires_at < as_of``) are intentionally excluded because they are the
+        auditor's job, not a proactive reminder. The owning user and the learning
+        item are returned alongside so the caller can build a recipient-addressed,
+        typed reminder without a second round-trip.
+        """
+        with self._session() as session:
+            rows = (
+                session.query(DBLearningRecord, DBUser, DBCourse)
+                .join(DBUser, DBLearningRecord.user_id == DBUser.id)
+                .join(DBCourse, DBLearningRecord.course_id == DBCourse.id)
+                .where(
+                    DBLearningRecord.tenant_id == tenant_id,
+                    DBLearningRecord.exempt.is_(False),
+                    DBLearningRecord.expires_at.is_not(None),
+                    DBLearningRecord.expires_at >= as_of,
+                    DBLearningRecord.expires_at <= horizon,
+                )
+                .all()
+            )
+            return [
+                (
+                    self._to_learning_record(record),
+                    self._to_user(user),
+                    self._to_course(course),
+                )
+                for record, user, course in rows
+            ]
 
     # ------------------------------------------------------------------
     # Sync helpers

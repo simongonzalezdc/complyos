@@ -514,6 +514,15 @@ def run_schedule(
         "--enqueue-notifications/--no-enqueue-notifications",
         help="Queue audit notification events without sending network calls",
     ),
+    enqueue_expiring_soon: bool = typer.Option(
+        True,
+        "--enqueue-expiring-soon/--no-enqueue-expiring-soon",
+        help="Queue a proactive upcoming-expiry reminder event (no network calls)",
+    ),
+    expiry_window: Annotated[
+        list[int] | None,
+        typer.Option("--expiry-window", help="Expiry reminder window in days (default 30/60/90)"),
+    ] = None,
     notify_channel: Annotated[
         list[str] | None,
         typer.Option("--notify-channel", help="Notification channel to enqueue"),
@@ -556,6 +565,21 @@ def run_schedule(
         return results
 
     results = asyncio.run(_run())
+
+    # Upcoming-expiry reminders run on every scheduled pass, independent of
+    # whether an audit job was due: a recertification can lapse on a day no audit
+    # is scheduled, so the proactive reminder must not be gated on audit results.
+    if enqueue_expiring_soon:
+        reminder_event = notification_service.enqueue_expiring_soon_reminder(
+            context,
+            windows_days=expiry_window,
+            channels=channels,
+        )
+        if reminder_event is not None:
+            console.print(
+                f"[green]Expiring-soon reminder enqueued:[/green] {reminder_event['id']}"
+            )
+
     if not results:
         console.print("[yellow]No scheduled audit jobs were due[/yellow]")
         return
@@ -1887,6 +1911,80 @@ def notifications_drain(
         delivery = item["delivery"]
         table.add_row(str(delivery["id"]), str(delivery["channel"]), str(item["status"]))
     console.print(table)
+
+
+@notifications_app.command("expiring-soon")
+def notifications_expiring_soon(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    window: Annotated[
+        list[int] | None,
+        typer.Option("--window", help="Reminder window in days (repeatable; default 30/60/90)"),
+    ] = None,
+    notify_channel: Annotated[
+        list[str] | None,
+        typer.Option("--notify-channel", help="Notification channel to enqueue"),
+    ] = None,
+    enqueue: bool = typer.Option(
+        True,
+        "--enqueue/--preview",
+        help="Enqueue a reminder event by default; use --preview to only compute",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Enqueue a proactive reminder for certifications expiring within the windows.
+
+    Forward-looking counterpart to ``audit``: surfaces not-yet-expired records and
+    queues one reminder event to the outbox (drain delivers it). ``--preview``
+    computes the set without enqueuing. Legal-hold subjects are excluded.
+    """
+    context = _local_cli_context(role="compliance_manager")
+    service = NotificationOutboxService(LocalRepository(db_path))
+    channels = notify_channel or ["email", "slack", "teams"]
+    reminder = service.compute_expiring_soon(context, windows_days=window)
+    event = None
+    if enqueue and reminder.total_expiring:
+        event = service.enqueue_expiring_soon_reminder(
+            context,
+            windows_days=window,
+            channels=channels,
+        )
+
+    if json_output:
+        _print_json(
+            {
+                "reminder": reminder.model_dump(mode="json"),
+                "enqueued_event_id": event["id"] if event else None,
+            }
+        )
+        return
+
+    console.print(f"[bold]Windows (days):[/bold] {'/'.join(str(w) for w in reminder.windows_days)}")
+    console.print(f"[bold]Total expiring soon:[/bold] {reminder.total_expiring}")
+    if event is not None:
+        console.print(f"[green]Reminder event enqueued:[/green] {event['id']}")
+    elif enqueue:
+        console.print("[cyan]Nothing expiring within the windows — no event enqueued.[/cyan]")
+    else:
+        console.print("[cyan]Preview only — no event enqueued.[/cyan]")
+
+    for group in reminder.groups:
+        if not group.count:
+            continue
+        table = Table(title=f"Expiring within {group.window_days} days ({group.count})")
+        table.add_column("User")
+        table.add_column("Department")
+        table.add_column("Course")
+        table.add_column("Expires")
+        table.add_column("Days Left")
+        for entry in group.entries:
+            table.add_row(
+                f"{entry.user_name} ({entry.user_email})",
+                entry.department,
+                entry.course_title,
+                entry.expires_at.isoformat(),
+                str(entry.days_until_expiry),
+            )
+        console.print(table)
 
 
 @governance_app.command("packet")
