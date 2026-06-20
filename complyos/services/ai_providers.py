@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
@@ -44,10 +45,110 @@ LOCAL_MODEL_PROVIDER_ID = "local-openai-compatible"
 DEFAULT_LOCAL_MODEL = "llama3.1:8b"
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 30.0
 
+# Soft-switch directive (Qwen3/3.5 convention) that suppresses reasoning output.
+NO_THINK_DIRECTIVE = "/no_think"
+
+# Reasoning blocks emitted by "thinking" models (Qwen3/3.5, DeepSeek-R1 distills).
+# Matched non-greedy, DOTALL, case-insensitive; a leading unterminated ``<think>``
+# with no close is handled separately by ``_strip_reasoning``.
+_THINK_BLOCK_RE = re.compile(
+    r"<\s*(think|thinking)\s*>.*?<\s*/\s*\1\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+# An unterminated leading reasoning tag (model started reasoning, never closed it).
+_LEADING_OPEN_THINK_RE = re.compile(
+    r"^\s*<\s*(think|thinking)\s*>.*\Z",
+    re.DOTALL | re.IGNORECASE,
+)
+# Markdown code fences: ```json ... ``` or bare ``` ... ```.
+_FENCE_RE = re.compile(
+    r"```[ \t]*[A-Za-z0-9_+-]*[ \t]*\r?\n?(.*?)```",
+    re.DOTALL,
+)
+
 
 def _norm(value: Any) -> str:
     """Normalize a value into a stable lowercase match key (for clustering)."""
     return "" if value is None else " ".join(str(value).split()).strip().lower()
+
+
+def _strip_reasoning(text: str, *, drop_unterminated: bool = True) -> str:
+    """Remove ``<think>``/``<thinking>`` reasoning blocks and markdown fences.
+
+    Handles balanced blocks and code fences (```json ... ``` and bare ``` ... ```).
+    When ``drop_unterminated`` is set, an unterminated *leading* ``<think>`` (a tag
+    the model never closed) is also dropped — that is only safe as a last resort,
+    because a stray open tag may still be followed by usable JSON; callers try
+    balanced extraction on the non-dropped text first. Returns the residual text.
+    """
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    if drop_unterminated:
+        cleaned = _LEADING_OPEN_THINK_RE.sub("", cleaned)
+    fence_match = _FENCE_RE.search(cleaned)
+    if fence_match:
+        cleaned = fence_match.group(1)
+    return cleaned.strip()
+
+
+def _extract_balanced_json(text: str) -> str | None:
+    """Return the first balanced top-level JSON object/array substring, if any.
+
+    Scans for the first ``{`` or ``[`` and matches brackets, ignoring braces and
+    brackets that appear inside JSON strings (with escape handling). Returns the
+    matched substring, or ``None`` when no balanced structure is found.
+    """
+    openers = {"{": "}", "[": "]"}
+    start = next((i for i, ch in enumerate(text) if ch in openers), -1)
+    if start < 0:
+        return None
+    closer = openers[text[start]]
+    opener = text[start]
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        ch = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _parse_model_content(content: str) -> Any:
+    """Sanitize a model's text content and parse the embedded JSON.
+
+    Strips reasoning blocks/markdown fences, then parses either the cleaned text
+    directly or the first balanced JSON object/array embedded in it. An
+    unterminated leading ``<think>`` is dropped only as a final fallback, after a
+    JSON-extraction attempt that keeps any JSON the model emitted past the open
+    tag. Raises ``json.JSONDecodeError`` (caught upstream) when nothing parses.
+    """
+    # First pass keeps an unterminated leading <think> so embedded JSON after it
+    # survives; the destructive drop is reserved for the final, no-JSON case.
+    kept = _strip_reasoning(content, drop_unterminated=False)
+    try:
+        return json.loads(kept)
+    except json.JSONDecodeError:
+        pass
+    candidate = _extract_balanced_json(kept)
+    if candidate is not None:
+        return json.loads(candidate)
+    # Last resort: drop an unterminated leading reasoning tag and retry.
+    cleaned = _strip_reasoning(content, drop_unterminated=True)
+    return json.loads(cleaned)
 
 
 class ProviderUnavailableError(RuntimeError):
@@ -254,12 +355,14 @@ class LocalModelProvider:
         *,
         timeout: float = DEFAULT_LOCAL_TIMEOUT_SECONDS,
         api_key: str | None = None,
+        disable_thinking: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.api_key = api_key
+        self.disable_thinking = disable_thinking
         self._client = client
 
     @property
@@ -367,6 +470,11 @@ class LocalModelProvider:
 
         Raises ProviderUnavailableError on any failure so the service falls back.
         """
+        if self.disable_thinking:
+            # Append the Qwen3/3.5 soft-switch to the OUTBOUND prompt only. This
+            # never touches the already-redacted payload — it only suppresses the
+            # model's reasoning emission to cut latency and clean the response.
+            user_prompt = f"{user_prompt}\n{NO_THINK_DIRECTIVE}"
         body = {
             "model": self.model,
             "messages": [
@@ -386,7 +494,10 @@ class LocalModelProvider:
             response.raise_for_status()
             envelope = response.json()
             content = envelope["choices"][0]["message"]["content"]
-            parsed = json.loads(content) if isinstance(content, str) else content
+            # Sanitize "thinking" model output (reasoning blocks, markdown fences)
+            # and extract the embedded JSON before validation. This touches ONLY
+            # the response — the redacted request is never altered.
+            parsed = _parse_model_content(content) if isinstance(content, str) else content
             validated = schema.model_validate(parsed)
         except httpx.TimeoutException as exc:
             raise ProviderUnavailableError(self.provider_id, task, f"timeout: {exc}") from exc
@@ -436,6 +547,7 @@ def provider_from_env() -> ProposalProvider:
             model=os.getenv("COMPLYOS_AI_MODEL") or DEFAULT_LOCAL_MODEL,
             timeout=_timeout_from_env(),
             api_key=os.getenv("COMPLYOS_AI_API_KEY"),
+            disable_thinking=_disable_thinking_from_env(),
         )
     return DeterministicProvider()
 
@@ -449,3 +561,14 @@ def _timeout_from_env() -> float:
     except ValueError:
         return DEFAULT_LOCAL_TIMEOUT_SECONDS
     return value if value > 0 else DEFAULT_LOCAL_TIMEOUT_SECONDS
+
+
+def _disable_thinking_from_env() -> bool:
+    """Opt-in flag (default OFF) to suppress reasoning on "thinking" models.
+
+    When ``COMPLYOS_AI_DISABLE_THINKING`` is a truthy value the provider appends
+    the ``/no_think`` soft-switch (Qwen3/3.5 convention) to the outbound prompt.
+    Unset/false leaves behavior unchanged.
+    """
+    raw = (os.getenv("COMPLYOS_AI_DISABLE_THINKING") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")

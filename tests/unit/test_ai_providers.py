@@ -269,3 +269,168 @@ def test_deterministic_provider_matches_legacy_content() -> None:
 def test_synthetic_fixtures_are_used_by_egress_test() -> None:
     # Guard: the eval fixtures stay PII-bearing so the egress proof is meaningful.
     assert any("@" in str(v) for row in _SYNTHETIC_PII_ROWS for v in row.values())
+
+
+# --- Thinking / reasoning model response robustness ------------------------
+def _chat_raw(content: str) -> Response:
+    """Wrap a raw model text content (un-parsed) as a chat/completions reply."""
+    return Response(200, json={"choices": [{"message": {"content": content}}]})
+
+
+@respx.mock
+def test_think_block_preamble_is_stripped_and_json_used(tmp_path) -> None:
+    # Qwen3/DeepSeek-R1 style: reasoning in <think>...</think> then the JSON.
+    content = (
+        "<think>let me reason about the headers and which fields fit...</think>"
+        '{"suggested_mappings": {"User ID": "user_id", "Course ID": "course_id"}}'
+    )
+    respx.post(CHAT_URL).mock(return_value=_chat_raw(content))
+    service, _ = _local_service(tmp_path, "think-block.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_mapping(context, headers=["User ID", "Course ID"])
+
+    # Model JSON used, NOT the deterministic fallback.
+    assert result.provenance["fallback"] is False
+    assert result.provenance["model_provider"] == "local-openai-compatible"
+    assert result.output["suggested_mappings"]["User ID"] == "user_id"
+
+
+@respx.mock
+def test_unterminated_leading_think_tag_falls_back_to_json(tmp_path) -> None:
+    # A leading <think> with no close, then the JSON after the reasoning prose.
+    content = (
+        "<think>reasoning that never closes... here is my answer "
+        '{"summary": "1 anomaly signal(s): 1 STALE_EXPORT"}'
+    )
+    respx.post(CHAT_URL).mock(return_value=_chat_raw(content))
+    service, _ = _local_service(tmp_path, "think-open.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_anomaly_summary(context, issues=[{"code": "STALE_EXPORT"}])
+
+    assert result.provenance["fallback"] is False
+    assert result.output["summary"] == "1 anomaly signal(s): 1 STALE_EXPORT"
+
+
+@respx.mock
+def test_markdown_json_fence_is_parsed(tmp_path) -> None:
+    content = (
+        "Here is the mapping:\n```json\n"
+        '{"suggested_mappings": {"User ID": "user_id"}}\n```'
+    )
+    respx.post(CHAT_URL).mock(return_value=_chat_raw(content))
+    service, _ = _local_service(tmp_path, "fence.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_mapping(context, headers=["User ID"])
+
+    assert result.provenance["fallback"] is False
+    assert result.output["suggested_mappings"]["User ID"] == "user_id"
+
+
+@respx.mock
+def test_bare_fence_is_parsed(tmp_path) -> None:
+    content = '```\n{"suggested_mappings": {"User ID": "user_id"}}\n```'
+    respx.post(CHAT_URL).mock(return_value=_chat_raw(content))
+    service, _ = _local_service(tmp_path, "bare-fence.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_mapping(context, headers=["User ID"])
+
+    assert result.provenance["fallback"] is False
+    assert result.output["suggested_mappings"]["User ID"] == "user_id"
+
+
+@respx.mock
+def test_leading_reasoning_prose_with_embedded_json_is_extracted(tmp_path) -> None:
+    # No tags, no fences — just reasoning prose then a JSON object embedded.
+    content = (
+        "First I considered the headers, then I decided on the mapping. "
+        'The result is {"suggested_mappings": {"User ID": "user_id"}} as shown.'
+    )
+    respx.post(CHAT_URL).mock(return_value=_chat_raw(content))
+    service, _ = _local_service(tmp_path, "embedded.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_mapping(context, headers=["User ID"])
+
+    assert result.provenance["fallback"] is False
+    assert result.output["suggested_mappings"]["User ID"] == "user_id"
+
+
+@respx.mock
+def test_pure_prose_no_json_falls_back_without_raising(tmp_path) -> None:
+    # Truly unparseable: prose with no JSON object/array at all.
+    respx.post(CHAT_URL).mock(
+        return_value=_chat_raw("I cannot produce that mapping right now, sorry.")
+    )
+    service, repo = _local_service(tmp_path, "prose.db")
+    context = default_local_context(surface="cli")
+
+    result = service.propose_mapping(context, headers=["User ID"])
+
+    assert result.status == "PROPOSED"
+    assert result.provenance["fallback"] is True
+    assert result.provenance["model_provider"] == "deterministic-local"
+    assert result.output["suggested_mappings"]["User ID"] == "user_id"
+    assert repo.list_learning_records() == []
+
+
+# --- Opt-in thinking-disable (/no_think soft-switch) -----------------------
+@respx.mock
+def test_disable_thinking_appends_no_think_directive(tmp_path) -> None:
+    route = respx.post(CHAT_URL).mock(
+        return_value=_chat_json({"suggested_mappings": {"User ID": "user_id"}})
+    )
+    repo = LocalRepository(str(tmp_path / "no-think-on.db"))
+    provider = LocalModelProvider(
+        base_url=BASE_URL, model="qwen3.5:4b", disable_thinking=True
+    )
+    service = AIProposalService(repo, provider=provider)
+    context = default_local_context(surface="cli")
+
+    service.propose_mapping(context, headers=["User ID"])
+
+    sent = route.calls.last.request.content.decode("utf-8")
+    assert "/no_think" in sent
+
+
+@respx.mock
+def test_thinking_enabled_by_default_no_directive(tmp_path) -> None:
+    route = respx.post(CHAT_URL).mock(
+        return_value=_chat_json({"suggested_mappings": {"User ID": "user_id"}})
+    )
+    service, _ = _local_service(tmp_path, "no-think-off.db")
+    context = default_local_context(surface="cli")
+
+    service.propose_mapping(context, headers=["User ID"])
+
+    sent = route.calls.last.request.content.decode("utf-8")
+    assert "/no_think" not in sent
+
+
+# --- Response sanitizing must NOT touch the redacted request side ----------
+@respx.mock
+def test_think_sanitizing_does_not_egress_pii(tmp_path) -> None:
+    # Even when the model emits reasoning, the REQUEST stays redacted: the
+    # sanitizing only touches the RESPONSE, never the outbound body.
+    route = respx.post(CHAT_URL).mock(
+        return_value=_chat_raw(
+            "<think>thinking about the duplicate rows...</think>"
+            '{"duplicate_clusters": []}'
+        )
+    )
+    service, _ = _local_service(tmp_path, "think-egress.db")
+    context = default_local_context(surface="cli")
+
+    rows = [
+        {"name": "Carol Hidden", "email": "carol.hidden@corp.example", "course_id": "c1"},
+        {"name": "Carol Hidden", "email": "carol.hidden@corp.example", "course_id": "c1"},
+    ]
+    service.propose_duplicate_clustering(context, rows=rows)
+
+    sent = route.calls.last.request.content.decode("utf-8")
+    assert "Carol Hidden" not in sent
+    assert "carol.hidden@corp.example" not in sent
+    assert "[REDACTED]" in sent

@@ -133,6 +133,10 @@ def generate_config(
             "model": "${COMPLYOS_AI_MODEL}",
             "timeout_seconds": "${COMPLYOS_AI_TIMEOUT_SECONDS}",
             "api_key": "${COMPLYOS_AI_API_KEY}",
+            # Opt-in (default off). Truthy appends the ``/no_think`` soft-switch to
+            # the outbound prompt so "thinking"/reasoning models (Qwen3/3.5,
+            # DeepSeek-R1 distills) skip reasoning. Off = behavior unchanged.
+            "disable_thinking": "${COMPLYOS_AI_DISABLE_THINKING}",
         },
         "database": {"path": db_path},
         "defaults": {
