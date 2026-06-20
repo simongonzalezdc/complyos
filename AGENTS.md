@@ -55,6 +55,7 @@ the same three; do not let the local gate drift more lenient than CI.
 | `COMPLYOS_AI_MODEL` | Model name for `local` provider (e.g. `llama3.1:8b`). Default `llama3.1:8b`. |
 | `COMPLYOS_AI_TIMEOUT_SECONDS` | Per-request timeout for `local` provider. Default `30`. |
 | `COMPLYOS_AI_API_KEY` | Optional bearer token for `local` provider (some servers want a dummy key). Never written to provenance. |
+| `COMPLYOS_AI_DISABLE_THINKING` | Opt-in (default off). Truthy (`1`/`true`/`yes`/`on`) appends the `/no_think` soft-switch to the outbound prompt so reasoning/"thinking" models (Qwen3/3.5, DeepSeek-R1 distills) skip reasoning — lower latency, cleaner JSON. Off = behavior unchanged. (Response sanitizing strips any `<think>` blocks/markdown fences regardless of this flag.) |
 
 ## Map
 
