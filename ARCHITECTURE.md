@@ -60,7 +60,7 @@ Every business workflow routes through the **application service layer**. Servic
 | `request_id` | Per-request correlation UUID |
 | `auth_method` | `"bearer"` / `"session"` / `"local_dev"` |
 
-### Permission Catalog (33 permissions)
+### Permission Catalog (35 permissions)
 
 ```
 audit:read              audit:run              analytics:read
@@ -79,6 +79,7 @@ legal_hold:manage
 source_intel:read       source_intel:run       source_intel:decide
 notifications:manage
 attestation:record      attestation:read
+intake:submit           intake:confirm
 admin:manage
 ```
 
@@ -86,14 +87,14 @@ admin:manage
 
 | Role | Permissions |
 |------|------------|
-| `owner` | All 33 |
+| `owner` | All 35 |
 | `admin` | All except `admin:manage` |
-| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications |
+| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications, attestation, intake (submit + confirm) |
 | `privacy_admin` | Evidence:read, readiness:read, privacy (all), legal hold, notifications |
 | `import_approver` | import:preview/decide/promote, evidence:read |
 | `importer` | import:preview/decide, evidence:read |
 | `reviewer` | audit:read, analytics:read, evidence, readiness, security/governance read, source-intel:read |
-| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run (**no** notifications:manage — MCP default role is proposal-only) |
+| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run, attestation:read, intake:submit (**no** notifications:manage, attestation:record, or intake:confirm — MCP default role is proposal-only and cannot confirm scope) |
 | `read_only` | audit:read, analytics:read, evidence:read, readiness:read, source-intel:read |
 
 ## Application Services

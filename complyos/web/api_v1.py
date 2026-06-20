@@ -29,6 +29,7 @@ from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.inbound_hooks import InboundHookService, InboundWebhookSignatureError
+from complyos.services.intake import IntakeService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
@@ -138,6 +139,20 @@ class AttestationRecordBody(BaseModel):
     policy_version: str
     expires_at: date | None = None
     on_behalf: bool = False
+
+
+class IntakeSubmitBody(BaseModel):
+    requester: str
+    title: str
+    audience: str | None = None
+    priority: str | None = None
+    business_context: str | None = None
+    constraints: str | None = None
+    requested_by_date: date | None = None
+
+
+class IntakeConfirmBody(BaseModel):
+    note: str | None = None
 
 
 class RuleRequestBody(BaseModel):
@@ -933,6 +948,65 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             }
         except AuthorizationError as exc:
             raise _permission_error(exc, context) from exc
+
+    # ---- Training intake: capture -> proposal-only packet -> confirm scope ----
+    @router.post("/intake")
+    async def submit_intake(
+        body: IntakeSubmitBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            service = IntakeService(repo)
+            request = service.create_request(
+                context,
+                requester=body.requester,
+                title=body.title,
+                audience=body.audience,
+                priority=body.priority,
+                business_context=body.business_context,
+                constraints=body.constraints,
+                requested_by_date=body.requested_by_date,
+            )
+            packet = service.draft_packet(context, request_id=request.id)
+            return {
+                "request": request.model_dump(mode="json"),
+                "packet": packet.model_dump(mode="json"),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("intake_submit_failed", exc, context) from exc
+
+    @router.get("/intake")
+    async def list_intake(
+        status: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            requests = IntakeService(repo).list_requests(context, status=status)
+            return {
+                "items": [req.model_dump(mode="json") for req in requests],
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_intake_status", exc, context) from exc
+
+    @router.post("/intake/{request_id}/confirm")
+    async def confirm_intake_scope(
+        request_id: str,
+        body: IntakeConfirmBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return IntakeService(repo).confirm_scope(
+                context, request_id=request_id, note=body.note
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("intake_confirm_failed", exc, context) from exc
 
     return router
 

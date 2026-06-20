@@ -277,6 +277,26 @@ class DBAIProvenance(Base):
     usage_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class DBIntakeRequest(Base):
+    __tablename__ = "intake_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    requester: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    audience: Mapped[str | None] = mapped_column(String, nullable=True)
+    priority: Mapped[str | None] = mapped_column(String, nullable=True)
+    business_context: Mapped[str | None] = mapped_column(String, nullable=True)
+    constraints: Mapped[str | None] = mapped_column(String, nullable=True)
+    requested_by_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="draft", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    confirmed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmation_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class DBPrivacyRequest(Base):
     __tablename__ = "privacy_requests"
 

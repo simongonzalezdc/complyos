@@ -38,6 +38,7 @@ from complyos.services.context import (
 from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.intake import IntakeService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
@@ -80,6 +81,10 @@ notifications_app = typer.Typer(name="notifications", help="Drain notification o
 attestations_app = typer.Typer(
     name="attestations",
     help="Define and record AI-use-policy / AI-literacy attestations",
+)
+intake_app = typer.Typer(
+    name="intake",
+    help="Capture training requests, draft proposal-only packets, and confirm scope",
 )
 console = Console()
 
@@ -2464,6 +2469,129 @@ def attestations_list(
     console.print(table)
 
 
+@intake_app.command("submit")
+def intake_submit(
+    title: str = typer.Argument(..., help="Short title of what training is requested"),
+    requester: str = typer.Option(..., "--requester", help="Who is asking (name or id)"),
+    audience: str | None = typer.Option(None, "--audience", help="Who needs the training"),
+    priority: str | None = typer.Option(
+        None, "--priority", help="low | medium | high | urgent (a human may override)"
+    ),
+    business_context: str | None = typer.Option(
+        None, "--context", help="Why this is needed / business driver"
+    ),
+    constraints: str | None = typer.Option(
+        None, "--constraints", help="Timing, budget, compliance, or delivery constraints"
+    ),
+    requested_by_date: str | None = typer.Option(
+        None, "--by", help="Requested-by date (YYYY-MM-DD)"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Capture a training request (DRAFT) and draft its proposal-only packet (intake:submit).
+
+    Submitting captures the request and drafts a packet that flags missing info
+    and SUGGESTS priority/routing. It never confirms scope — run `intake confirm`
+    for that (a separate, human-gated step).
+    """
+    from datetime import date as _date
+
+    context = _local_cli_context()
+    parsed_by = _date.fromisoformat(requested_by_date) if requested_by_date else None
+    service = IntakeService(LocalRepository(db_path))
+    request = service.create_request(
+        context,
+        requester=requester,
+        title=title,
+        audience=audience,
+        priority=priority,
+        business_context=business_context,
+        constraints=constraints,
+        requested_by_date=parsed_by,
+    )
+    packet = service.draft_packet(context, request_id=request.id)
+    if json_output:
+        _print_json(
+            {
+                "request": request.model_dump(mode="json"),
+                "packet": packet.model_dump(mode="json"),
+            }
+        )
+        return
+    console.print(
+        f"[green]Captured intake request[/green] {request.id} "
+        f"(status {request.status.value}; scope NOT yet confirmed)."
+    )
+    console.print(
+        f"Draft packet: priority [bold]{packet.suggested_priority.value}[/bold], "
+        f"routing [bold]{packet.suggested_routing}[/bold] ({packet.routing_rationale})."
+    )
+    if packet.missing_info:
+        console.print(f"[yellow]Missing info:[/yellow] {', '.join(packet.missing_info)}")
+    else:
+        console.print("[green]No required fields missing.[/green]")
+    console.print("Run `complyos intake confirm` for an owner to confirm scope before work starts.")
+
+
+@intake_app.command("list")
+def intake_list(
+    status: str | None = typer.Option(
+        None, "--status", help="Filter by status: draft | confirmed | withdrawn"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List the tenant's intake requests (intake:submit)."""
+    context = _local_cli_context()
+    requests = IntakeService(LocalRepository(db_path)).list_requests(context, status=status)
+    if json_output:
+        _print_json({"items": [req.model_dump(mode="json") for req in requests]})
+        return
+    table = Table(title="Intake requests")
+    table.add_column("ID")
+    table.add_column("Title")
+    table.add_column("Requester")
+    table.add_column("Priority")
+    table.add_column("Status")
+    table.add_column("Confirmed by")
+    for req in requests:
+        table.add_row(
+            req.id,
+            req.title,
+            req.requester,
+            req.priority.value if req.priority else "-",
+            req.status.value,
+            req.confirmed_by or "-",
+        )
+    console.print(table)
+
+
+@intake_app.command("confirm")
+def intake_confirm(
+    request_id: str = typer.Argument(..., help="Intake request id to confirm scope for"),
+    note: str | None = typer.Option(None, "--note", help="Optional confirmation note"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Confirm scope for an intake request: DRAFT -> CONFIRMED (intake:confirm).
+
+    This is the human guardrail. The proposal-only/agent role cannot do this; an
+    elevated human confirms scope before the request is treated as agreed work.
+    """
+    context = _local_cli_context()
+    request = IntakeService(LocalRepository(db_path)).confirm_scope(
+        context, request_id=request_id, note=note
+    )
+    if json_output:
+        _print_json(request.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Scope confirmed[/green] for intake request {request.id} "
+        f"by {request.confirmed_by} (status {request.status.value})."
+    )
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
@@ -2476,6 +2604,7 @@ app.add_typer(security_app, name="security")
 app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
 app.add_typer(attestations_app, name="attestations")
+app.add_typer(intake_app, name="intake")
 
 
 if __name__ == "__main__":

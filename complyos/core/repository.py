@@ -8,6 +8,7 @@ from datetime import date, datetime
 from typing import Any
 
 from complyos.core.import_repo import ImportRepositoryMixin
+from complyos.core.intake_repo import IntakeRequestRepositoryMixin
 from complyos.core.notification_repo import NotificationRepositoryMixin
 from complyos.core.privacy_repo import PrivacyRepositoryMixin
 from complyos.core.repository_base import RepositoryBase
@@ -36,6 +37,7 @@ class LocalRepository(
     SourceIntelRepositoryMixin,
     NotificationRepositoryMixin,
     RoleBindingRepositoryMixin,
+    IntakeRequestRepositoryMixin,
     RepositoryBase,
     RepositoryMappers,
 ):

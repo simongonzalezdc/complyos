@@ -22,6 +22,7 @@ from complyos.models.database import (
     DBImportDecision,
     DBImportRow,
     DBInboundWebhookEvent,
+    DBIntakeRequest,
     DBLearningRecord,
     DBLegalHold,
     DBNotificationDelivery,
@@ -36,10 +37,13 @@ from complyos.models.database import (
 from complyos.models.domain import (
     Course,
     Enrollment,
+    IntakePriority,
+    IntakeStatus,
     LearningRecord,
     LearningRecordStatus,
     PrivacyRequest,
     PrivacyRequestType,
+    TrainingRequest,
     User,
 )
 
@@ -63,6 +67,26 @@ class RepositoryMappers:
             employment_status=EmploymentStatus(db.employment_status),
             manager_id=db.manager_id,
             custom_attributes=db.custom_attributes or {},
+        )
+
+    @staticmethod
+    def _to_training_request(db: DBIntakeRequest) -> TrainingRequest:
+        return TrainingRequest(
+            id=db.id,
+            tenant_id=db.tenant_id,
+            requester=db.requester,
+            title=db.title,
+            audience=db.audience,
+            priority=IntakePriority(db.priority) if db.priority else None,
+            business_context=db.business_context,
+            constraints=db.constraints,
+            requested_by_date=db.requested_by_date,
+            status=IntakeStatus(db.status),
+            created_by=db.created_by,
+            created_at=db.created_at,
+            confirmed_by=db.confirmed_by,
+            confirmed_at=db.confirmed_at,
+            confirmation_note=db.confirmation_note,
         )
 
     @staticmethod

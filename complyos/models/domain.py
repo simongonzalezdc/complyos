@@ -275,6 +275,115 @@ class AttestationRecord(BaseModel):
     output_hash: str
 
 
+class IntakePriority(StrEnum):
+    """Suggested handling priority for a training intake request.
+
+    The drafting step *suggests* a priority deterministically; it never confirms
+    scope. The human owner can override it at scope-confirmation time. These
+    string values are persisted on the request and read back, so changing them
+    is a data change, not just a rename.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+    @classmethod
+    def values(cls) -> frozenset[str]:
+        return frozenset(member.value for member in cls)
+
+
+class IntakeStatus(StrEnum):
+    """Lifecycle state of a training intake request.
+
+    ``DRAFT`` is the only state the proposal-only/agent role can create. Only an
+    elevated human step (``confirm_scope``) moves a request to ``CONFIRMED``;
+    that transition is the scope-confirmation guardrail. ``WITHDRAWN`` lets a
+    requester retire a draft that never became real work.
+    """
+
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    WITHDRAWN = "withdrawn"
+
+    @classmethod
+    def values(cls) -> frozenset[str]:
+        return frozenset(member.value for member in cls)
+
+
+class TrainingRequest(BaseModel):
+    """A captured training request from a coordinator or business requester.
+
+    This is the persisted record of *what was asked for*: who needs training,
+    the audience, business context, constraints, and a requested-by date. A new
+    request is always ``DRAFT`` — capturing a request is not the same as agreeing
+    to do the work. Scope is confirmed by a separate, human-gated step that flips
+    ``status`` to ``CONFIRMED`` and stamps ``confirmed_by``/``confirmed_at``.
+
+    Claim boundary: a request (even a confirmed one) is a record of scope intent
+    and human approval to start. It is never a statement that anyone is
+    "certified" or "compliant".
+    """
+
+    id: str
+    tenant_id: str
+    requester: str
+    title: str
+    audience: str | None = None
+    priority: IntakePriority | None = None
+    business_context: str | None = None
+    constraints: str | None = None
+    requested_by_date: date | None = None
+    status: IntakeStatus = IntakeStatus.DRAFT
+    created_by: str
+    created_at: datetime
+    confirmed_by: str | None = None
+    confirmed_at: datetime | None = None
+    confirmation_note: str | None = None
+
+    @property
+    def is_confirmed(self) -> bool:
+        """True only when a human has explicitly confirmed scope."""
+        return self.status is IntakeStatus.CONFIRMED
+
+
+class IntakePacket(BaseModel):
+    """A proposal-only draft summarizing a captured training request.
+
+    The packet restates the request fields, flags which required fields are
+    **missing**, and *suggests* a priority and routing destination. It is
+    deterministic by default and PII-light (it references the requester string
+    and free-text context the requester themselves supplied).
+
+    Proposal-only guardrail: ``confirms_scope`` is always ``False``. Drafting a
+    packet NEVER confirms scope or commits work; an accountable human does that
+    through ``IntakeService.confirm_scope``. ``requires_human_confirmation`` is
+    always ``True`` so every surface that renders a packet states the boundary.
+    """
+
+    request_id: str
+    tenant_id: str
+    title: str
+    requester: str
+    audience: str | None = None
+    business_context: str | None = None
+    constraints: str | None = None
+    requested_by_date: date | None = None
+    missing_info: list[str] = Field(default_factory=list)
+    suggested_priority: IntakePriority
+    suggested_routing: str
+    routing_rationale: str
+    confirms_scope: bool = False
+    requires_human_confirmation: bool = True
+    drafted_by_provider: str = "deterministic"
+
+    @property
+    def is_complete(self) -> bool:
+        """True when no required field is missing from the captured request."""
+        return not self.missing_info
+
+
 # ---------------------------------------------------------------------------
 # Workflow vocabularies
 #
