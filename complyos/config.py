@@ -120,6 +120,20 @@ def generate_config(
                 "course_id": "${BLACKBOARD_COURSE_ID}",
             },
         },
+        "ai": {
+            # Proposal-only AI content provider. Default ``deterministic`` keeps
+            # the deterministic rules (no network, no model). Set ``local`` to
+            # route content through an OpenAI-compatible local runtime (Ollama,
+            # llama.cpp, vLLM, LM Studio). Redaction, hashing/provenance,
+            # persistence, and the approve/reject lifecycle stay owned by the
+            # service regardless of provider; a model outage falls back to
+            # deterministic and never raises to the caller.
+            "provider": "${COMPLYOS_AI_PROVIDER}",
+            "base_url": "${COMPLYOS_AI_BASE_URL}",
+            "model": "${COMPLYOS_AI_MODEL}",
+            "timeout_seconds": "${COMPLYOS_AI_TIMEOUT_SECONDS}",
+            "api_key": "${COMPLYOS_AI_API_KEY}",
+        },
         "database": {"path": db_path},
         "defaults": {
             "department": None,

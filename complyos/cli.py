@@ -1132,6 +1132,54 @@ def ai_approve(
     console.print("[yellow]No compliance records were changed by this approval.[/yellow]")
 
 
+@ai_app.command("eval")
+def ai_eval(
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    track: str = typer.Option("workforce", "--track", help="workforce or campus"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Grade the CONFIGURED AI provider on synthetic fixtures (no real PII).
+
+    Runs all five proposal tasks and reports, per task: provider reachable, valid
+    JSON, schema match, no PII leak in the output, and a basic quality heuristic.
+    With the default deterministic provider this passes trivially (it proves the
+    harness); point ``COMPLYOS_AI_PROVIDER=local`` at a runtime to grade a model.
+    """
+    from complyos.services.ai_eval import run_eval
+
+    context = _local_cli_context(track=track)
+    report = run_eval(AIProposalService(LocalRepository(db_path)), context)
+
+    if json_output:
+        _print_json(report.model_dump(mode="json"))
+    else:
+        table = Table(title=f"AI provider eval — {report.provider}")
+        table.add_column("Task")
+        table.add_column("Reachable")
+        table.add_column("JSON")
+        table.add_column("Schema")
+        table.add_column("No PII")
+        table.add_column("Quality")
+        table.add_column("Result")
+        for r in report.results:
+            mark = lambda ok: "[green]PASS[/green]" if ok else "[red]FAIL[/red]"  # noqa: E731
+            table.add_row(
+                r.task,
+                mark(r.reachable),
+                mark(r.valid_json),
+                mark(r.schema_match),
+                mark(r.no_pii_leak),
+                mark(r.quality),
+                mark(r.passed),
+            )
+        console.print(table)
+        verdict = "[green]ALL PASS[/green]" if report.passed else "[red]FAILURES[/red]"
+        console.print(f"{report.passes}/{report.total} tasks passed — {verdict}")
+
+    if not report.passed:
+        raise typer.Exit(1)
+
+
 class _FixtureSourceClient:
     """No-network fixture client for local source-intelligence demos."""
 
