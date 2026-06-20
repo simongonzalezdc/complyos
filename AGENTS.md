@@ -50,6 +50,11 @@ the same three; do not let the local gate drift more lenient than CI.
 | `COMPLYOS_ALLOW_INSECURE_LOCAL=1` | Opt into header-driven role/tenant on the API with no token (local-only). |
 | `COMPLYOS_MCP_ROLE` | Raise the MCP agent above the proposal-only default (`agent_service_account`), e.g. `privacy_admin`. |
 | `COMPLYOS_INBOUND_WEBHOOK_SECRET` | HMAC secret for inbound hooks; absent = fail closed (unsigned rejected). |
+| `COMPLYOS_AI_PROVIDER` | AI content provider for the proposal-only layer. Default `deterministic` (no network/model). `local` routes content through an OpenAI-compatible local runtime. Redaction-before-model, hashing/provenance, persistence, and lifecycle stay service-owned; a model outage falls back to deterministic. |
+| `COMPLYOS_AI_BASE_URL` | OpenAI-compatible base URL for `local` provider (e.g. `http://localhost:11434/v1` for Ollama). Unset with `local` = silently use deterministic. |
+| `COMPLYOS_AI_MODEL` | Model name for `local` provider (e.g. `llama3.1:8b`). Default `llama3.1:8b`. |
+| `COMPLYOS_AI_TIMEOUT_SECONDS` | Per-request timeout for `local` provider. Default `30`. |
+| `COMPLYOS_AI_API_KEY` | Optional bearer token for `local` provider (some servers want a dummy key). Never written to provenance. |
 
 ## Map
 

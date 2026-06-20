@@ -25,15 +25,22 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from complyos.connectors.normalization import ENROLLMENT_ALIASES
 from complyos.connectors.normalization import normalize_header as _normalize_header
 from complyos.core.repository import LocalRepository
+from complyos.services.ai_providers import (
+    DeterministicProvider,
+    LocalModelProvider,
+    ProposalProvider,
+    ProviderUnavailableError,
+    provider_from_env,
+)
 from complyos.services.context import (
     PERM_AI_APPROVE,
     PERM_AI_PROPOSE,
@@ -82,11 +89,6 @@ _PII_EXCLUDED_POLICY: dict[str, Any] = {
     "masked_fields": ["name", "email", "employee_id"],
     "masked_count": 0,
 }
-
-
-def _norm(value: Any) -> str:
-    """Normalize a value into a stable lowercase match key (for clustering)."""
-    return "" if value is None else " ".join(str(value).split()).strip().lower()
 
 
 class AIProposalExpiredError(ValueError):
@@ -173,9 +175,51 @@ def _redact_rows(
 class AIProposalService:
     """Stores deterministic/proposal-only AI-style outputs and provenance."""
 
-    def __init__(self, repository: LocalRepository | None = None) -> None:
+    def __init__(
+        self,
+        repository: LocalRepository | None = None,
+        *,
+        provider: ProposalProvider | None = None,
+    ) -> None:
         self.repository = repository or LocalRepository()
+        # The provider supplies CONTENT only. The service still owns redaction
+        # (runs first, always), hashing/provenance, persistence, and lifecycle.
+        # Default is the deterministic provider, so with no AI env configured the
+        # behavior is byte-identical to the pre-provider implementation.
+        self.provider: ProposalProvider = provider or provider_from_env()
+        self._fallback = DeterministicProvider()
         self._last_hash_preimage: dict[str, Any] = {}
+
+    def _provider_content(
+        self,
+        task: str,
+        call: Callable[[ProposalProvider], dict[str, Any]],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Run ``call`` against the configured provider, falling back deterministically.
+
+        Returns ``(content, provider_meta)``. ``provider_meta`` stamps provenance:
+        ``model_provider`` (the provider id actually used), ``model_name``, the
+        endpoint ``host`` (host only — never the full URL, never a token), and the
+        ``fallback`` flag. On :class:`ProviderUnavailableError` it transparently
+        falls back to the deterministic provider so a model outage never raises to
+        the caller and the proposal is still produced.
+        """
+        provider = self.provider
+        try:
+            content = call(provider)
+            fallback = False
+        except ProviderUnavailableError:
+            content = call(self._fallback)
+            provider = self._fallback
+            fallback = True
+        meta: dict[str, Any] = {
+            "model_provider": provider.provider_id,
+            "fallback": fallback,
+        }
+        if isinstance(provider, LocalModelProvider):
+            meta["model_name"] = provider.model
+            meta["endpoint_host"] = provider.endpoint_host
+        return content, meta
 
     def last_hash_preimage(self) -> dict[str, Any]:
         """Return the (already-redacted) preimage used for the last input_hash.
@@ -191,8 +235,8 @@ class AIProposalService:
         headers: list[str],
         target_schema: str = "learning_records",
         sample_rows: list[dict[str, Any]] | None = None,
-        model_provider: str = "deterministic-local",
-        model_name: str = "rules-v1",
+        model_provider: str | None = None,
+        model_name: str | None = None,
     ) -> AIProposalResult:
         require_permission(context, PERM_AI_PROPOSE)
 
@@ -210,18 +254,22 @@ class AIProposalService:
         self._last_hash_preimage = preimage
         input_hash = _hash(preimage)
 
-        suggestions = self._suggest_mappings(headers)
+        # The provider supplies CONTENT only, from the redacted payload. A model
+        # outage falls back to the deterministic provider transparently.
+        content, provider_meta = self._provider_content(
+            "field_mapping",
+            lambda provider: provider.suggest_mappings(headers, target_schema),
+        )
         output = {
-            "target_schema": target_schema,
-            "suggested_mappings": suggestions,
+            "target_schema": content["target_schema"],
+            "suggested_mappings": content["suggested_mappings"],
             "state_mutation_allowed": False,
             "requires_human_approval": True,
         }
         output_hash = _hash(output)
         proposal_id = str(uuid4())
         provenance = {
-            "model_provider": model_provider,
-            "model_name": model_name,
+            **self._provenance_identity(provider_meta, model_provider, model_name),
             "prompt_hash": _hash(
                 {
                     "task": "field_mapping",
@@ -232,6 +280,7 @@ class AIProposalService:
             ),
             "redaction_policy": redaction_policy,
             "response_hash": output_hash,
+            "fallback": provider_meta["fallback"],
             "created_at": datetime.now(UTC).isoformat(),
         }
         self.repository.save_ai_proposal(
@@ -257,7 +306,7 @@ class AIProposalService:
             output_hash=output_hash,
             output=output,
             provenance=provenance,
-            warnings=["proposal-only; cannot mutate compliance records"],
+            warnings=_proposal_warnings(provider_meta["fallback"]),
         )
 
     # ------------------------------------------------------------------
@@ -275,7 +324,7 @@ class AIProposalService:
         context: ActorContext,
         *,
         issues: list[dict[str, Any]],
-        model_name: str = "rules-v1",
+        model_name: str | None = None,
     ) -> AIProposalResult:
         """Summarize anomaly signals (stale/backdated/duplicate counts) as a draft.
 
@@ -284,26 +333,17 @@ class AIProposalService:
         """
         require_permission(context, PERM_AI_PROPOSE)
         codes = sorted(str(issue.get("code", "UNKNOWN")) for issue in issues)
-        counts: dict[str, int] = {}
-        for code in codes:
-            counts[code] = counts.get(code, 0) + 1
-        total = len(codes)
-        parts = [f"{count} {code}" for code, count in sorted(counts.items())]
-        summary = (
-            f"{total} anomaly signal(s): " + ", ".join(parts)
-            if total
-            else "no anomaly signals detected"
+        content, provider_meta = self._provider_content(
+            "anomaly_summary",
+            lambda provider: provider.anomaly_summary(codes),
         )
         return self._store_proposal(
             context,
             proposal_type="anomaly_summary",
+            provider_meta=provider_meta,
             model_name=model_name,
             input_preimage={"issue_codes": codes},
-            output={
-                "summary": summary,
-                "counts_by_code": counts,
-                "total_signals": total,
-            },
+            output=content,
             redaction_policy={
                 "strategy": "codes_only_no_records",
                 "masked_fields": [],
@@ -320,7 +360,7 @@ class AIProposalService:
         missing_courses: list[str] | None = None,
         days_overdue: int | None = None,
         severity: str = "medium",
-        model_name: str = "rules-v1",
+        model_name: str | None = None,
     ) -> AIProposalResult:
         """Draft a plain-language explanation of one compliance gap (PII-free).
 
@@ -330,36 +370,24 @@ class AIProposalService:
         """
         require_permission(context, PERM_AI_PROPOSE)
         titles = list(missing_courses or [])
-        course_clause = ", ".join(titles) if titles else "no outstanding courses"
-        overdue_clause = (
-            f" Overdue by {int(days_overdue)} day(s)."
-            if days_overdue
-            else " Not yet overdue."
-        )
-        explanation = (
-            f"Learner {user_id} in {department or 'an unspecified department'} has "
-            f"{len(titles)} outstanding mandatory course(s): {course_clause}."
-            f"{overdue_clause} Severity: {severity}."
+        payload = {
+            "user_id": user_id,
+            "department": department,
+            "missing_courses": titles,
+            "days_overdue": days_overdue,
+            "severity": severity,
+        }
+        content, provider_meta = self._provider_content(
+            "gap_explanation",
+            lambda provider: provider.gap_explanation(payload),
         )
         return self._store_proposal(
             context,
             proposal_type="gap_explanation",
+            provider_meta=provider_meta,
             model_name=model_name,
-            input_preimage={
-                "user_id": user_id,
-                "department": department,
-                "missing_courses": titles,
-                "days_overdue": days_overdue,
-                "severity": severity,
-            },
-            output={
-                "user_id": user_id,
-                "department": department,
-                "missing_courses": titles,
-                "days_overdue": days_overdue,
-                "severity": severity,
-                "explanation": explanation,
-            },
+            input_preimage=payload,
+            output=content,
             redaction_policy=_PII_EXCLUDED_POLICY,
         )
 
@@ -370,7 +398,7 @@ class AIProposalService:
         user_id: str,
         missing_courses: list[str] | None = None,
         deadline: str | None = None,
-        model_name: str = "rules-v1",
+        model_name: str | None = None,
     ) -> AIProposalResult:
         """Draft a reminder message for a learner's outstanding courses (PII-free).
 
@@ -379,29 +407,22 @@ class AIProposalService:
         """
         require_permission(context, PERM_AI_PROPOSE)
         titles = list(missing_courses or [])
-        course_clause = ", ".join(titles) if titles else "your assigned mandatory training"
-        deadline_clause = (
-            f" Please complete by {deadline}." if deadline else " Please complete it promptly."
-        )
-        message = (
-            f"Reminder for learner {user_id}: you have {len(titles)} outstanding "
-            f"mandatory course(s): {course_clause}.{deadline_clause}"
+        payload = {
+            "user_id": user_id,
+            "missing_courses": titles,
+            "deadline": deadline,
+        }
+        content, provider_meta = self._provider_content(
+            "remediation_message",
+            lambda provider: provider.remediation_message(payload),
         )
         return self._store_proposal(
             context,
             proposal_type="remediation_message",
+            provider_meta=provider_meta,
             model_name=model_name,
-            input_preimage={
-                "user_id": user_id,
-                "missing_courses": titles,
-                "deadline": deadline,
-            },
-            output={
-                "user_id": user_id,
-                "missing_courses": titles,
-                "deadline": deadline,
-                "message_draft": message,
-            },
+            input_preimage=payload,
+            output=content,
             redaction_policy=_PII_EXCLUDED_POLICY,
         )
 
@@ -419,35 +440,22 @@ class AIProposalService:
         row numbers in each cluster.
         """
         require_permission(context, PERM_AI_PROPOSE)
+        # Redact BEFORE anything model-facing. The local provider only ever sees
+        # ``redacted_rows`` (used to build its prompt); the deterministic provider
+        # may read the raw rows to compute the hashed identity, but it emits only
+        # hash signatures + row numbers, so no raw PII leaves either path.
         redacted_rows, redaction_policy = _redact_rows(rows)
-        clusters: dict[str, list[int]] = {}
-        for index, row in enumerate(rows):
-            emp = _norm(row.get("employee_id") or row.get("emp_id"))
-            name = _norm(
-                row.get("name")
-                or f"{row.get('first_name', '')} {row.get('last_name', '')}"
-            )
-            course = _norm(row.get("course_id") or row.get("course"))
-            identity = emp or (f"{name}|{course}" if name.strip() else "")
-            if not identity.strip("|"):
-                continue
-            signature = _hash({"identity": identity})
-            clusters.setdefault(signature, []).append(index)
-        duplicate_clusters = [
-            {"signature": signature[:16], "row_numbers": indexes, "size": len(indexes)}
-            for signature, indexes in clusters.items()
-            if len(indexes) > 1
-        ]
+        content, provider_meta = self._provider_content(
+            "duplicate_clustering",
+            lambda provider: provider.duplicate_clustering(redacted_rows, rows),
+        )
         return self._store_proposal(
             context,
             proposal_type="duplicate_clustering",
+            provider_meta=provider_meta,
             model_name=model_name,
             input_preimage={"redacted_sample_rows": redacted_rows},
-            output={
-                "duplicate_clusters": duplicate_clusters,
-                "rows_examined": len(rows),
-                "duplicate_groups": len(duplicate_clusters),
-            },
+            output=content,
             redaction_policy=redaction_policy,
         )
 
@@ -456,15 +464,17 @@ class AIProposalService:
         context: ActorContext,
         *,
         proposal_type: str,
-        model_name: str,
+        provider_meta: dict[str, Any],
+        model_name: str | None,
         input_preimage: dict[str, Any],
         output: dict[str, Any],
         redaction_policy: dict[str, Any],
     ) -> AIProposalResult:
-        """Shared persistence path for the deterministic proposal types.
+        """Shared persistence path for the proposal types.
 
         Stamps the proposal-only guardrail flags, computes the provenance hashes,
-        and stores the proposal as PROPOSED. Mirrors propose_mapping exactly.
+        records the provider identity (+ fallback flag), and stores the proposal
+        as PROPOSED. Mirrors propose_mapping exactly.
         """
         self._last_hash_preimage = input_preimage
         input_hash = _hash(input_preimage)
@@ -476,11 +486,11 @@ class AIProposalService:
         output_hash = _hash(full_output)
         proposal_id = str(uuid4())
         provenance = {
-            "model_provider": "deterministic-local",
-            "model_name": model_name,
+            **self._provenance_identity(provider_meta, None, model_name),
             "prompt_hash": _hash({"task": proposal_type, "input": input_preimage}),
             "redaction_policy": redaction_policy,
             "response_hash": output_hash,
+            "fallback": provider_meta["fallback"],
             "created_at": datetime.now(UTC).isoformat(),
         }
         self.repository.save_ai_proposal(
@@ -506,8 +516,37 @@ class AIProposalService:
             output_hash=output_hash,
             output=full_output,
             provenance=provenance,
-            warnings=["proposal-only; cannot mutate compliance records"],
+            warnings=_proposal_warnings(provider_meta["fallback"]),
         )
+
+    @staticmethod
+    def _provenance_identity(
+        provider_meta: dict[str, Any],
+        model_provider_override: str | None,
+        model_name_override: str | None,
+    ) -> dict[str, Any]:
+        """Build the provider-identity provenance fields.
+
+        ``model_provider`` is the provider id actually used (the local provider id
+        when the model served the content, ``deterministic-local`` when the
+        deterministic provider produced or fell back to it). For the local model
+        the endpoint ``host`` (host only — never the full URL, never a token) is
+        recorded. Explicit overrides win for backward compatibility (the web API
+        request can name a provider/model). ``model_name`` defaults to the legacy
+        ``rules-v1`` for the deterministic provider, keeping default output stable.
+        """
+        identity: dict[str, Any] = {
+            "model_provider": model_provider_override or provider_meta["model_provider"],
+        }
+        if "endpoint_host" in provider_meta:
+            identity["endpoint_host"] = provider_meta["endpoint_host"]
+        if model_name_override is not None:
+            identity["model_name"] = model_name_override
+        elif "model_name" in provider_meta:
+            identity["model_name"] = provider_meta["model_name"]
+        else:
+            identity["model_name"] = "rules-v1"
+        return identity
 
     def approve(self, context: ActorContext, proposal_id: str) -> AIProposalResult:
         require_permission(context, PERM_AI_APPROVE)
@@ -618,14 +657,14 @@ class AIProposalService:
             warnings=warnings,
         )
 
-    @staticmethod
-    def _suggest_mappings(headers: list[str]) -> dict[str, str | None]:
-        aliases = {
-            candidate: canonical
-            for canonical, candidates in ENROLLMENT_ALIASES.items()
-            for candidate in [_normalize_header(canonical), *candidates]
-        }
-        return {header: aliases.get(_normalize_header(header)) for header in headers}
+
+def _proposal_warnings(fallback: bool) -> list[str]:
+    warnings = ["proposal-only; cannot mutate compliance records"]
+    if fallback:
+        warnings.append(
+            "ai provider unavailable; fell back to deterministic provider for this proposal"
+        )
+    return warnings
 
 
 def _hash(value: Any) -> str:
