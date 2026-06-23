@@ -43,6 +43,7 @@ from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
+from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
 
 mcp = FastMCP("complyos")
@@ -1091,6 +1092,101 @@ async def confirm_intake_scope(
     return (
         IntakeService(LocalRepository(db_path))
         .confirm_scope(context, request_id=request_id, note=note)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def request_roster_snapshot(
+    label: str,
+    csv_text: str,
+    source_system: str = "csv",
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Proposal-only: preview a source export into quarantine and draft a roster view.
+
+    The default proposal-only agent role MAY do this (it holds ``rosters:read``).
+    The export is routed through the import preview, which QUARANTINES the batch —
+    nothing mutates the normalized truth. A proposal-only roster view (learners x
+    learning-items, normalized status) is returned alongside the captured
+    snapshot. Promotion is a separate human step (see approve_roster_snapshot),
+    so an agent can preview and present but never let an import mutate truth.
+
+    Args:
+        label: Short label for this roster snapshot.
+        csv_text: The source CSV export text.
+        source_system: Source system label.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The captured snapshot and its proposal-only roster view.
+    """
+    context = _mcp_context(track=profile)
+    service = RostersService(LocalRepository(db_path))
+    snapshot = service.request_snapshot(
+        context, label=label, csv_text=csv_text, source_system=source_system
+    )
+    packet = service.draft_packet(context, snapshot_id=snapshot.id)
+    return {
+        "snapshot": snapshot.model_dump(mode="json"),
+        "packet": packet.model_dump(mode="json"),
+    }
+
+
+@mcp.tool()
+async def list_rosters(
+    status: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Read-only: list the tenant's roster snapshots.
+
+    The default proposal-only agent role may list roster snapshots (it holds
+    ``rosters:read``) so it can triage and report the queue.
+
+    Args:
+        status: Optional filter: draft | approved | withdrawn.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The tenant's roster snapshots.
+    """
+    context = _mcp_context(track=profile)
+    snapshots = RostersService(LocalRepository(db_path)).list_snapshots(context, status=status)
+    return {"items": [snap.model_dump(mode="json") for snap in snapshots]}
+
+
+@mcp.tool()
+async def approve_roster_snapshot(
+    snapshot_id: str,
+    note: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: approve a roster snapshot and promote its quarantined import.
+
+    This is the quarantine guardrail. The default proposal-only MCP role lacks
+    ``rosters:approve`` and is therefore denied — an AI/agent can never let a
+    previewed import mutate normalized truth. Raise COMPLYOS_MCP_ROLE to a
+    human-operated role (e.g. compliance_manager) only when a human is genuinely
+    approving the import through the agent surface.
+
+    Args:
+        snapshot_id: Roster snapshot id to approve and import.
+        note: Optional approval note.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The approved snapshot with its human approver stamped.
+    """
+    context = _mcp_context(track=profile)
+    return (
+        RostersService(LocalRepository(db_path))
+        .approve_snapshot(context, snapshot_id=snapshot_id, note=note)
         .model_dump(mode="json")
     )
 

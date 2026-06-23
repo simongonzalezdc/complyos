@@ -39,6 +39,7 @@ from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.intake import IntakeService
+from complyos.services.rosters import RostersService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
@@ -85,6 +86,10 @@ attestations_app = typer.Typer(
 intake_app = typer.Typer(
     name="intake",
     help="Capture training requests, draft proposal-only packets, and confirm scope",
+)
+rosters_app = typer.Typer(
+    name="rosters",
+    help="Preview/quarantine source exports, draft proposal-only roster views, and approve imports",
 )
 console = Console()
 
@@ -2592,6 +2597,121 @@ def intake_confirm(
     )
 
 
+@rosters_app.command("request")
+def rosters_request(
+    label: str = typer.Argument(..., help="Short label for this roster snapshot"),
+    csv_path: str = typer.Option(..., "--csv", help="Path to the source CSV export"),
+    source_system: str = typer.Option("csv", "--source", help="Source system label"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Capture a roster snapshot by previewing a source export into quarantine (rosters:read).
+
+    The export is routed through the import preview, which QUARANTINES the batch —
+    nothing mutates the normalized truth. Promotion is a separate, human-gated
+    step (`rosters approve`).
+    """
+    context = _local_cli_context()
+    snapshot = RostersService(LocalRepository(db_path)).request_snapshot(
+        context, label=label, path=csv_path, source_system=source_system
+    )
+    if json_output:
+        _print_json(snapshot.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Captured roster snapshot[/green] {snapshot.id} "
+        f"(status {snapshot.status.value}; batch {snapshot.batch_id} quarantined, NOT yet imported)."
+    )
+    console.print("Run `complyos rosters draft` to view the roster, then `rosters approve` to import.")
+
+
+@rosters_app.command("draft")
+def rosters_draft(
+    snapshot_id: str = typer.Argument(..., help="Roster snapshot id to draft a view for"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Draft a proposal-only roster view for a captured snapshot (rosters:read)."""
+    context = _local_cli_context()
+    packet = RostersService(LocalRepository(db_path)).draft_packet(
+        context, snapshot_id=snapshot_id
+    )
+    if json_output:
+        _print_json(packet.model_dump(mode="json"))
+        return
+    console.print(
+        f"[bold]Roster view[/bold] for snapshot {packet.snapshot_id} "
+        f"({len(packet.rows)} rows; batch {packet.batch_status}, "
+        f"{'promotable' if packet.is_promotable else f'{packet.blocked_row_count} blocked rows'})."
+    )
+    table = Table(title="Status counts")
+    table.add_column("Status")
+    table.add_column("Count", justify="right")
+    for status_value, count in packet.status_counts.items():
+        if count:
+            table.add_row(status_value, str(count))
+    console.print(table)
+    console.print("[yellow]Proposal only — a human must run `rosters approve` to import.[/yellow]")
+
+
+@rosters_app.command("list")
+def rosters_list(
+    status: str | None = typer.Option(
+        None, "--status", help="Filter by status: draft | approved | withdrawn"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List the tenant's roster snapshots (rosters:read)."""
+    context = _local_cli_context()
+    snapshots = RostersService(LocalRepository(db_path)).list_snapshots(context, status=status)
+    if json_output:
+        _print_json({"items": [snap.model_dump(mode="json") for snap in snapshots]})
+        return
+    table = Table(title="Roster snapshots")
+    table.add_column("ID")
+    table.add_column("Label")
+    table.add_column("Source")
+    table.add_column("Batch")
+    table.add_column("Status")
+    table.add_column("Approved by")
+    for snap in snapshots:
+        table.add_row(
+            snap.id,
+            snap.label,
+            snap.source_system,
+            snap.batch_id,
+            snap.status.value,
+            snap.approved_by or "-",
+        )
+    console.print(table)
+
+
+@rosters_app.command("approve")
+def rosters_approve(
+    snapshot_id: str = typer.Argument(..., help="Roster snapshot id to approve and import"),
+    note: str | None = typer.Option(None, "--note", help="Optional approval note"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Approve a snapshot: promote its quarantined batch and mark it APPROVED (rosters:approve).
+
+    This is the quarantine guardrail. The proposal-only/agent role cannot do this;
+    an elevated human approves before the previewed data mutates normalized truth.
+    """
+    context = _local_cli_context()
+    snapshot = RostersService(LocalRepository(db_path)).approve_snapshot(
+        context, snapshot_id=snapshot_id, note=note
+    )
+    if json_output:
+        _print_json(snapshot.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Approved[/green] roster snapshot {snapshot.id} "
+        f"by {snapshot.approved_by} (status {snapshot.status.value}); batch imported."
+    )
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
@@ -2605,6 +2725,7 @@ app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
 app.add_typer(attestations_app, name="attestations")
 app.add_typer(intake_app, name="intake")
+app.add_typer(rosters_app, name="rosters")
 
 
 if __name__ == "__main__":

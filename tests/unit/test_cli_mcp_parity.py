@@ -265,6 +265,24 @@ PARITY_MATRIX: tuple[MatrixRow, ...] = (
         mcp="confirm_intake_scope",
         api_prefix="/intake",  # /intake/{id}/confirm
     ),
+    MatrixRow(
+        workflow="Rosters request (preview + draft view)",
+        cli="rosters request",
+        mcp="request_roster_snapshot",
+        api_prefix="/rosters",
+    ),
+    MatrixRow(
+        workflow="Rosters list",
+        cli="rosters list",
+        mcp="list_rosters",
+        api_prefix="/rosters",
+    ),
+    MatrixRow(
+        workflow="Rosters approve import",
+        cli="rosters approve",
+        mcp="approve_roster_snapshot",
+        api_prefix="/rosters",  # /rosters/{id}/approve
+    ),
 )
 
 
@@ -438,6 +456,12 @@ MUTATING_MCP_TOOLS: tuple[MutatingMCPTool, ...] = (
         cli="intake confirm",
         api_prefix="/intake",
     ),
+    MutatingMCPTool(
+        tool="approve_roster_snapshot",
+        permission="rosters:approve",
+        cli="rosters approve",
+        api_prefix="/rosters",
+    ),
 )
 
 # WP13b closed the last ungated side-effect tool: send_notification now requires
@@ -550,6 +574,7 @@ def _minimal_kwargs_for(tool: str, db_path: str) -> dict[str, str | bool | int]:
             "body": "b",
         },
         "confirm_intake_scope": {"request_id": "x"},
+        "approve_roster_snapshot": {"snapshot_id": "x"},
     }
     kwargs: dict[str, str | bool | int] = dict(per_tool.get(tool, {}))
     # These tools take no db_path kwarg.

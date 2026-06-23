@@ -36,6 +36,7 @@ from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
 from complyos.services.role_admin import RoleAdminService
+from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.web.rate_limit import RateLimitExceededError, check_rate_limit
@@ -152,6 +153,16 @@ class IntakeSubmitBody(BaseModel):
 
 
 class IntakeConfirmBody(BaseModel):
+    note: str | None = None
+
+
+class RosterRequestBody(BaseModel):
+    label: str
+    csv_text: str
+    source_system: str = "csv"
+
+
+class RosterApproveBody(BaseModel):
     note: str | None = None
 
 
@@ -1007,6 +1018,61 @@ def build_api_v1_router(repository: LocalRepository | None = None) -> APIRouter:
             raise _permission_error(exc, context) from exc
         except (PermissionError, ValueError) as exc:
             raise _bad_request("intake_confirm_failed", exc, context) from exc
+
+    # ---- Rosters: preview/quarantine -> proposal-only view -> human-approved import ----
+    @router.post("/rosters")
+    async def request_roster_snapshot(
+        body: RosterRequestBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            service = RostersService(repo)
+            snapshot = service.request_snapshot(
+                context,
+                label=body.label,
+                csv_text=body.csv_text,
+                source_system=body.source_system,
+            )
+            packet = service.draft_packet(context, snapshot_id=snapshot.id)
+            return {
+                "snapshot": snapshot.model_dump(mode="json"),
+                "packet": packet.model_dump(mode="json"),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("roster_request_failed", exc, context) from exc
+
+    @router.get("/rosters")
+    async def list_roster_snapshots(
+        status: str | None = None,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            snapshots = RostersService(repo).list_snapshots(context, status=status)
+            return {
+                "items": [snap.model_dump(mode="json") for snap in snapshots],
+                "actor_context": context.public_dict(),
+            }
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except ValueError as exc:
+            raise _bad_request("bad_roster_status", exc, context) from exc
+
+    @router.post("/rosters/{snapshot_id}/approve")
+    async def approve_roster_snapshot(
+        snapshot_id: str,
+        body: RosterApproveBody,
+        context: ActorContext = Depends(actor_context),  # noqa: B008
+    ) -> dict[str, object]:
+        try:
+            return RostersService(repo).approve_snapshot(
+                context, snapshot_id=snapshot_id, note=body.note
+            ).model_dump(mode="json")
+        except AuthorizationError as exc:
+            raise _permission_error(exc, context) from exc
+        except (PermissionError, ValueError) as exc:
+            raise _bad_request("roster_approve_failed", exc, context) from exc
 
     return router
 
