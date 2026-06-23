@@ -17,19 +17,64 @@ from complyos.models.domain import EnrollmentStatus, LearningRecordStatus
 DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]
 DATETIME_FORMATS = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", *DATE_FORMATS]
 
+# Canonical user field -> accepted column-name aliases (lowercased after
+# stripping spaces/underscores/dashes). First match wins per row.
+USER_ALIASES: dict[str, list[str]] = {
+    "id": ["id", "userid", "user", "learnerid", "learner", "studentid"],
+    "employee_id": ["employeeid", "employeenumber", "empid", "staffid"],
+    "email": ["email", "emailaddress", "mail", "learneremail", "studentemail"],
+    "first_name": ["firstname", "givenname", "first"],
+    "last_name": ["lastname", "surname", "familyname", "last"],
+    "full_name": ["fullname", "name", "learnername", "studentname", "workername"],
+    "department": ["department", "dept", "orgunit", "division"],
+    "region": ["region", "location", "country"],
+    "hire_date": ["hiredate", "startdate", "dateofhire"],
+    "employment_status": ["employmentstatus", "status", "employeestatus"],
+    "manager_id": ["managerid", "supervisorid", "manager"],
+    "job_title": ["jobtitle", "title", "position"],
+}
+
+COURSE_ALIASES: dict[str, list[str]] = {
+    "id": ["id", "courseid", "course", "trainingid", "learningitemid"],
+    "code": ["code", "coursecode", "shortname", "trainingcode"],
+    "title": [
+        "title",
+        "coursetitle",
+        "name",
+        "coursename",
+        "training",
+        "trainingname",
+        "trainingtitle",
+        "learningitem",
+        "learningitemtitle",
+    ],
+    "description": ["description", "summary"],
+    "duration_minutes": ["durationminutes", "duration", "minutes"],
+    "mandatory": ["mandatory", "required", "compliance"],
+    "category": ["category", "type", "coursetype"],
+}
+
 # Canonical enrollment field -> accepted column-name aliases (lowercased after
 # stripping spaces/underscores/dashes). First match wins per row.
 ENROLLMENT_ALIASES: dict[str, list[str]] = {
     "id": ["id", "enrollmentid", "registrationid", "learningrecordid", "transcriptid"],
     "user_id": ["userid", "user", "learnerid", "studentid"],
-    "course_id": ["courseid", "course", "learningitemid"],
-    "status": ["status", "enrollmentstatus", "completionstatus"],
+    "course_id": ["courseid", "course", "trainingid", "training", "learningitemid"],
+    "status": ["status", "enrollmentstatus", "completionstatus", "result"],
     "assigned_date": ["assigneddate", "enrolldate", "enrollmentdate", "registrationdate"],
     "due_date": ["duedate", "deadline", "targetdate"],
-    "completed_date": ["completeddate", "completiondate", "finisheddate"],
+    "completed_date": ["completeddate", "completiondate", "finisheddate", "completedon"],
     "completion_percentage": ["completionpercentage", "progress", "percentcomplete"],
     "score": ["score", "grade", "finalscore"],
-    "expires_at": ["expiresat", "expirationdate", "expirydate", "recertificationdate"],
+    "expires_at": [
+        "expiresat",
+        "expirationdate",
+        "expirydate",
+        "recertificationdate",
+        "renewaldate",
+        "renewaldue",
+        "renewalduedate",
+    ],
     "source_system": ["sourcesystem", "system", "platform", "lms"],
     "source_record_id": ["sourcerecordid", "externalid", "transcriptitemid"],
     "exempt": ["exempt", "waived", "exception"],

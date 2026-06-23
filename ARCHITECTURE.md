@@ -365,6 +365,8 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 
 Control-mapping and readiness language only. Never write "SOC 2 compliant", "SOC 2 certified", "GDPR compliant", "FERPA compliant", "COPPA compliant", "LGPD compliant", or "PIPEDA compliant". Use "readiness", "control mapping", "evidence", and "review". A test enforces this at the codebase level.
 
+The value-prop form of this rule — *the software does the clerical layer; the licensed human keeps judgment, liability, and approval* — is the **Product Boundary Doctrine** (`docs/product-boundary-doctrine.md`). It governs every surface, demo, and pitch.
+
 ## Completed Phases
 
 - [x] Phase 1 — Core auditing, MCP server, CLI, Workday connector
@@ -372,7 +374,7 @@ Control-mapping and readiness language only. Never write "SOC 2 compliant", "SOC
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
-- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 9 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (659 tests green, ruff+mypy clean)
+- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 10 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (659 tests green, ruff+mypy clean)
 
 ## Roadmap
 

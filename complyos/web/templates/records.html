@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Records · ComplyOS{% endblock %}
+
+{% block content %}
+<p class="eyebrow">Module · Records</p>
+<h1>Normalized training records</h1>
+<p class="lede">
+  Renewal-aware records for tenant <strong>{{ context.tenant_id }}</strong>.
+  Review completion and renewal status before sharing a client-facing status packet.
+</p>
+
+<section class="panel" aria-labelledby="records-heading">
+  <div class="section-heading-row">
+    <h2 id="records-heading">Records</h2>
+    <div class="action-row action-row-tight">
+      <a class="btn" href="{{ shell_url }}/records/export.csv">Export CSV</a>
+      <a class="btn" href="{{ shell_url }}/records/export.html">Export HTML</a>
+    </div>
+  </div>
+  <table class="data-table" aria-label="Normalized training records">
+    <caption class="table-caption">
+      Learner, training, completion date, renewal date, and current renewal status.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Learner</th>
+        <th scope="col">Training</th>
+        <th scope="col">Completed</th>
+        <th scope="col">Renewal due</th>
+        <th scope="col">Expired</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.learner }}</td>
+        <td>{{ row.training }}</td>
+        <td class="nowrap">{{ row.completed_date or '—' }}</td>
+        <td class="nowrap">{{ row.renewal_date or '—' }}</td>
+        <td>{{ 'Yes' if row.expired else 'No' }}</td>
+        <td><span class="tag {{ 'sev-high' if row.expired else '' }}">{{ row.status }}</span></td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" class="empty-cell">
+          No normalized training records yet. Promote an import batch to populate this view.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

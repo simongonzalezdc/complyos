@@ -234,7 +234,9 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
     },
     {
         "migration_id": ROSTER_SNAPSHOTS_MIGRATION,
-        "description": "Roster snapshots: preview/quarantine -> draft view -> human-approved import",
+        "description": (
+            "Roster snapshots: preview/quarantine -> draft view -> human-approved import"
+        ),
         "statements": [
             """
             CREATE TABLE IF NOT EXISTS roster_snapshots (

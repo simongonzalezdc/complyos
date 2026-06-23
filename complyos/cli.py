@@ -39,13 +39,13 @@ from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
 from complyos.services.intake import IntakeService
-from complyos.services.rosters import RostersService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
 from complyos.services.role_admin import RoleAdminService
+from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
@@ -2620,9 +2620,13 @@ def rosters_request(
         return
     console.print(
         f"[green]Captured roster snapshot[/green] {snapshot.id} "
-        f"(status {snapshot.status.value}; batch {snapshot.batch_id} quarantined, NOT yet imported)."
+        f"(status {snapshot.status.value}; batch {snapshot.batch_id} quarantined, "
+        "NOT yet imported)."
     )
-    console.print("Run `complyos rosters draft` to view the roster, then `rosters approve` to import.")
+    console.print(
+        "Run `complyos rosters draft` to view the roster, then `rosters approve` "
+        "to import."
+    )
 
 
 @rosters_app.command("draft")

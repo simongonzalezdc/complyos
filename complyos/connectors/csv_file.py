@@ -17,8 +17,10 @@ from typing import Any
 
 from complyos.connectors.base import LMSConnector
 from complyos.connectors.normalization import (
+    COURSE_ALIASES,
     ENROLLMENT_ALIASES,
     STATUS_SYNONYMS,
+    USER_ALIASES,
 )
 from complyos.connectors.normalization import (
     normalize_status_for_expiry as _normalize_status_for_expiry,  # noqa: E501
@@ -40,32 +42,6 @@ from complyos.models.domain import (
 USERS_FILE = "users.csv"
 COURSES_FILE = "courses.csv"
 ENROLLMENTS_FILE = "enrollments.csv"
-
-# Canonical field -> accepted column-name aliases (lowercased, after
-# stripping spaces/underscores/dashes). First match wins per row.
-USER_ALIASES: dict[str, list[str]] = {
-    "id": ["id", "userid", "user"],
-    "employee_id": ["employeeid", "employeenumber", "empid", "staffid"],
-    "email": ["email", "emailaddress", "mail"],
-    "first_name": ["firstname", "givenname", "first"],
-    "last_name": ["lastname", "surname", "familyname", "last"],
-    "department": ["department", "dept", "orgunit", "division"],
-    "region": ["region", "location", "country"],
-    "hire_date": ["hiredate", "startdate", "dateofhire"],
-    "employment_status": ["employmentstatus", "status", "employeestatus"],
-    "manager_id": ["managerid", "supervisorid", "manager"],
-    "job_title": ["jobtitle", "title", "position"],
-}
-
-COURSE_ALIASES: dict[str, list[str]] = {
-    "id": ["id", "courseid", "course"],
-    "code": ["code", "coursecode", "shortname"],
-    "title": ["title", "coursetitle", "name", "coursename"],
-    "description": ["description", "summary"],
-    "duration_minutes": ["durationminutes", "duration", "minutes"],
-    "mandatory": ["mandatory", "required", "compliance"],
-    "category": ["category", "type", "coursetype"],
-}
 
 TRUTHY = {"true", "yes", "y", "1", "required", "mandatory"}
 

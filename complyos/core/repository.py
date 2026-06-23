@@ -337,6 +337,7 @@ class LocalRepository(
     def list_learning_records(
         self,
         *,
+        tenant_id: str | None = None,
         user_id: str | None = None,
         course_id: str | None = None,
         status: str | LearningRecordStatus | None = None,
@@ -344,6 +345,8 @@ class LocalRepository(
     ) -> list[LearningRecord]:
         with self._session() as session:
             query = session.query(DBLearningRecord)
+            if tenant_id:
+                query = query.where(DBLearningRecord.tenant_id == tenant_id)
             if user_id:
                 query = query.where(DBLearningRecord.user_id == user_id)
             if course_id:
@@ -620,4 +623,3 @@ class LocalRepository(
                 "retention_policy": dict(row.retention_policy or {}),
                 "subprocessor_profile": dict(row.subprocessor_profile or {}),
             }
-
