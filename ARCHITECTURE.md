@@ -60,7 +60,7 @@ Every business workflow routes through the **application service layer**. Servic
 | `request_id` | Per-request correlation UUID |
 | `auth_method` | `"bearer"` / `"session"` / `"local_dev"` |
 
-### Permission Catalog (35 permissions)
+### Permission Catalog (37 permissions)
 
 ```
 audit:read              audit:run              analytics:read
@@ -80,6 +80,7 @@ source_intel:read       source_intel:run       source_intel:decide
 notifications:manage
 attestation:record      attestation:read
 intake:submit           intake:confirm
+rosters:read            rosters:approve
 admin:manage
 ```
 
@@ -87,14 +88,14 @@ admin:manage
 
 | Role | Permissions |
 |------|------------|
-| `owner` | All 35 |
+| `owner` | All 37 |
 | `admin` | All except `admin:manage` |
-| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications, attestation, intake (submit + confirm) |
+| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications, attestation, intake (submit + confirm), rosters (read + approve) |
 | `privacy_admin` | Evidence:read, readiness:read, privacy (all), legal hold, notifications |
 | `import_approver` | import:preview/decide/promote, evidence:read |
 | `importer` | import:preview/decide, evidence:read |
 | `reviewer` | audit:read, analytics:read, evidence, readiness, security/governance read, source-intel:read |
-| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run, attestation:read, intake:submit (**no** notifications:manage, attestation:record, or intake:confirm — MCP default role is proposal-only and cannot confirm scope) |
+| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run, attestation:read, intake:submit, rosters:read (**no** notifications:manage, attestation:record, intake:confirm, or rosters:approve — MCP default role is proposal-only: it can confirm/approve nothing and cannot let an import mutate truth) |
 | `read_only` | audit:read, analytics:read, evidence:read, readiness:read, source-intel:read |
 
 ## Application Services
@@ -119,6 +120,9 @@ All surfaces instantiate services with a repository and call them with an `Actor
 | `NotificationOutboxService` | Enqueue and drain outbound notifications |
 | `InboundHookService` | Validate, redact, and record inbound webhook receipts |
 | `RoleAdminService` | Manage role bindings per tenant |
+| `AttestationService` | Define and human-record AI-use-policy / AI-literacy attestations |
+| `IntakeService` | Capture training requests, draft proposal-only packets, confirm scope |
+| `RostersService` | Preview/quarantine source exports, draft proposal-only roster views, approve imports |
 
 ## Surfaces
 

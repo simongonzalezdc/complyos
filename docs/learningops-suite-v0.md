@@ -49,7 +49,7 @@ Use these labels everywhere the suite is described:
 | **Intake** | Live | Training coordinator, business requester | Captures requests, missing info, priority, audience, constraints, and routing. | Human owner confirms scope before work starts. |
 | **Scheduling** | Synthetic demo | Training coordinator | Cohorts, sessions, rooms/links, reminders, waitlists, and reschedules. | Human-approved rollout plan before notifications. |
 | **Learner Support** | Synthetic demo | Training specialist, coordinator | Drafts learner follow-up, escalation notes, and missing-completion nudges. | Draft-only messaging until a human sends or approves. |
-| **Rosters** | Synthetic demo | Training coordinator, L&D analyst | Normalizes attendance/enrollment/completion records across LMS, HRIS, and CSV exports. | Quarantine/preview before imports mutate truth. |
+| **Rosters** | Live | Training coordinator, L&D analyst | Normalizes attendance/enrollment/completion records across LMS, HRIS, and CSV exports. | Quarantine/preview before imports mutate truth. |
 | **MicroLearn Radar** | Roadmap | Instructional designer, training specialist | Uses the shared Source Intelligence engine to find source-backed topic suggestions and draft microlearning candidates after approval. | Source quality scoring and SME approval before publication. |
 | **NeedsAnalysis** | Synthetic demo | Instructional designer, L&D partner | Determines whether training is the right intervention and captures the performance gap. | Explicit “training may not be the fix” outcome. |
 | **ObjectiveBuilder** | Synthetic demo | Instructional designer | Converts needs into measurable learning objectives and assessment alignment. | SME review before objectives become course requirements. |

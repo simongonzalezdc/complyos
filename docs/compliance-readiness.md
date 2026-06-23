@@ -27,7 +27,7 @@ AICPA Trust Services Criteria cover Security, Availability, Processing Integrity
 
 Product requirements:
 
-- service-layer authz tests (require_permission choke-point across all 18 services; 659 tests including BOLA/IDOR and cross-surface denial parity);
+- service-layer authz tests (require_permission choke-point across all 19 services; 659 tests including BOLA/IDOR and cross-surface denial parity);
 - actor/action/object/result logs (`audit_action_logs` table, designed + partial production receipts needed);
 - per-identity in-process rate limiting on mutating API endpoints (`COMPLYOS_RATE_LIMIT_PER_MINUTE`);
 - deterministic audit engine with evidence hashes;
