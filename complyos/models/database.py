@@ -297,6 +297,22 @@ class DBIntakeRequest(Base):
     confirmation_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class DBRosterSnapshot(Base):
+    __tablename__ = "roster_snapshots"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="local-default", nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    batch_id: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="draft", nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approval_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class DBPrivacyRequest(Base):
     __tablename__ = "privacy_requests"
 

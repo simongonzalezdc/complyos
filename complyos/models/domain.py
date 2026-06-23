@@ -521,3 +521,116 @@ class PrivacyRequest(BaseModel):
     def is_controller_approved(self) -> bool:
         """True only when a controller has recorded an explicit approval."""
         return self.controller_approval.get("status") == "approved"
+
+
+# ---------------------------------------------------------------------------
+# Rosters suite module
+# ---------------------------------------------------------------------------
+class RosterStatus(StrEnum):
+    """Lifecycle state of a roster snapshot.
+
+    ``DRAFT`` is the only state the proposal-only/agent role can create:
+    requesting a snapshot routes the source export through ImportService's
+    preview/quarantine but commits nothing. Only an elevated human step
+    (``approve_snapshot``) promotes the underlying import batch and moves the
+    snapshot to ``APPROVED``; that transition is the quarantine guardrail.
+    ``WITHDRAWN`` retires a draft snapshot that was never approved. The string
+    values are persisted and read back, so changing them is a data change.
+    """
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    WITHDRAWN = "withdrawn"
+
+    @classmethod
+    def values(cls) -> frozenset[str]:
+        return frozenset(member.value for member in cls)
+
+
+class RosterSnapshot(BaseModel):
+    """A captured roster snapshot tied to a quarantined import batch.
+
+    Rosters does not re-implement normalization or imports: requesting a
+    snapshot routes the source export through
+    :class:`complyos.services.imports.ImportService` (preview -> quarantine),
+    and the snapshot only records *which* batch was previewed and whether it has
+    been human-approved. A new snapshot is always ``DRAFT`` — previewing data is
+    never the same as letting it mutate the normalized truth. Approval promotes
+    the import batch (the only mutate path) and stamps
+    ``approved_by``/``approved_at``.
+
+    Claim boundary: a snapshot records that data was previewed and (optionally)
+    human-approved for import. It never asserts anyone is "certified" or
+    "compliant".
+    """
+
+    id: str
+    tenant_id: str
+    label: str
+    source_system: str
+    batch_id: str
+    status: RosterStatus = RosterStatus.DRAFT
+    created_by: str
+    created_at: datetime
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    approval_note: str | None = None
+
+    @property
+    def is_approved(self) -> bool:
+        """True only when a human has explicitly approved the snapshot's import."""
+        return self.status is RosterStatus.APPROVED
+
+
+class RosterRow(BaseModel):
+    """One learner x learning-item cell in a roster view.
+
+    The status is the already-normalized
+    :class:`LearningRecordStatus` (assigned/in_progress/completed/overdue/
+    expired/exempt/not_started) computed by the shared normalization layer — this
+    model only *presents* it; it never re-derives status. Learners are addressed
+    by opaque ``user_id``, never name/email (PII discipline).
+    """
+
+    user_id: str
+    course_id: str
+    status: LearningRecordStatus
+    source_system: str
+    due_date: date | None = None
+    completed_date: datetime | None = None
+    expires_at: date | None = None
+
+
+class RosterPacket(BaseModel):
+    """A proposal-only roster view over the normalized records + a pending batch.
+
+    Restates the captured snapshot, presents the current learners x learning-items
+    rows with their normalized status, and reports the quarantine state of the
+    underlying import batch (``can_promote`` / how many rows are blocked). It is
+    deterministic and writes NO state change.
+
+    Quarantine guardrail: ``confirms_import`` is always ``False``. Drafting a
+    packet NEVER promotes the batch or mutates normalized records; an accountable
+    human does that through ``RostersService.approve_snapshot``.
+    ``requires_human_approval`` is always ``True`` so every surface states the
+    boundary.
+    """
+
+    snapshot_id: str
+    tenant_id: str
+    label: str
+    source_system: str
+    batch_id: str
+    batch_status: str
+    can_promote: bool
+    blocked_row_count: int
+    rows: list[RosterRow] = Field(default_factory=list)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    confirms_import: bool = False
+    requires_human_approval: bool = True
+    drafted_by_provider: str = "deterministic"
+
+    @property
+    def is_promotable(self) -> bool:
+        """True when the quarantined batch has no blocking rows to clear first."""
+        return self.can_promote and self.blocked_row_count == 0

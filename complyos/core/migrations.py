@@ -18,6 +18,7 @@ INBOUND_WEBHOOKS_MIGRATION = "20260613_inbound_webhook_events"
 PERFORMANCE_INDEXES_MIGRATION = "20260614_performance_indexes"
 TENANT_SCOPING_INDEXES_MIGRATION = "20260615_tenant_scoping_indexes"
 INTAKE_REQUESTS_MIGRATION = "20260619_intake_requests"
+ROSTER_SNAPSHOTS_MIGRATION = "20260619_roster_snapshots"
 
 
 class SchemaMigration(TypedDict):
@@ -229,6 +230,29 @@ SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
             """,
             "CREATE INDEX IF NOT EXISTS ix_intake_requests_tenant_status "
             "ON intake_requests (tenant_id, status)",
+        ],
+    },
+    {
+        "migration_id": ROSTER_SNAPSHOTS_MIGRATION,
+        "description": "Roster snapshots: preview/quarantine -> draft view -> human-approved import",
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS roster_snapshots (
+                id VARCHAR PRIMARY KEY,
+                tenant_id VARCHAR NOT NULL DEFAULT 'local-default',
+                label VARCHAR NOT NULL,
+                source_system VARCHAR NOT NULL,
+                batch_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                created_by VARCHAR NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                approved_by VARCHAR,
+                approved_at DATETIME,
+                approval_note VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_roster_snapshots_tenant_status "
+            "ON roster_snapshots (tenant_id, status)",
         ],
     },
 )

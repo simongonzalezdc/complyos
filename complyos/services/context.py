@@ -46,6 +46,8 @@ PERM_ATTESTATION_RECORD = "attestation:record"
 PERM_ATTESTATION_READ = "attestation:read"
 PERM_INTAKE_SUBMIT = "intake:submit"
 PERM_INTAKE_CONFIRM = "intake:confirm"
+PERM_ROSTERS_READ = "rosters:read"
+PERM_ROSTERS_APPROVE = "rosters:approve"
 PERM_ADMIN_MANAGE = "admin:manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
@@ -84,6 +86,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         PERM_ATTESTATION_READ,
         PERM_INTAKE_SUBMIT,
         PERM_INTAKE_CONFIRM,
+        PERM_ROSTERS_READ,
+        PERM_ROSTERS_APPROVE,
         PERM_ADMIN_MANAGE,
     }
 )
@@ -120,6 +124,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_ATTESTATION_READ,
             PERM_INTAKE_SUBMIT,
             PERM_INTAKE_CONFIRM,
+            PERM_ROSTERS_READ,
+            PERM_ROSTERS_APPROVE,
         }
     ),
     "privacy_admin": frozenset(
@@ -179,6 +185,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             # requests and packets — the proposal-only side). intake:confirm is
             # intentionally withheld: confirming scope is the human guardrail, so
             # the agent default role can never mark a request scope-confirmed.
+            PERM_ROSTERS_READ,
+            # NOTE: rosters:read IS granted (the agent may request a snapshot,
+            # which only previews/quarantines source data, and read the roster
+            # view). rosters:approve is intentionally withheld: approving a
+            # snapshot promotes the quarantined import batch into normalized
+            # truth, which is the human guardrail. The agent default role can
+            # preview but never let an import mutate truth.
         }
     ),
     "read_only": frozenset(

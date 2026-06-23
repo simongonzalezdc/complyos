@@ -14,6 +14,7 @@ from complyos.core.privacy_repo import PrivacyRepositoryMixin
 from complyos.core.repository_base import RepositoryBase
 from complyos.core.repository_mappers import RepositoryMappers
 from complyos.core.role_binding_repo import RoleBindingRepositoryMixin
+from complyos.core.rosters_repo import RosterSnapshotRepositoryMixin
 from complyos.core.source_intel_repo import SourceIntelRepositoryMixin
 from complyos.core.time import utc_now
 from complyos.models.database import (
@@ -38,6 +39,7 @@ class LocalRepository(
     NotificationRepositoryMixin,
     RoleBindingRepositoryMixin,
     IntakeRequestRepositoryMixin,
+    RosterSnapshotRepositoryMixin,
     RepositoryBase,
     RepositoryMappers,
 ):

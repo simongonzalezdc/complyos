@@ -29,6 +29,7 @@ from complyos.models.database import (
     DBNotificationEvent,
     DBNotificationPreference,
     DBPrivacyRequest,
+    DBRosterSnapshot,
     DBSourceIntelJobExecution,
     DBSourceIntelProposal,
     DBSourceIntelSchedule,
@@ -43,6 +44,8 @@ from complyos.models.domain import (
     LearningRecordStatus,
     PrivacyRequest,
     PrivacyRequestType,
+    RosterSnapshot,
+    RosterStatus,
     TrainingRequest,
     User,
 )
@@ -87,6 +90,22 @@ class RepositoryMappers:
             confirmed_by=db.confirmed_by,
             confirmed_at=db.confirmed_at,
             confirmation_note=db.confirmation_note,
+        )
+
+    @staticmethod
+    def _to_roster_snapshot(db: DBRosterSnapshot) -> RosterSnapshot:
+        return RosterSnapshot(
+            id=db.id,
+            tenant_id=db.tenant_id,
+            label=db.label,
+            source_system=db.source_system,
+            batch_id=db.batch_id,
+            status=RosterStatus(db.status),
+            created_by=db.created_by,
+            created_at=db.created_at,
+            approved_by=db.approved_by,
+            approved_at=db.approved_at,
+            approval_note=db.approval_note,
         )
 
     @staticmethod
