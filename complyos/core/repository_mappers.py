@@ -22,12 +22,14 @@ from complyos.models.database import (
     DBImportDecision,
     DBImportRow,
     DBInboundWebhookEvent,
+    DBIntakeRequest,
     DBLearningRecord,
     DBLegalHold,
     DBNotificationDelivery,
     DBNotificationEvent,
     DBNotificationPreference,
     DBPrivacyRequest,
+    DBRosterSnapshot,
     DBSourceIntelJobExecution,
     DBSourceIntelProposal,
     DBSourceIntelSchedule,
@@ -36,10 +38,15 @@ from complyos.models.database import (
 from complyos.models.domain import (
     Course,
     Enrollment,
+    IntakePriority,
+    IntakeStatus,
     LearningRecord,
     LearningRecordStatus,
     PrivacyRequest,
     PrivacyRequestType,
+    RosterSnapshot,
+    RosterStatus,
+    TrainingRequest,
     User,
 )
 
@@ -63,6 +70,42 @@ class RepositoryMappers:
             employment_status=EmploymentStatus(db.employment_status),
             manager_id=db.manager_id,
             custom_attributes=db.custom_attributes or {},
+        )
+
+    @staticmethod
+    def _to_training_request(db: DBIntakeRequest) -> TrainingRequest:
+        return TrainingRequest(
+            id=db.id,
+            tenant_id=db.tenant_id,
+            requester=db.requester,
+            title=db.title,
+            audience=db.audience,
+            priority=IntakePriority(db.priority) if db.priority else None,
+            business_context=db.business_context,
+            constraints=db.constraints,
+            requested_by_date=db.requested_by_date,
+            status=IntakeStatus(db.status),
+            created_by=db.created_by,
+            created_at=db.created_at,
+            confirmed_by=db.confirmed_by,
+            confirmed_at=db.confirmed_at,
+            confirmation_note=db.confirmation_note,
+        )
+
+    @staticmethod
+    def _to_roster_snapshot(db: DBRosterSnapshot) -> RosterSnapshot:
+        return RosterSnapshot(
+            id=db.id,
+            tenant_id=db.tenant_id,
+            label=db.label,
+            source_system=db.source_system,
+            batch_id=db.batch_id,
+            status=RosterStatus(db.status),
+            created_by=db.created_by,
+            created_at=db.created_at,
+            approved_by=db.approved_by,
+            approved_at=db.approved_at,
+            approval_note=db.approval_note,
         )
 
     @staticmethod

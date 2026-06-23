@@ -9,7 +9,13 @@ list_ledger requires evidence:read. Return shapes are unchanged.
 
 from __future__ import annotations
 
+import csv
+from datetime import date
+from html import escape
+from io import StringIO
 from typing import Any
+
+from pydantic import BaseModel
 
 from complyos.connectors.base import LMSConnector
 from complyos.core.auditor import ComplianceAuditor
@@ -21,6 +27,19 @@ from complyos.services.context import (
     ActorContext,
     require_permission,
 )
+
+FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+class TrainingRecordStatusRow(BaseModel):
+    """Rendered training-record status for read and packet surfaces."""
+
+    learner: str
+    training: str
+    completed_date: str
+    renewal_date: str
+    status: str
+    expired: bool
 
 
 class EvidenceService:
@@ -90,3 +109,116 @@ class EvidenceService:
         """List tenant-scoped evidence ledger entries."""
         require_permission(context, PERM_EVIDENCE_READ)
         return self.repository.list_evidence_ledger(tenant_id=context.tenant_id, limit=limit)
+
+    def list_training_record_status(
+        self,
+        context: ActorContext,
+        *,
+        as_of: date | None = None,
+    ) -> list[TrainingRecordStatusRow]:
+        """List tenant-scoped normalized training records for operator review."""
+        require_permission(context, PERM_EVIDENCE_READ)
+        return self._training_record_status_rows(context.tenant_id, as_of=as_of)
+
+    def render_training_record_packet_csv(
+        self,
+        context: ActorContext,
+        *,
+        as_of: date | None = None,
+    ) -> str:
+        """Render a client-facing status packet as CSV."""
+        require_permission(context, PERM_EVIDENCE_EXPORT)
+        rows = self._training_record_status_rows(context.tenant_id, as_of=as_of)
+        output = StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(["learner", "training", "completed_date", "renewal_date", "status"])
+        for row in rows:
+            writer.writerow(
+                [
+                    _neutralize_cell(row.learner),
+                    _neutralize_cell(row.training),
+                    row.completed_date,
+                    row.renewal_date,
+                    row.status,
+                ]
+            )
+        return output.getvalue()
+
+    def render_training_record_packet_html(
+        self,
+        context: ActorContext,
+        *,
+        as_of: date | None = None,
+    ) -> str:
+        """Render a minimal client-facing status packet as HTML."""
+        require_permission(context, PERM_EVIDENCE_EXPORT)
+        rows = self._training_record_status_rows(context.tenant_id, as_of=as_of)
+        body = "\n".join(
+            "<tr>"
+            f"<td>{escape(row.learner)}</td>"
+            f"<td>{escape(row.training)}</td>"
+            f"<td>{escape(row.completed_date)}</td>"
+            f"<td>{escape(row.renewal_date)}</td>"
+            f"<td>{escape(row.status)}</td>"
+            "</tr>"
+            for row in rows
+        )
+        if not body:
+            body = "<tr><td colspan='5'>No normalized training records.</td></tr>"
+        return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Client-facing status packet</title>
+</head>
+<body>
+  <h1>client-facing status packet</h1>
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Learner</th>
+        <th scope="col">Training</th>
+        <th scope="col">Completed date</th>
+        <th scope="col">Renewal date</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {body}
+    </tbody>
+  </table>
+</body>
+</html>"""
+
+    def _training_record_status_rows(
+        self,
+        tenant_id: str,
+        *,
+        as_of: date | None,
+    ) -> list[TrainingRecordStatusRow]:
+        records = self.repository.list_learning_records(tenant_id=tenant_id)
+        rows: list[TrainingRecordStatusRow] = []
+        for record in records:
+            user = self.repository.get_user(record.user_id)
+            course = self.repository.get_course(record.course_id)
+            learner = user.full_name.strip() if user and user.full_name.strip() else record.user_id
+            training = course.title if course else record.course_id
+            expired = record.is_expired(as_of=as_of)
+            status = "overdue" if expired else record.status.value
+            completed = record.completed_date.date().isoformat() if record.completed_date else ""
+            renewal = record.expires_at.isoformat() if record.expires_at else ""
+            rows.append(
+                TrainingRecordStatusRow(
+                    learner=learner,
+                    training=training,
+                    completed_date=completed,
+                    renewal_date=renewal,
+                    status=status,
+                    expired=expired,
+                )
+            )
+        return sorted(rows, key=lambda row: (row.learner.lower(), row.training.lower()))
+
+
+def _neutralize_cell(value: str) -> str:
+    return f"'{value}" if value.startswith(FORMULA_PREFIXES) else value

@@ -38,12 +38,14 @@ from complyos.services.context import (
 from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.intake import IntakeService
 from complyos.services.notifications import NotificationOutboxService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
 from complyos.services.role_admin import RoleAdminService
+from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
 from complyos.services.source_intel import SourceIntelService
 from complyos.source_intel import (
@@ -80,6 +82,14 @@ notifications_app = typer.Typer(name="notifications", help="Drain notification o
 attestations_app = typer.Typer(
     name="attestations",
     help="Define and record AI-use-policy / AI-literacy attestations",
+)
+intake_app = typer.Typer(
+    name="intake",
+    help="Capture training requests, draft proposal-only packets, and confirm scope",
+)
+rosters_app = typer.Typer(
+    name="rosters",
+    help="Preview/quarantine source exports, draft proposal-only roster views, and approve imports",
 )
 console = Console()
 
@@ -2464,6 +2474,248 @@ def attestations_list(
     console.print(table)
 
 
+@intake_app.command("submit")
+def intake_submit(
+    title: str = typer.Argument(..., help="Short title of what training is requested"),
+    requester: str = typer.Option(..., "--requester", help="Who is asking (name or id)"),
+    audience: str | None = typer.Option(None, "--audience", help="Who needs the training"),
+    priority: str | None = typer.Option(
+        None, "--priority", help="low | medium | high | urgent (a human may override)"
+    ),
+    business_context: str | None = typer.Option(
+        None, "--context", help="Why this is needed / business driver"
+    ),
+    constraints: str | None = typer.Option(
+        None, "--constraints", help="Timing, budget, compliance, or delivery constraints"
+    ),
+    requested_by_date: str | None = typer.Option(
+        None, "--by", help="Requested-by date (YYYY-MM-DD)"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Capture a training request (DRAFT) and draft its proposal-only packet (intake:submit).
+
+    Submitting captures the request and drafts a packet that flags missing info
+    and SUGGESTS priority/routing. It never confirms scope — run `intake confirm`
+    for that (a separate, human-gated step).
+    """
+    from datetime import date as _date
+
+    context = _local_cli_context()
+    parsed_by = _date.fromisoformat(requested_by_date) if requested_by_date else None
+    service = IntakeService(LocalRepository(db_path))
+    request = service.create_request(
+        context,
+        requester=requester,
+        title=title,
+        audience=audience,
+        priority=priority,
+        business_context=business_context,
+        constraints=constraints,
+        requested_by_date=parsed_by,
+    )
+    packet = service.draft_packet(context, request_id=request.id)
+    if json_output:
+        _print_json(
+            {
+                "request": request.model_dump(mode="json"),
+                "packet": packet.model_dump(mode="json"),
+            }
+        )
+        return
+    console.print(
+        f"[green]Captured intake request[/green] {request.id} "
+        f"(status {request.status.value}; scope NOT yet confirmed)."
+    )
+    console.print(
+        f"Draft packet: priority [bold]{packet.suggested_priority.value}[/bold], "
+        f"routing [bold]{packet.suggested_routing}[/bold] ({packet.routing_rationale})."
+    )
+    if packet.missing_info:
+        console.print(f"[yellow]Missing info:[/yellow] {', '.join(packet.missing_info)}")
+    else:
+        console.print("[green]No required fields missing.[/green]")
+    console.print("Run `complyos intake confirm` for an owner to confirm scope before work starts.")
+
+
+@intake_app.command("list")
+def intake_list(
+    status: str | None = typer.Option(
+        None, "--status", help="Filter by status: draft | confirmed | withdrawn"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List the tenant's intake requests (intake:submit)."""
+    context = _local_cli_context()
+    requests = IntakeService(LocalRepository(db_path)).list_requests(context, status=status)
+    if json_output:
+        _print_json({"items": [req.model_dump(mode="json") for req in requests]})
+        return
+    table = Table(title="Intake requests")
+    table.add_column("ID")
+    table.add_column("Title")
+    table.add_column("Requester")
+    table.add_column("Priority")
+    table.add_column("Status")
+    table.add_column("Confirmed by")
+    for req in requests:
+        table.add_row(
+            req.id,
+            req.title,
+            req.requester,
+            req.priority.value if req.priority else "-",
+            req.status.value,
+            req.confirmed_by or "-",
+        )
+    console.print(table)
+
+
+@intake_app.command("confirm")
+def intake_confirm(
+    request_id: str = typer.Argument(..., help="Intake request id to confirm scope for"),
+    note: str | None = typer.Option(None, "--note", help="Optional confirmation note"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Confirm scope for an intake request: DRAFT -> CONFIRMED (intake:confirm).
+
+    This is the human guardrail. The proposal-only/agent role cannot do this; an
+    elevated human confirms scope before the request is treated as agreed work.
+    """
+    context = _local_cli_context()
+    request = IntakeService(LocalRepository(db_path)).confirm_scope(
+        context, request_id=request_id, note=note
+    )
+    if json_output:
+        _print_json(request.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Scope confirmed[/green] for intake request {request.id} "
+        f"by {request.confirmed_by} (status {request.status.value})."
+    )
+
+
+@rosters_app.command("request")
+def rosters_request(
+    label: str = typer.Argument(..., help="Short label for this roster snapshot"),
+    csv_path: str = typer.Option(..., "--csv", help="Path to the source CSV export"),
+    source_system: str = typer.Option("csv", "--source", help="Source system label"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Capture a roster snapshot by previewing a source export into quarantine (rosters:read).
+
+    The export is routed through the import preview, which QUARANTINES the batch —
+    nothing mutates the normalized truth. Promotion is a separate, human-gated
+    step (`rosters approve`).
+    """
+    context = _local_cli_context()
+    snapshot = RostersService(LocalRepository(db_path)).request_snapshot(
+        context, label=label, path=csv_path, source_system=source_system
+    )
+    if json_output:
+        _print_json(snapshot.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Captured roster snapshot[/green] {snapshot.id} "
+        f"(status {snapshot.status.value}; batch {snapshot.batch_id} quarantined, "
+        "NOT yet imported)."
+    )
+    console.print(
+        "Run `complyos rosters draft` to view the roster, then `rosters approve` "
+        "to import."
+    )
+
+
+@rosters_app.command("draft")
+def rosters_draft(
+    snapshot_id: str = typer.Argument(..., help="Roster snapshot id to draft a view for"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Draft a proposal-only roster view for a captured snapshot (rosters:read)."""
+    context = _local_cli_context()
+    packet = RostersService(LocalRepository(db_path)).draft_packet(
+        context, snapshot_id=snapshot_id
+    )
+    if json_output:
+        _print_json(packet.model_dump(mode="json"))
+        return
+    console.print(
+        f"[bold]Roster view[/bold] for snapshot {packet.snapshot_id} "
+        f"({len(packet.rows)} rows; batch {packet.batch_status}, "
+        f"{'promotable' if packet.is_promotable else f'{packet.blocked_row_count} blocked rows'})."
+    )
+    table = Table(title="Status counts")
+    table.add_column("Status")
+    table.add_column("Count", justify="right")
+    for status_value, count in packet.status_counts.items():
+        if count:
+            table.add_row(status_value, str(count))
+    console.print(table)
+    console.print("[yellow]Proposal only — a human must run `rosters approve` to import.[/yellow]")
+
+
+@rosters_app.command("list")
+def rosters_list(
+    status: str | None = typer.Option(
+        None, "--status", help="Filter by status: draft | approved | withdrawn"
+    ),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """List the tenant's roster snapshots (rosters:read)."""
+    context = _local_cli_context()
+    snapshots = RostersService(LocalRepository(db_path)).list_snapshots(context, status=status)
+    if json_output:
+        _print_json({"items": [snap.model_dump(mode="json") for snap in snapshots]})
+        return
+    table = Table(title="Roster snapshots")
+    table.add_column("ID")
+    table.add_column("Label")
+    table.add_column("Source")
+    table.add_column("Batch")
+    table.add_column("Status")
+    table.add_column("Approved by")
+    for snap in snapshots:
+        table.add_row(
+            snap.id,
+            snap.label,
+            snap.source_system,
+            snap.batch_id,
+            snap.status.value,
+            snap.approved_by or "-",
+        )
+    console.print(table)
+
+
+@rosters_app.command("approve")
+def rosters_approve(
+    snapshot_id: str = typer.Argument(..., help="Roster snapshot id to approve and import"),
+    note: str | None = typer.Option(None, "--note", help="Optional approval note"),
+    db_path: str = typer.Option("complyos.db", "--db", help="Path to SQLite database"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Approve a snapshot: promote its quarantined batch and mark it APPROVED (rosters:approve).
+
+    This is the quarantine guardrail. The proposal-only/agent role cannot do this;
+    an elevated human approves before the previewed data mutates normalized truth.
+    """
+    context = _local_cli_context()
+    snapshot = RostersService(LocalRepository(db_path)).approve_snapshot(
+        context, snapshot_id=snapshot_id, note=note
+    )
+    if json_output:
+        _print_json(snapshot.model_dump(mode="json"))
+        return
+    console.print(
+        f"[green]Approved[/green] roster snapshot {snapshot.id} "
+        f"by {snapshot.approved_by} (status {snapshot.status.value}); batch imported."
+    )
+
+
 privacy_app.add_typer(privacy_retention_app, name="retention")
 app.add_typer(import_app, name="import")
 app.add_typer(evidence_app, name="evidence")
@@ -2476,6 +2728,8 @@ app.add_typer(security_app, name="security")
 app.add_typer(notifications_app, name="notifications")
 app.add_typer(privacy_app, name="privacy")
 app.add_typer(attestations_app, name="attestations")
+app.add_typer(intake_app, name="intake")
+app.add_typer(rosters_app, name="rosters")
 
 
 if __name__ == "__main__":

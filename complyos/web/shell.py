@@ -16,13 +16,14 @@ from __future__ import annotations
 import hmac
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Form, Request, status
+from fastapi import APIRouter, File, Form, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from complyos.api.mcp_server import _get_connector
+from complyos.connectors.document import DocumentExtractionError, DocumentExtractor
 from complyos.core.repository import LocalRepository
 from complyos.models.domain import AuditReport
 from complyos.notification.signing import sign_payload, verify_signature
@@ -61,6 +62,7 @@ MODULES: tuple[dict[str, object], ...] = (
     {"key": "overview", "label": "Overview", "href": SHELL_PREFIX, "live": True},
     {"key": "gaps", "label": "Gaps", "href": f"{SHELL_PREFIX}/gaps", "live": True},
     {"key": "imports", "label": "Imports", "href": f"{SHELL_PREFIX}/imports", "live": True},
+    {"key": "records", "label": "Records", "href": f"{SHELL_PREFIX}/records", "live": True},
     {"key": "evidence", "label": "Evidence", "href": f"{SHELL_PREFIX}/evidence", "live": True},
     {
         "key": "remediation",
@@ -461,15 +463,30 @@ def build_shell_router(
 
     @router.post("/shell/imports/preview", response_class=HTMLResponse)
     async def shell_imports_preview(
-        request: Request, csv_text: str = Form(default="")
+        request: Request,
+        csv_text: Annotated[str, Form()] = "",
+        document_file: Annotated[UploadFile | None, File()] = None,
     ) -> Response:
-        """Preview a pasted CSV through the live ImportService (import:preview)."""
+        """Preview pasted CSV or uploaded document rows through ImportService."""
         context = _shell_context(request)
         if context is None:
             return _login_redirect()
+        source_system = "csv"
+        preview_csv_text = csv_text
+        if document_file is not None and document_file.filename:
+            source_system = "document_upload"
+            content = await document_file.read()
+            try:
+                preview_csv_text = DocumentExtractor(
+                    content,
+                    filename=document_file.filename,
+                ).to_import_csv_text()
+            except DocumentExtractionError:
+                preview_csv_text = ""
         try:
             preview = ImportService(repository).preview(
-                context, ImportPreviewRequest(csv_text=csv_text)
+                context,
+                ImportPreviewRequest(source_system=source_system, csv_text=preview_csv_text),
             )
         except AuthorizationError as exc:
             return _permission_panel(
@@ -482,6 +499,70 @@ def build_shell_router(
         return _imports_render(
             request, context, preview=preview, rows=_import_decision_rows(preview.batch_id)
         )
+
+    @router.get("/shell/records", response_class=HTMLResponse)
+    async def shell_records(request: Request) -> Response:
+        """Read normalized training records and renewal status."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            rows = EvidenceService(_get_connector(), repository).list_training_record_status(
+                context
+            )
+        except AuthorizationError as exc:
+            return _permission_panel(
+                request,
+                active="records",
+                context=context,
+                module_label="Records",
+                error=exc,
+            )
+        return _render(
+            request,
+            "records.html",
+            {"active": "records", "context": context, "rows": rows},
+        )
+
+    @router.get("/shell/records/export.csv")
+    async def shell_records_export_csv(request: Request) -> Response:
+        """Export the client-facing status packet as CSV."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            content = EvidenceService(
+                _get_connector(),
+                repository,
+            ).render_training_record_packet_csv(
+                context,
+            )
+        except AuthorizationError:
+            return Response("permission denied", status_code=status.HTTP_403_FORBIDDEN)
+        return Response(
+            content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": (
+                    'attachment; filename="client-facing-status-packet.csv"'
+                )
+            },
+        )
+
+    @router.get("/shell/records/export.html", response_class=HTMLResponse)
+    async def shell_records_export_html(request: Request) -> Response:
+        """Export the client-facing status packet as minimal HTML."""
+        context = _shell_context(request)
+        if context is None:
+            return _login_redirect()
+        try:
+            content = EvidenceService(
+                _get_connector(),
+                repository,
+            ).render_training_record_packet_html(context)
+        except AuthorizationError:
+            return Response("permission denied", status_code=status.HTTP_403_FORBIDDEN)
+        return HTMLResponse(content)
 
     @router.get("/shell/evidence", response_class=HTMLResponse)
     async def shell_evidence(request: Request, limit: int = 50) -> Response:

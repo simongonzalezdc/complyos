@@ -12,15 +12,22 @@
 </p>
 
 <section class="panel" aria-labelledby="paste-heading">
-  <h2 id="paste-heading">Paste CSV</h2>
-  <form method="post" action="{{ shell_url }}/imports/preview">
+  <h2 id="paste-heading">Paste CSV or upload a document</h2>
+  <form method="post" action="{{ shell_url }}/imports/preview" enctype="multipart/form-data">
     <label for="csv_text">CSV rows (header + data)</label>
     <textarea id="csv_text" name="csv_text" class="field field-mono" rows="8"
               aria-describedby="csv-help"
               placeholder="user_id,course_id,status,completed_at&#10;u1,c1,completed,2026-01-15"></textarea>
+    <label for="document_file">Document table</label>
+    <input id="document_file" name="document_file" type="file" class="field"
+           accept=".docx,.xlsx,.csv" aria-describedby="document-help" />
     <p id="csv-help" class="posture-note">
       The first line is the header row. Unexpected columns are flagged, not
       silently dropped.
+    </p>
+    <p id="document-help" class="posture-note">
+      Word, Excel, and CSV tables are extracted into normalized training records
+      for preview.
     </p>
     <button type="submit" class="btn">Preview</button>
   </form>

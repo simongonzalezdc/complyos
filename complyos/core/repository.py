@@ -8,11 +8,13 @@ from datetime import date, datetime
 from typing import Any
 
 from complyos.core.import_repo import ImportRepositoryMixin
+from complyos.core.intake_repo import IntakeRequestRepositoryMixin
 from complyos.core.notification_repo import NotificationRepositoryMixin
 from complyos.core.privacy_repo import PrivacyRepositoryMixin
 from complyos.core.repository_base import RepositoryBase
 from complyos.core.repository_mappers import RepositoryMappers
 from complyos.core.role_binding_repo import RoleBindingRepositoryMixin
+from complyos.core.rosters_repo import RosterSnapshotRepositoryMixin
 from complyos.core.source_intel_repo import SourceIntelRepositoryMixin
 from complyos.core.time import utc_now
 from complyos.models.database import (
@@ -36,6 +38,8 @@ class LocalRepository(
     SourceIntelRepositoryMixin,
     NotificationRepositoryMixin,
     RoleBindingRepositoryMixin,
+    IntakeRequestRepositoryMixin,
+    RosterSnapshotRepositoryMixin,
     RepositoryBase,
     RepositoryMappers,
 ):
@@ -333,6 +337,7 @@ class LocalRepository(
     def list_learning_records(
         self,
         *,
+        tenant_id: str | None = None,
         user_id: str | None = None,
         course_id: str | None = None,
         status: str | LearningRecordStatus | None = None,
@@ -340,6 +345,8 @@ class LocalRepository(
     ) -> list[LearningRecord]:
         with self._session() as session:
             query = session.query(DBLearningRecord)
+            if tenant_id:
+                query = query.where(DBLearningRecord.tenant_id == tenant_id)
             if user_id:
                 query = query.where(DBLearningRecord.user_id == user_id)
             if course_id:
@@ -616,4 +623,3 @@ class LocalRepository(
                 "retention_policy": dict(row.retention_policy or {}),
                 "subprocessor_profile": dict(row.subprocessor_profile or {}),
             }
-

@@ -891,3 +891,64 @@ def test_api_v1_attestation_record_denied_for_agent_role(monkeypatch, tmp_path) 
     )
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "permission_denied"
+
+
+def test_api_v1_intake_submit_list_confirm_flow(monkeypatch, tmp_path) -> None:
+    """End-to-end intake over the API: submit (draft packet) -> list -> confirm."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-intake.db"))))
+    headers = {"Authorization": "Bearer test-token"}
+
+    submit = client.post(
+        "/api/v1/intake",
+        json={
+            "requester": "ops-lead",
+            "title": "New regulatory compliance policy training",
+        },
+        headers=headers,
+    )
+    assert submit.status_code == 200, submit.text
+    body = submit.json()
+    request_id = body["request"]["id"]
+    assert body["request"]["status"] == "draft"
+    # Proposal-only packet boundary is explicit in the response.
+    assert body["packet"]["confirms_scope"] is False
+    assert body["packet"]["requires_human_confirmation"] is True
+    assert body["packet"]["suggested_routing"] == "compliance-training"
+
+    listing = client.get("/api/v1/intake", headers=headers)
+    assert listing.status_code == 200
+    assert any(item["id"] == request_id for item in listing.json()["items"])
+
+    confirm = client.post(
+        f"/api/v1/intake/{request_id}/confirm",
+        json={"note": "owner approved"},
+        headers=headers,
+    )
+    assert confirm.status_code == 200, confirm.text
+    assert confirm.json()["status"] == "confirmed"
+    assert confirm.json()["confirmation_note"] == "owner approved"
+
+
+def test_api_v1_intake_confirm_denied_for_agent_role(monkeypatch, tmp_path) -> None:
+    """An agent_service_account caller can draft intake but cannot confirm scope."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "test-token")
+    client = TestClient(create_api_v1_app(LocalRepository(str(tmp_path / "api-intake-denied.db"))))
+    bearer = {"Authorization": "Bearer test-token"}
+    agent = {**bearer, "X-Actor-Role": "agent_service_account"}
+
+    # Agent CAN submit/draft.
+    submit = client.post(
+        "/api/v1/intake",
+        json={"requester": "agent", "title": "Agent-captured ask"},
+        headers=agent,
+    )
+    assert submit.status_code == 200, submit.text
+    request_id = submit.json()["request"]["id"]
+
+    # Agent CANNOT confirm scope.
+    denied = client.post(
+        f"/api/v1/intake/{request_id}/confirm", json={}, headers=agent
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"

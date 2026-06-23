@@ -38,10 +38,12 @@ from complyos.services.context import (
 from complyos.services.evidence import EvidenceService
 from complyos.services.governance import GovernancePacketService
 from complyos.services.imports import ImportPreviewRequest, ImportService
+from complyos.services.intake import IntakeService
 from complyos.services.policy_rules import PolicyRuleService
 from complyos.services.privacy import PrivacyProgramService
 from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
+from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
 
 mcp = FastMCP("complyos")
@@ -978,6 +980,213 @@ async def record_attestation(
             expires_at=parsed_expiry,
             on_behalf=on_behalf,
         )
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def submit_intake(
+    title: str,
+    requester: str,
+    audience: str | None = None,
+    priority: str | None = None,
+    business_context: str | None = None,
+    constraints: str | None = None,
+    requested_by_date: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Proposal-only: capture a training request (DRAFT) and draft its packet.
+
+    The default proposal-only agent role MAY do this (it holds ``intake:submit``).
+    Submitting captures the request and drafts a proposal-only packet that flags
+    missing info and SUGGESTS a priority + routing. It never confirms scope —
+    that is a separate human step (see confirm_intake_scope), so an agent can
+    triage requests but can never agree to do the work.
+
+    Args:
+        title: Short title of what training is requested.
+        requester: Who is asking (name or id).
+        audience: Who needs the training.
+        priority: Optional low|medium|high|urgent (a human may override).
+        business_context: Why this is needed / business driver.
+        constraints: Timing, budget, compliance, or delivery constraints.
+        requested_by_date: Optional ISO date (YYYY-MM-DD).
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The captured request and its proposal-only draft packet.
+    """
+    from datetime import date as _date
+
+    context = _mcp_context(track=profile)
+    parsed_by = _date.fromisoformat(requested_by_date) if requested_by_date else None
+    service = IntakeService(LocalRepository(db_path))
+    request = service.create_request(
+        context,
+        requester=requester,
+        title=title,
+        audience=audience,
+        priority=priority,
+        business_context=business_context,
+        constraints=constraints,
+        requested_by_date=parsed_by,
+    )
+    packet = service.draft_packet(context, request_id=request.id)
+    return {
+        "request": request.model_dump(mode="json"),
+        "packet": packet.model_dump(mode="json"),
+    }
+
+
+@mcp.tool()
+async def list_intake(
+    status: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Read-only: list the tenant's training intake requests.
+
+    The default proposal-only agent role may list intake requests (it holds
+    ``intake:submit``) so it can triage and report the queue.
+
+    Args:
+        status: Optional filter: draft | confirmed | withdrawn.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The tenant's intake requests.
+    """
+    context = _mcp_context(track=profile)
+    requests = IntakeService(LocalRepository(db_path)).list_requests(context, status=status)
+    return {"items": [req.model_dump(mode="json") for req in requests]}
+
+
+@mcp.tool()
+async def confirm_intake_scope(
+    request_id: str,
+    note: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: confirm scope for an intake request (DRAFT -> CONFIRMED).
+
+    This is the human guardrail. The default proposal-only MCP role lacks
+    ``intake:confirm`` and is therefore denied — an AI/agent can never confirm
+    scope. Raise COMPLYOS_MCP_ROLE to a human-operated role (e.g.
+    compliance_manager) only when a human is genuinely confirming scope through
+    the agent surface.
+
+    Args:
+        request_id: Intake request id to confirm scope for.
+        note: Optional confirmation note.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The confirmed request with its human approver stamped.
+    """
+    context = _mcp_context(track=profile)
+    return (
+        IntakeService(LocalRepository(db_path))
+        .confirm_scope(context, request_id=request_id, note=note)
+        .model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+async def request_roster_snapshot(
+    label: str,
+    csv_text: str,
+    source_system: str = "csv",
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Proposal-only: preview a source export into quarantine and draft a roster view.
+
+    The default proposal-only agent role MAY do this (it holds ``rosters:read``).
+    The export is routed through the import preview, which QUARANTINES the batch —
+    nothing mutates the normalized truth. A proposal-only roster view (learners x
+    learning-items, normalized status) is returned alongside the captured
+    snapshot. Promotion is a separate human step (see approve_roster_snapshot),
+    so an agent can preview and present but never let an import mutate truth.
+
+    Args:
+        label: Short label for this roster snapshot.
+        csv_text: The source CSV export text.
+        source_system: Source system label.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The captured snapshot and its proposal-only roster view.
+    """
+    context = _mcp_context(track=profile)
+    service = RostersService(LocalRepository(db_path))
+    snapshot = service.request_snapshot(
+        context, label=label, csv_text=csv_text, source_system=source_system
+    )
+    packet = service.draft_packet(context, snapshot_id=snapshot.id)
+    return {
+        "snapshot": snapshot.model_dump(mode="json"),
+        "packet": packet.model_dump(mode="json"),
+    }
+
+
+@mcp.tool()
+async def list_rosters(
+    status: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Read-only: list the tenant's roster snapshots.
+
+    The default proposal-only agent role may list roster snapshots (it holds
+    ``rosters:read``) so it can triage and report the queue.
+
+    Args:
+        status: Optional filter: draft | approved | withdrawn.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The tenant's roster snapshots.
+    """
+    context = _mcp_context(track=profile)
+    snapshots = RostersService(LocalRepository(db_path)).list_snapshots(context, status=status)
+    return {"items": [snap.model_dump(mode="json") for snap in snapshots]}
+
+
+@mcp.tool()
+async def approve_roster_snapshot(
+    snapshot_id: str,
+    note: str | None = None,
+    profile: str = "workforce",
+    db_path: str = "complyos.db",
+) -> dict[str, Any]:
+    """Mutating: approve a roster snapshot and promote its quarantined import.
+
+    This is the quarantine guardrail. The default proposal-only MCP role lacks
+    ``rosters:approve`` and is therefore denied — an AI/agent can never let a
+    previewed import mutate normalized truth. Raise COMPLYOS_MCP_ROLE to a
+    human-operated role (e.g. compliance_manager) only when a human is genuinely
+    approving the import through the agent surface.
+
+    Args:
+        snapshot_id: Roster snapshot id to approve and import.
+        note: Optional approval note.
+        profile: workforce or campus.
+        db_path: SQLite database path.
+
+    Returns:
+        The approved snapshot with its human approver stamped.
+    """
+    context = _mcp_context(track=profile)
+    return (
+        RostersService(LocalRepository(db_path))
+        .approve_snapshot(context, snapshot_id=snapshot_id, note=note)
         .model_dump(mode="json")
     )
 

@@ -60,7 +60,7 @@ Every business workflow routes through the **application service layer**. Servic
 | `request_id` | Per-request correlation UUID |
 | `auth_method` | `"bearer"` / `"session"` / `"local_dev"` |
 
-### Permission Catalog (33 permissions)
+### Permission Catalog (37 permissions)
 
 ```
 audit:read              audit:run              analytics:read
@@ -79,6 +79,8 @@ legal_hold:manage
 source_intel:read       source_intel:run       source_intel:decide
 notifications:manage
 attestation:record      attestation:read
+intake:submit           intake:confirm
+rosters:read            rosters:approve
 admin:manage
 ```
 
@@ -86,14 +88,14 @@ admin:manage
 
 | Role | Permissions |
 |------|------------|
-| `owner` | All 33 |
+| `owner` | All 37 |
 | `admin` | All except `admin:manage` |
-| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications |
+| `compliance_manager` | Audit, analytics:read, evidence, rules, remediation, connectors:read, AI, readiness, security/governance read, privacy (request/approve/export), source-intel, notifications, attestation, intake (submit + confirm), rosters (read + approve) |
 | `privacy_admin` | Evidence:read, readiness:read, privacy (all), legal hold, notifications |
 | `import_approver` | import:preview/decide/promote, evidence:read |
 | `importer` | import:preview/decide, evidence:read |
 | `reviewer` | audit:read, analytics:read, evidence, readiness, security/governance read, source-intel:read |
-| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run (**no** notifications:manage — MCP default role is proposal-only) |
+| `agent_service_account` | audit:read/run, analytics:read, evidence:read, import:preview, rules:preview, remediation:propose, connectors:read, ai:propose, readiness:read, source-intel:read/run, attestation:read, intake:submit, rosters:read (**no** notifications:manage, attestation:record, intake:confirm, or rosters:approve — MCP default role is proposal-only: it can confirm/approve nothing and cannot let an import mutate truth) |
 | `read_only` | audit:read, analytics:read, evidence:read, readiness:read, source-intel:read |
 
 ## Application Services
@@ -118,6 +120,9 @@ All surfaces instantiate services with a repository and call them with an `Actor
 | `NotificationOutboxService` | Enqueue and drain outbound notifications |
 | `InboundHookService` | Validate, redact, and record inbound webhook receipts |
 | `RoleAdminService` | Manage role bindings per tenant |
+| `AttestationService` | Define and human-record AI-use-policy / AI-literacy attestations |
+| `IntakeService` | Capture training requests, draft proposal-only packets, confirm scope |
+| `RostersService` | Preview/quarantine source exports, draft proposal-only roster views, approve imports |
 
 ## Surfaces
 
@@ -360,6 +365,8 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 
 Control-mapping and readiness language only. Never write "SOC 2 compliant", "SOC 2 certified", "GDPR compliant", "FERPA compliant", "COPPA compliant", "LGPD compliant", or "PIPEDA compliant". Use "readiness", "control mapping", "evidence", and "review". A test enforces this at the codebase level.
 
+The value-prop form of this rule — *the software does the clerical layer; the licensed human keeps judgment, liability, and approval* — is the **Product Boundary Doctrine** (`docs/product-boundary-doctrine.md`). It governs every surface, demo, and pitch.
+
 ## Completed Phases
 
 - [x] Phase 1 — Core auditing, MCP server, CLI, Workday connector
@@ -367,7 +374,7 @@ Control-mapping and readiness language only. Never write "SOC 2 compliant", "SOC
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
-- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 9 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (659 tests green, ruff+mypy clean)
+- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 10 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (659 tests green, ruff+mypy clean)
 
 ## Roadmap
 

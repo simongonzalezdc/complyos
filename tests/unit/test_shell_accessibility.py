@@ -270,6 +270,7 @@ _MODULES: list[tuple[str, str, str]] = [
     ("/shell", "compliance_manager", "a11y-overview.db"),
     ("/shell/gaps", "compliance_manager", "a11y-gaps.db"),
     ("/shell/imports", "importer", "a11y-imports.db"),
+    ("/shell/records", "compliance_manager", "a11y-records.db"),
     ("/shell/evidence", "compliance_manager", "a11y-evidence.db"),
     ("/shell/remediation", "compliance_manager", "a11y-remediation.db"),
     ("/shell/source-intel", "compliance_manager", "a11y-source-intel.db"),

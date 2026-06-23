@@ -39,7 +39,7 @@ fail closed at context construction time.
 ## Web shell at /shell
 
 An authenticated enterprise web shell served by `complyos serve-dashboard` (shell at
-`http://host:port/shell`). All nine modules render from live service data — not mock theater.
+`http://host:port/shell`). All ten modules render from live service data — not mock theater.
 
 | Module | URL | What it shows |
 |---|---|---|
