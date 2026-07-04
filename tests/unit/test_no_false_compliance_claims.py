@@ -7,6 +7,8 @@ from pathlib import Path
 
 PUBLIC_TEXT_FILES = [
     Path("README.md"),
+    Path("COMMERCIAL-LICENSE.md"),
+    Path("docs/pricing.md"),
     Path("docs/access-review-procedure.md"),
     Path("docs/index.html"),
     Path("docs/agent-surface.md"),

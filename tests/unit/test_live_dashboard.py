@@ -80,6 +80,28 @@ def test_live_dashboard_legacy_endpoints_served_with_insecure_optin(monkeypatch)
     assert client.get("/dashboard").status_code == 200
 
 
+def test_live_dashboard_source_intel_review_disabled_in_secured_posture(monkeypatch) -> None:
+    """With a real token and no insecure opt-in, the review queue fails closed too."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "dash-token")
+    monkeypatch.delenv("COMPLYOS_ALLOW_INSECURE_LOCAL", raising=False)
+    client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
+
+    response = client.get("/source-intel/review")
+
+    assert response.status_code == 404
+
+
+def test_live_dashboard_source_intel_review_served_with_insecure_optin(monkeypatch) -> None:
+    """Token + explicit insecure opt-in keeps the review queue available."""
+    monkeypatch.setenv("COMPLYOS_API_TOKEN", "dash-token")
+    monkeypatch.setenv("COMPLYOS_ALLOW_INSECURE_LOCAL", "1")
+    client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
+
+    response = client.get("/source-intel/review")
+
+    assert response.status_code == 200
+
+
 def test_live_dashboard_html_endpoint() -> None:
     client = TestClient(create_dashboard_app(auditor=FakeAuditor()))
 

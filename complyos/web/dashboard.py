@@ -107,6 +107,8 @@ def create_dashboard_app(
 
     @app.get("/source-intel/review", response_class=HTMLResponse)
     async def source_intel_review() -> HTMLResponse:
+        """Local/dev only: unauthenticated review queue (disabled in secured posture)."""
+        _guard_legacy_dev_endpoint()
         context = default_local_context(
             surface="dashboard",
             role="compliance_manager",

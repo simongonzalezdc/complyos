@@ -76,7 +76,7 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 > data into `LearningRecord`. The existing `Enrollment` model remains available
 > as the compatibility layer for the current audit engine.
 
-## Current State (branch simon/enterprise-hardening, 659 tests passing)
+## Current State (850+ tests passing; 878 at last count, 2026-07-04)
 
 ### Built
 
@@ -87,7 +87,7 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 
 **Surfaces (all call the same services; cross-surface parity enforced by tests)**
 - **CLI (Typer):** audit / report / status / digest / dashboard / serve-dashboard / sync / connectors / health / validate-rule / preview-rule / remediate / export / notifications / security evidence / governance packet / privacy / admin role-bindings / source-intel / mcp / run-schedule / release-check.
-- **MCP (FastMCP, ~30 tools):** same services; default role is least-privilege `agent_service_account` (proposal-only); privileged ops require `COMPLYOS_MCP_ROLE` opt-in.
+- **MCP (FastMCP, 38 tools):** same services; default role is least-privilege `agent_service_account` (proposal-only); privileged ops require `COMPLYOS_MCP_ROLE` opt-in.
 - **API v1 (FastAPI, `/api/v1/*`):** versioned routes covering audits, learners, connectors, imports (preview/decisions/promote), evidence, exports/reports, rules (validate/preview), remediations, ai/proposals (mapping/approve), readiness, admin/roles, sync, privacy (requests/legal-holds/retention), source-intel, notifications, hooks/inbound. Bearer-token auth (fail-closed when `COMPLYOS_API_TOKEN` unset; constant-time compare). Structured errors `{code,message,details,request_id}`. OpenAPI snapshot test. In-process per-identity rate limiting on mutating endpoints (`COMPLYOS_RATE_LIMIT_PER_MINUTE`).
 - **Web shell (`/shell`):** authenticated enterprise web shell served by `complyos serve-dashboard`. Signed-session cookie auth wraps the same `ActorContext` (login exchanges the API token, or a chosen role in `COMPLYOS_ALLOW_INSECURE_LOCAL` mode, for an `HttpOnly SameSite=Lax` signed cookie). Ten modules rendered from live service data: Overview, Gaps, Imports, Records, Evidence, Remediation, Source intelligence, Privacy & retention, Readiness, Administration. Import preview/decide/promote are wired. WCAG 2.2 AA accessibility and color-contrast enforced by tests.
 
@@ -97,9 +97,9 @@ Learner ── has ──▶ LearningRecord ── for ──▶ Learning Item
 **Tenant model**
 - Tenant-aware data model, single-tenant runtime by default. Tenant governance metadata (data_region, processing_purpose, data_categories, retention_policy, subprocessor_profile) is surfaced through readiness. Multi-tenant / SaaS is deliberately not built — see `docs/multi-tenancy.md`.
 
-**Connectors:** CSV (read-only), Workday, SAP SuccessFactors, Cornerstone, Mock.
+**Connectors:** CSV (read-only), Workday, SAP SuccessFactors, Cornerstone, Canvas (read-only), Moodle (read-only), Blackboard (read-only), D2L Brightspace (read-only), Mock.
 
-**Test suite:** 659 passing; adversarial suite includes BOLA/IDOR, secrets audit, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases, and connector-failure-fails-closed.
+**Test suite:** 850+ passing (878 at last count, 2026-07-04); adversarial suite includes BOLA/IDOR, secrets audit, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases, and connector-failure-fails-closed.
 
 ---
 

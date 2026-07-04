@@ -359,7 +359,7 @@ The domain models and auditor logic are intentionally storage-agnostic — only 
 | API v1 | `httpx.AsyncClient` + OpenAPI snapshot |
 | Adversarial | BOLA/IDOR, secrets audit, cross-surface denial parity, export formula/XSS neutralization, import adversarial cases, connector-failure-fails-closed |
 
-659 tests pass on this branch. Use the full local test suite as the release baseline when changing connector, repository, or audit behavior; avoid relying on a stale hard-coded test count.
+850+ tests pass on this branch (878 at last count, 2026-07-04). Use the full local test suite as the release baseline when changing connector, repository, or audit behavior; avoid relying on a stale hard-coded test count.
 
 ## Claim Discipline
 
@@ -374,7 +374,7 @@ The value-prop form of this rule — *the software does the clerical layer; the 
 - [x] Phase 3 — Remediation workflows, CSV connector, compliance digest, HTML report/dashboard export
 - [x] Phase 4 — Operator-ready release: scheduled audit runs, notification outbox, release packaging, and documentation/security polish
 - [x] Phase 5 — Scale-out: PostgreSQL backend, live web dashboard, SAP SuccessFactors connector, Cornerstone connector
-- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 10 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (659 tests green, ruff+mypy clean)
+- [x] Enterprise hardening — Application service layer with `ActorContext` + `require_permission` authorization choke-point; four parity surfaces (CLI/MCP/API v1/web shell); authenticated enterprise web shell with 10 live modules; proposal-only AI layer with PII redaction and provenance; privacy/DSR/legal-hold/retention services; repository mixin decomposition; source-intel and notification outbox; adversarial test suite (850+ tests green, ruff+mypy clean)
 
 ## Roadmap
 

@@ -167,6 +167,9 @@
       }
 
       .nav-action {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
         justify-self: end;
       }
 
@@ -231,6 +234,7 @@
       .status-pill,
       .system-tag,
       .step span,
+      .price-card .price,
       .footer code {
         font-family:
           "Geist Mono",
@@ -543,7 +547,8 @@
       .track ul,
       .connector-list,
       .control-card ul,
-      .boundary ul {
+      .boundary ul,
+      .trust-list {
         display: grid;
         gap: 12px;
         margin: 28px 0 0;
@@ -554,7 +559,8 @@
       .track li,
       .connector-list li,
       .control-card li,
-      .boundary li {
+      .boundary li,
+      .trust-list li {
         position: relative;
         padding-left: 22px;
         color: #313833;
@@ -563,7 +569,8 @@
       .track li::before,
       .connector-list li::before,
       .control-card li::before,
-      .boundary li::before {
+      .boundary li::before,
+      .trust-list li::before {
         content: "";
         position: absolute;
         top: 0.72em;
@@ -850,6 +857,78 @@
         color: var(--muted);
       }
 
+      .price-board {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--line);
+      }
+
+      .price-card {
+        min-height: 230px;
+        padding: clamp(22px, 3vw, 32px);
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .price-card.lead {
+        background: rgba(232, 223, 207, 0.46);
+      }
+
+      .price-card h3 {
+        margin: 14px 0 0;
+        font-size: clamp(22px, 2.5vw, 34px);
+        line-height: 0.98;
+        letter-spacing: -0.05em;
+      }
+
+      .price-card .price {
+        display: block;
+        margin: 10px 0 12px;
+        color: var(--accent-dark);
+        font-size: clamp(19px, 2vw, 24px);
+        font-weight: 740;
+        letter-spacing: -0.03em;
+      }
+
+      .price-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .price-terms {
+        display: grid;
+        grid-template-columns: 0.82fr 1.18fr;
+        gap: 18px;
+        margin-top: 18px;
+        padding: clamp(24px, 3.5vw, 42px);
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .price-terms h3 {
+        margin: 0;
+        font-size: clamp(26px, 3.5vw, 48px);
+        line-height: 0.98;
+        letter-spacing: -0.06em;
+      }
+
+      .price-terms p {
+        margin: 12px 0 0;
+        color: var(--muted);
+      }
+
+      p.contact-note {
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
       .final {
         padding: clamp(32px, 6vw, 72px);
         border: 1px solid var(--line);
@@ -876,12 +955,21 @@
       }
 
       .footer {
-        display: flex;
-        justify-content: space-between;
-        gap: 20px;
+        display: grid;
+        gap: 14px;
         padding-top: 34px;
         color: var(--muted);
         font-size: 13px;
+      }
+
+      .footer-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .footer-legal {
+        margin: 0;
       }
 
       .fade-in {
@@ -947,7 +1035,8 @@
         .flow,
         .panel-footer,
         .control-grid,
-        .boundary {
+        .boundary,
+        .price-terms {
           grid-template-columns: 1fr;
         }
 
@@ -978,7 +1067,8 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .connector-board {
+        .connector-board,
+        .price-board {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
@@ -1042,7 +1132,8 @@
         .proof-strip,
         .connector-board,
         .suite-board,
-        .demo-grid {
+        .demo-grid,
+        .price-board {
           grid-template-columns: 1fr;
         }
 
@@ -1074,9 +1165,13 @@
           <a href="#controls">Controls</a>
           <a href="#connectors">Connectors</a>
           <a href="#flow">Flow</a>
+          <a href="#pricing">Pricing</a>
         </div>
         <div class="nav-action">
           <a class="button secondary" href="./learningops-suite-v0.md">Suite spec</a>
+          <a class="button" href="mailto:simon@puenteworks.com?subject=ComplyOS%20pilot">
+            Talk about a pilot
+          </a>
         </div>
       </nav>
 
@@ -1104,6 +1199,13 @@
               Review RegWatch v0
             </a>
           </div>
+          <p class="contact-note">
+            Pilots and licensing:
+            <a class="text-link" href="mailto:simon@puenteworks.com?subject=ComplyOS%20pilot"
+              >simon@puenteworks.com</a
+            >
+            — evaluation is free under BUSL-1.1; production runs on a flat per-tenant license.
+          </p>
           <div class="proof-strip" aria-label="Product proof points">
             <span>
               <strong>2 tracks</strong>
@@ -1450,7 +1552,7 @@
               <li>Campus profile for education LMS sources.</li>
             </ul>
           </div>
-          <div class="connector-board" aria-label="Target connector systems">
+          <div class="connector-board" aria-label="Supported connector systems">
             <div class="connector lead">
               <strong>CSV export</strong>
               <small>Security-gate-friendly path for any LMS/HRIS when APIs are blocked.</small>
@@ -1469,19 +1571,19 @@
             </div>
             <div class="connector">
               <strong>Canvas</strong>
-              <small>Courses, enrollments, completions, cohorts, and assignments. Roadmap target — not yet an implemented connector.</small>
+              <small>Courses, enrollments, completions, cohorts, and assignments. Supported read-only connector (Bearer API token).</small>
             </div>
             <div class="connector">
               <strong>Moodle</strong>
-              <small>Course completion data from open learning programs. Roadmap target — not yet an implemented connector.</small>
+              <small>Course completion data from open learning programs. Supported read-only connector (Web Services token).</small>
             </div>
             <div class="connector">
               <strong>Blackboard</strong>
-              <small>Institutional learning evidence for legacy campuses. Roadmap target — not yet an implemented connector.</small>
+              <small>Institutional learning evidence for legacy campuses. Supported read-only connector (OAuth 2.0 client credentials).</small>
             </div>
             <div class="connector">
               <strong>D2L Brightspace</strong>
-              <small>Modern LMS records for higher education and enterprise learning. Roadmap target — not yet an implemented connector.</small>
+              <small>Modern LMS records for higher education and enterprise learning. Supported read-only connector (OAuth 2.0 client credentials).</small>
             </div>
           </div>
         </div>
@@ -1529,6 +1631,84 @@
         </div>
       </section>
 
+      <section id="pricing" aria-labelledby="pricing-title">
+        <div class="section-heading">
+          <h2 id="pricing-title">Published pricing, paid pilots.</h2>
+          <p>
+            Most tools in this lane are quote-only. ComplyOS pricing is public and flat per
+            tenant: a paid pilot that credits in full toward year one, then a self-hosted annual
+            license sized by tier — never metered per learner. Full tier details and pilot scope
+            live in the <a class="text-link" href="./pricing.md">pricing page</a>.
+          </p>
+        </div>
+        <div class="price-board" aria-label="ComplyOS pilot and license tiers">
+          <article class="price-card lead">
+            <span class="matrix-label">Design partner</span>
+            <h3>Paid pilot</h3>
+            <span class="price">$2,500&ndash;$7,500</span>
+            <p>
+              60&ndash;90 days, one tenant, one connector or document-folder ingest. The
+              deliverable is a client-facing evidence packet, and 100% of the fee credits toward
+              a year-one license &mdash; the pilot is the implementation.
+            </p>
+          </article>
+          <article class="price-card">
+            <span class="matrix-label">Annual &middot; per tenant</span>
+            <h3>Entry</h3>
+            <span class="price">$6,000/yr</span>
+            <p>
+              Up to 500 learners as a sizing guide, single connector. Training providers and
+              campus programs.
+            </p>
+          </article>
+          <article class="price-card">
+            <span class="matrix-label">Annual &middot; per tenant</span>
+            <h3>Core</h3>
+            <span class="price">$12,000/yr</span>
+            <p>
+              Up to 5,000 learners as a sizing guide, multiple connectors, notification outbox
+              and hooks.
+            </p>
+          </article>
+          <article class="price-card">
+            <span class="matrix-label">Annual &middot; per tenant</span>
+            <h3>Enterprise</h3>
+            <span class="price">from $24,000/yr</span>
+            <p>
+              Workday, SAP SuccessFactors, and Cornerstone connectors, multi-boundary readiness
+              packets, priority support.
+            </p>
+          </article>
+        </div>
+        <div class="price-terms" aria-label="License terms and contact">
+          <div>
+            <h3>Terms without the ratchet.</h3>
+            <p>
+              The pilot is scoped up front, and the license renews only when both sides agree in
+              writing. Read the <a class="text-link" href="./pricing.md">published pricing</a> and
+              the <a class="text-link" href="../COMMERCIAL-LICENSE.md">commercial license draft</a>,
+              then start the conversation.
+            </p>
+            <div class="hero-actions">
+              <a class="button" href="mailto:simon@puenteworks.com?subject=ComplyOS%20pilot">
+                Talk about a pilot
+              </a>
+              <a class="button secondary" href="./pricing.md">See full pricing</a>
+            </div>
+            <p class="contact-note">Or email directly: simon@puenteworks.com.</p>
+          </div>
+          <ul class="trust-list">
+            <li>No auto-renewal &mdash; if you do nothing, you owe nothing.</li>
+            <li>No hidden implementation fees &mdash; the paid pilot is the implementation.</li>
+            <li>Flat per tenant &mdash; no per-learner metering, no headcount audit at renewal.</li>
+            <li>
+              Your evidence stays in your database &mdash; SQLite or PostgreSQL you control, with
+              BUSL-1.1 conversion to Apache-2.0 built into the license.
+            </li>
+          </ul>
+        </div>
+      </section>
+
       <section class="final" aria-labelledby="final-title">
         <h2 id="final-title">Compliance software should start with proof, not a sales deck.</h2>
         <p>
@@ -1549,8 +1729,18 @@
       </section>
 
       <footer class="footer">
-        <span>ComplyOS</span>
-        <span><code>readiness_only</code> · source-available compliance infrastructure.</span>
+        <div class="footer-row">
+          <span>ComplyOS</span>
+          <span><code>readiness_only</code> · source-available compliance infrastructure.</span>
+        </div>
+        <p class="footer-legal">
+          Source-available under BUSL-1.1 &middot; Production use is licensed by PuenteWorks LLC
+          &middot; <a class="text-link" href="../COMMERCIAL-LICENSE.md">Commercial license</a>
+          &middot; <a class="text-link" href="./pricing.md">Pricing</a> &middot;
+          <a class="text-link" href="mailto:simon@puenteworks.com?subject=ComplyOS%20pilot"
+            >simon@puenteworks.com</a
+          >
+        </p>
       </footer>
     </main>
   </body>

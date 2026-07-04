@@ -49,6 +49,15 @@ Enterprise compliance tracking still runs on CSV exports, stale dashboards, scre
 
 ---
 
+## Pricing
+
+Published and flat per tenant — no quote-only gate: a paid pilot at
+$2,500–$7,500 (credited in full to a year-one license), then self-hosted annual
+tiers at Entry $6,000 / Core $12,000 / Enterprise from $24,000 per year.
+No auto-renewal, no per-learner metering — details in [docs/pricing.md](docs/pricing.md).
+
+---
+
 ## Architecture
 
 ```
@@ -90,11 +99,21 @@ Forgejo is the source-of-truth remote for ComplyOS. Do not push ComplyOS changes
 
 ## Quick Start
 
+### Getting the source
+
+ComplyOS is source-available, not public-clone. Source access is granted by
+**PuenteWorks LLC** — email
+[simon@puenteworks.com](mailto:simon@puenteworks.com?subject=ComplyOS%20source%20access)
+and you will receive a private Forgejo remote. Evaluation and any other
+non-production use are free under [BUSL-1.1](LICENSE); production use requires
+a [commercial license](COMMERCIAL-LICENSE.md) — see the published rates in
+[docs/pricing.md](docs/pricing.md).
+
 ### Installation
 
 ```bash
-# Clone from the Forgejo remote you were granted
-git clone <forgejo-complyos-remote>
+# Clone the private Forgejo remote you were granted (see "Getting the source")
+git clone <your-granted-forgejo-remote> complyos
 cd complyos
 
 # Install with uv (recommended)
@@ -224,7 +243,10 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 | Workday Learning | ✅ Supported | Basic Auth (env vars) |
 | SAP SuccessFactors Learning | ✅ Supported | OAuth 2.0 |
 | Cornerstone OnDemand Learning | ✅ Supported | OAuth 2.0 |
-| Canvas, Moodle, Blackboard, D2L Brightspace | Roadmap / profile targets | Varies |
+| Canvas | ✅ Supported (read-only) | Bearer API token |
+| Moodle | ✅ Supported (read-only) | Web Services token (`wstoken`) |
+| Blackboard Learn | ✅ Supported (read-only) | OAuth 2.0 (client credentials) |
+| D2L Brightspace | ✅ Supported (read-only) | OAuth 2.0 (client credentials) |
 | Mock (seed data) | ✅ Built-in | None |
 
 ### CSV Configuration
@@ -339,3 +361,9 @@ Grant says otherwise.
 On 2030-06-11, or the fourth anniversary of the first public distribution of
 a specific version under this license, whichever comes first, that version
 converts to **Apache License 2.0**.
+
+The licensor is **PuenteWorks LLC** (California). Production use is licensed
+under the [Commercial License Agreement](COMMERCIAL-LICENSE.md) (draft, pending
+counsel review) at the published rates in [docs/pricing.md](docs/pricing.md).
+Licensing contact:
+[simon@puenteworks.com](mailto:simon@puenteworks.com?subject=ComplyOS%20pilot).

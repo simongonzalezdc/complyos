@@ -10,10 +10,10 @@ source-available release.
 
 ## Reporting a Vulnerability
 
-Report suspected vulnerabilities privately to the repository owner or the
-internal Kyanite Labs security contact. Do not file public issues containing
-secrets, webhook URLs, tenant URLs, access tokens, sample employee records, or
-student records.
+Report suspected vulnerabilities privately to PuenteWorks LLC (the licensor)
+at `simon@puenteworks.com`. Do not file public issues containing secrets,
+webhook URLs, tenant URLs, access tokens, sample employee records, or student
+records.
 
 ## Secret Handling
 

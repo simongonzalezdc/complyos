@@ -1,0 +1,88 @@
+# Docker build context excludes for ComplyOS.
+#
+# The Dockerfile only COPYs pyproject.toml, README.md, and complyos/, so most
+# of this is belt-and-suspenders (smaller build context, and safety if the
+# Dockerfile ever switches to `COPY . .`). Local runtime state and secrets are
+# excluded unconditionally so they can never be baked into an image layer.
+
+# Version control
+.git
+.gitignore
+
+# Docker tooling itself — not needed inside the image
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Python build/cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtualenvs (never ship the host venv into the image)
+.env
+.venv
+venv/
+ENV/
+env/
+
+# Local runtime state and secrets — never bake these in
+*.db
+*.sqlite
+*.sqlite3
+.env.*
+complyos.env
+data/
+
+# Test / lint / type-check caches
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# Local agent/runtime workspaces (mirrors .gitignore)
+.omc/
+.worktrees/
+.omx/
+.codex-audit/
+output/
+source-intel-reviews.jsonl
+
+# Docs and non-runtime project files not needed inside the image
+docs/
+examples/
+scripts/
+skills/
+tests/
+deploy/
+AGENTS.md
+CONTEXT.md
+DESIGN-SYSTEM.md
+ARCHITECTURE.md
+SECURITY.md
+llms.txt
+renovate.json
+uv.lock
+
+# Editors / OS cruft
+.DS_Store
+.vscode/
+.idea/

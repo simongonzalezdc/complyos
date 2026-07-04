@@ -19,7 +19,7 @@ ComplyOS should present itself as readiness/control-mapping software until couns
 | Accessibility | WCAG 2.2 AA target and public-sector expectations | web shell a11y tests live — landmarks/labels/scope plus computed color-contrast enforced by `tests/unit/test_shell_accessibility.py` |
 | School privacy | FERPA/COPPA review inputs, minimization, access logs | this doc plus contract review |
 | Global privacy | Purpose, minimization, retention, data-region and subprocessor records | `ReadinessService` surfaces `TenantMetadata` (data_region, processing_purpose, data_categories, retention_policy, subprocessor_profile) per tenant via API `/api/v1/readiness` and the web shell Readiness module |
-| Control plane integrity | Service-layer authz, actor/action audit logs, per-identity rate limiting, adversarial test coverage | `complyos/services/context.py`, `audit_action_logs` table, `complyos/web/rate_limit.py`, 659-test suite (BOLA/IDOR, cross-surface parity, secrets audit) |
+| Control plane integrity | Service-layer authz, actor/action audit logs, per-identity rate limiting, adversarial test coverage | `complyos/services/context.py`, `audit_action_logs` table, `complyos/web/rate_limit.py`, full test suite of 850+ tests (BOLA/IDOR, cross-surface parity, secrets audit) |
 
 ## SOC 2 readiness posture
 
@@ -27,7 +27,7 @@ AICPA Trust Services Criteria cover Security, Availability, Processing Integrity
 
 Product requirements:
 
-- service-layer authz tests (require_permission choke-point across all 19 services; 659 tests including BOLA/IDOR and cross-surface denial parity);
+- service-layer authz tests (require_permission choke-point across all 19 services; 850+ tests including BOLA/IDOR and cross-surface denial parity);
 - actor/action/object/result logs (`audit_action_logs` table, designed + partial production receipts needed);
 - per-identity in-process rate limiting on mutating API endpoints (`COMPLYOS_RATE_LIMIT_PER_MINUTE`);
 - deterministic audit engine with evidence hashes;

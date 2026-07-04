@@ -1,0 +1,77 @@
+services:
+  complyos:
+    build: .
+    image: complyos:dev
+    container_name: complyos
+    restart: unless-stopped
+
+    # Local-first posture: bind to loopback only. Everything reachable off
+    # this host must go through a TLS-terminating reverse proxy in front of
+    # this container — do not change 127.0.0.1 to 0.0.0.0 here without one.
+    # See deploy/docker.md.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # The SQLite file under ./data is the entire application state. Back it
+    # up by copying this directory (see deploy/docker.md and
+    # docs/backup-restore-dr-plan.md).
+    volumes:
+      - ./data:/data
+
+    environment:
+      # --- Database --------------------------------------------------------
+      # Defaults (baked into the image) to sqlite at /data/complyos.db.
+      # `complyos serve-dashboard` has no --db flag — the database location
+      # is controlled entirely through this URL. Point at Postgres instead
+      # with a postgresql+psycopg:// URL (needs the `postgres` extra, not
+      # installed in this image — build a custom image with
+      # `pip install .[postgres]` first).
+      # COMPLYOS_DATABASE_URL: sqlite:////data/complyos.db
+
+      # --- Auth: required for anything beyond a single trusted operator ----
+      # Bearer token for /api/v1/*, and the password accepted at
+      # /shell/login (session pins role=owner). Leave unset/empty and the
+      # API fails closed (401) and the shell login refuses — by design, so
+      # nothing accidentally serves compliance data unauthenticated. Set a
+      # real secret here (or via an env_file / secrets manager, not
+      # committed to source control).
+      COMPLYOS_API_TOKEN: ""
+
+      # Uncomment ONLY for a trusted single-operator local deployment with no
+      # token configured — never on anything reachable beyond localhost.
+      # COMPLYOS_ALLOW_INSECURE_LOCAL: "1"
+
+      # --- Session cookie ---------------------------------------------------
+      # Signs the /shell session cookie; falls back to COMPLYOS_API_TOKEN
+      # above if unset. Set explicitly to rotate the API token independently
+      # of active shell sessions.
+      # COMPLYOS_SESSION_SECRET: ""
+
+      # Mark the session cookie Secure (HTTPS-only). Flip this on once a TLS
+      # reverse proxy sits in front of this service — see deploy/docker.md.
+      # COMPLYOS_SESSION_SECURE: "1"
+
+      # --- Notifications (optional) -----------------------------------------
+      # COMPLYOS_SMTP_HOST: ""
+      # COMPLYOS_SMTP_PORT: "587"
+      # COMPLYOS_SMTP_USERNAME: ""
+      # COMPLYOS_SMTP_PASSWORD: ""
+      # COMPLYOS_SMTP_FROM: "complyos@example.com"
+      # COMPLYOS_NOTIFICATION_EMAIL_TO: ""
+      # COMPLYOS_SLACK_WEBHOOK_URL: ""
+      # COMPLYOS_TEAMS_WEBHOOK_URL: ""
+      # COMPLYOS_WEBHOOK_URL: ""
+      # COMPLYOS_WEBHOOK_SECRET: ""
+      # COMPLYOS_INBOUND_WEBHOOK_SECRET: ""
+
+      # --- Rate limiting (optional) ------------------------------------------
+      # Requests/minute for mutating /api/v1/* calls. Unset, empty, or <= 0
+      # is effectively unlimited.
+      # COMPLYOS_RATE_LIMIT_PER_MINUTE: "60"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

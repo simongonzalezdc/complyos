@@ -1,7 +1,7 @@
 # ComplyOS Enterprise Hardening — Remediation Report
 
 > Branch: `simon/enterprise-hardening` · Baseline: `main` (342 tests green)
-> Result: **659 tests green**, ruff + mypy clean. All 3 CRITICAL and all
+> Result: **850+ tests green** (878 at last count, 2026-07-04), ruff + mypy clean. All 3 CRITICAL and all
 > HIGH/MEDIUM findings remediated; the repository God-object split and the
 > security-critical typed-model migration are done; and the full enterprise
 > control plane (service boundary, API v1, CLI/MCP parity, AI proposal layer,
@@ -88,7 +88,8 @@ A final independent adversarial review (multiple parallel reviewers over the ful
 diff) confirmed the authorization choke-point, default-MCP-role restriction,
 rate-limiting, AI proposal-only guarantee, shell session-auth soundness, and
 absence of mock theater or false-compliance claims. Its one blocking finding (the
-`decide` IDOR) is fixed in WP18. **658 → 659 tests green.**
+`decide` IDOR) is fixed in WP18. **658 → 659 tests green at that point; the
+suite has since grown past 850 (do not rely on a hard-coded count).**
 
 **Architecture invariant now provable:** every business workflow routes through a
 service that enforces permissions, and the parity suite fails the build if any
@@ -107,8 +108,12 @@ model. Before any multi-tenant/shared-token deployment, these must be closed:
 - **Repository point-lookups (`get_import_batch`, `list_import_rows`, `get_privacy_request`,
   `get_legal_hold`) are keyed by id only**; tenant isolation is enforced by the *service* post-fetch
   check (tested). Add an optional `tenant_id` filter at the repository layer for defense in depth.
-- **MCP context hardcodes `tenant_id="local-default"`** — add `COMPLYOS_MCP_TENANT_ID` before
-  exposing MCP to multiple tenants.
+- **MCP tenant pinning — closed.** `complyos/api/mcp_server.py` now reads
+  `COMPLYOS_MCP_TENANT_ID`: when set, every MCP tool is pinned to that tenant and a
+  conflicting per-tool `tenant_id` argument is rejected with an explicit error; when
+  unset, the single-tenant `local-default` remains the default. Remaining multi-tenant
+  work here is per-connection tenant binding if one MCP deployment must ever serve
+  more than one tenant.
 
 **Other:**
 - Shell token-login pins `role=owner`; insecure-local mode selects role. Role-scoped

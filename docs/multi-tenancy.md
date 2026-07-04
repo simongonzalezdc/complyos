@@ -62,9 +62,13 @@ shared-deployment multi-tenant hosting:
    layer up in the service. Add an optional `tenant_id` filter at the repository
    layer so a future caller cannot bypass the boundary by skipping the service
    check.
-3. **MCP tenant selection.** `complyos/api/mcp_server.py` hardcodes
-   `tenant_id="local-default"`. Add a `COMPLYOS_MCP_TENANT_ID` (or per-connection
-   tenant) before exposing MCP to more than one tenant.
+3. **MCP tenant pinning — implemented.** `complyos/api/mcp_server.py` reads
+   `COMPLYOS_MCP_TENANT_ID`: when set, every MCP tool operates on that tenant,
+   and a per-tool `tenant_id` argument that disagrees with the pinned tenant is
+   rejected with an explicit conflict error. When unset, the runtime falls back
+   to the per-tool `tenant_id` argument or the single-tenant `local-default`.
+   What remains for multi-tenant is per-connection tenant binding if one MCP
+   deployment must ever serve more than one tenant.
 4. **Re-run the BOLA/IDOR suite across all surfaces** (API, CLI, MCP, web) under
    the new credential model, asserting tenant A can never read or mutate tenant
    B's objects on any path.

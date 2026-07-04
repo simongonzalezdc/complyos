@@ -6,9 +6,10 @@ ActorContext auth model in a SIGNED session cookie rather than inventing a secon
 auth model — the cookie carries only an opaque role token signed server-side, and
 ``shell_context`` rebuilds the SAME ActorContext that the services consume.
 
-WP16a delivers the foundation (session login/logout, base layout, side nav) plus
-the live Overview module. The remaining seven modules are present in the nav but
-marked "soon" and land in WP16b-d.
+All ten modules (Overview, Gaps, Imports, Records, Evidence, Remediation,
+Source intelligence, Privacy & retention, Readiness, Administration) are live
+and rendered from real service data; WP16a-d plus document-ingest v0
+delivered them incrementally.
 """
 
 from __future__ import annotations

@@ -41,11 +41,12 @@ limitation to apologize for.
 | Normalization helpers (alias remap, `parse_date`, `to_learning_status`, expiry) | **Live** | `complyos/connectors/normalization.py` |
 | Import governance: Preview → Decide → Promote (quarantine, per-row decisions, evidence ledger, action log) | **Live** | `complyos/services/imports.py` |
 | `LearningRecord` model incl. `expires_at` + `is_expired()` + `is_compliant` | **Live** | `complyos/models/domain.py` |
-| Web shell Imports module (currently `csv_text` paste form) | **Live** | `complyos/web/shell.py` |
+| Web shell Imports module (`csv_text` paste form + `.docx`/`.xlsx`/`.csv` upload) | **Live** | `complyos/web/shell.py` |
 | Connector capability registry | **Live** | `complyos/connectors/capabilities.py` |
-| **Document extraction** (`.docx`/`.xlsx`/`.csv` → table) | **NEW** | — |
-| **File-upload UI + multipart route** (vs. paste) | **NEW** | — |
-| **Client-facing evidence packet export** (learner · training · completed · renewal-due) | **NEW** | — |
+| **Document extraction** (`.docx`/`.xlsx`/`.csv` → table) | **Live** | `complyos/connectors/document.py` |
+| **File-upload UI + multipart route** (vs. paste) | **Live** | `complyos/web/shell.py` (Imports module `document_file` upload) |
+| **Client-facing evidence packet export** (learner · training · completed · renewal-due) | **Live** | `complyos/services/evidence.py`, `/shell/records/export.csv` + `/shell/records/export.html` |
+| Records read view (learner-scoped, renewal-aware) | **Live** | `complyos/web/shell.py` (`GET /shell/records`, tenth shell module) |
 
 The spine (governance, models, normalization, expiry logic, evidence ledger) already
 exists. The honest delta is **~5 medium components**, no breaking changes, no new
