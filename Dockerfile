@@ -6,7 +6,7 @@
 # SQLAlchemy, aiosqlite, uvicorn, jinja2, etc. all ship prebuilt wheels for
 # this base image), so there is no build toolchain to shed in a second
 # stage. A multi-stage split would not meaningfully shrink this image.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.title="ComplyOS" \
       org.opencontainers.image.description="L&D Compliance & Learning Operations dashboard" \
