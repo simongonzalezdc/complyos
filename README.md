@@ -1,5 +1,9 @@
 # ComplyOS
 
+> ComplyOS is a compliance operating system / compliance workflow tooling that helps operators and builders running compliance workflows structure compliance work with an OS-like tool surface.
+
+**TL;DR:** ComplyOS — compliance operating system / compliance workflow tooling. Best for operators and builders running compliance workflows.
+
 [![Source of truth](https://img.shields.io/badge/source-Forgejo-609966.svg)](#source-of-truth)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -367,3 +371,64 @@ under the [Commercial License Agreement](COMMERCIAL-LICENSE.md) (draft, pending
 counsel review) at the published rates in [docs/pricing.md](docs/pricing.md).
 Licensing contact:
 [simon@puenteworks.com](mailto:simon@puenteworks.com?subject=ComplyOS%20pilot).
+
+<!-- s-plus-geo:start -->
+
+## What is ComplyOS?
+
+**ComplyOS** is a **compliance operating system / compliance workflow tooling** that helps **operators and builders running compliance workflows** **structure compliance work with an OS-like tool surface**.
+
+| | |
+| --- | --- |
+| **Product** | ComplyOS |
+| **Category** | compliance operating system / compliance workflow tooling |
+| **Best for** | operators and builders running compliance workflows |
+| **Not** | a certification body |
+| **Source** | [GitHub](https://github.com/simongonzalezdc/complyos) · [Forgejo](https://git.kyanitelabs.tech/simon/complyos) |
+| **Keywords** | compliance OS, compliance workflow tooling |
+
+## Who it's for
+
+- Primary: operators and builders running compliance workflows
+- Use when you need to structure compliance work with an OS-like tool surface
+- Skip if you need a certification body
+
+## FAQ
+
+### What is ComplyOS?
+
+ComplyOS is a compliance operating system / compliance workflow tooling. It helps operators and builders running compliance workflows structure compliance work with an OS-like tool surface.
+
+### Who should use ComplyOS?
+
+operators and builders running compliance workflows.
+
+### How is ComplyOS different?
+
+Tooling to operate compliance work — not a certifier.
+
+### Is ComplyOS production software?
+
+Treat the README status and release tags as source of truth for maturity. Validate against your own requirements before production use.
+
+## Status
+
+- Maintained as of 2026 on the default branch
+- Prefer release tags when pinning dependencies
+- Report issues on the canonical remote listed above
+
+## Agent surface
+
+- Coding agents: read this README first, then repo docs/`AGENTS.md` if present
+- Prefer machine-readable briefs (`llms.txt`) when the repo ships one
+- MCP or skill entrypoints are documented in-repo when applicable
+
+## Contributing
+
+Issues and PRs welcome on the canonical remote. Keep public docs free of secrets and machine-local paths.
+
+## License
+
+See [LICENSE](LICENSE) in this repository (or package metadata if license is package-only).
+
+<!-- s-plus-geo:end -->
