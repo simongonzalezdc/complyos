@@ -218,7 +218,7 @@ async def audit_compliance_gaps(
     department: str | None = None,
     region: str | None = None,
 ) -> dict[str, Any]:
-    """Audit compliance training gaps across the organization.
+    """Audit the organization for missing compliance training. Returns a shaped gaps summary with affected users and missing courses. Use when leadership needs to know who is non-compliant. Optionally pass department or region to scope the audit.
 
     Finds users who are missing required training assignments.
     Optionally filter by department or region.
@@ -238,7 +238,7 @@ async def audit_compliance_gaps(
 
 @mcp.tool()
 async def get_user_compliance_status(user_id: str) -> dict[str, Any]:
-    """Get complete compliance status for a single user.
+    """Fetch one user's full compliance status. Returns user details, course-by-course status, and a compliance summary. Use when a single learner's posture is needed. Pass user_id from the LMS.
 
     Args:
         user_id: The user's ID in the LMS
@@ -254,7 +254,7 @@ async def generate_audit_report(
     department: str | None = None,
     region: str | None = None,
 ) -> dict[str, Any]:
-    """Generate a structured compliance audit report.
+    """Generate an evidence-backed compliance audit report. Returns a structured report with severity breakdown, department analysis, top missing courses, and an evidence hash. Use when a leadership or regulatory submission is required. Optionally pass department or region to scope it.
 
     Creates an evidence-backed report suitable for leadership review
     or regulatory audit submission.
@@ -279,7 +279,7 @@ async def generate_compliance_digest(
     region: str | None = None,
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Generate a what-changed compliance digest vs the previous audit run.
+    """Diff a fresh audit against the previous snapshot to show what changed. Returns new gaps, resolved gaps, trend, severity breakdown, and an evidence hash. Use when tracking whether compliance is improving. Pass db_path for the snapshot history; optionally pass department or region.
 
     Runs a fresh audit, diffs it against the most recent snapshot for the
     same scope, and records the run so the next digest has a baseline.
@@ -301,7 +301,7 @@ async def generate_compliance_digest(
 
 @mcp.tool()
 async def sync(db_path: str = "complyos.db") -> dict[str, Any]:
-    """Mutating: pull LMS data into the local SQLite cache.
+    """Pull LMS data into the local SQLite cache (mutating). Returns connector name and synced counts of users, courses, enrollments, and learning records. Use when the local cache is stale. Pass db_path for the cache location.
 
     Mirrors the CLI ``sync`` command and ``POST /api/v1/sync``. This clears and
     re-populates the local cache, so it is gated at audit:run. The default
@@ -321,7 +321,7 @@ async def sync(db_path: str = "complyos.db") -> dict[str, Any]:
 
 @mcp.tool()
 async def list_connectors(profile: str | None = None) -> dict[str, Any]:
-    """Read-only: list the connector capability matrix.
+    """List the configured connector capability matrix (read-only). Returns a matrix of connector capabilities without connecting to any LMS. Use when deciding which LMS to target. Optionally pass profile (all/workforce/campus).
 
     Mirrors the CLI ``connectors`` command and ``GET /api/v1/connectors``. Does
     not connect to or mutate any LMS; it reports configured connector
@@ -339,7 +339,7 @@ async def list_connectors(profile: str | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 async def check_connector_health() -> dict[str, Any]:
-    """Read-only: check the health of the LMS connector.
+    """Check the LMS connector's health (read-only). Returns status, authentication state, and any errors. Use when diagnosing why sync or audit fails. Takes no parameters.
 
     Returns:
         Connector status, authentication state, and any errors.
@@ -355,7 +355,7 @@ async def validate_assignment_rule(
     course_ids: list[str],
     deadline_days: int = 30,
 ) -> dict[str, Any]:
-    """Validate an assignment rule before deployment.
+    """Validate an assignment rule before deployment. Returns a validation result with a valid flag, issues list, and preview. Use when drafting a new rule. Pass name, target_criteria, and course_ids from the rule draft.
 
     Checks for unknown courses, empty targets, and users who would match.
 
@@ -385,7 +385,7 @@ async def preview_assignment_rule(
     course_ids: list[str],
     deadline_days: int = 30,
 ) -> dict[str, Any]:
-    """Preview which users would be affected by an assignment rule.
+    """Preview which users an assignment rule would affect. Returns affected users, missing courses, and a total enrollment count. Use when sizing a rule's impact before deploy. Pass name, target_criteria, and course_ids from the rule draft.
 
     Args:
         name: Rule name
@@ -414,7 +414,7 @@ async def remediate_compliance_gaps(
     auto_enroll: bool = False,
     notify_manager: bool = False,
 ) -> dict[str, Any]:
-    """Audit and remediate compliance gaps in one operation.
+    """Audit then remediate compliance gaps in one mutating operation. Returns a summary of gaps found and remediation actions taken. Use when closing gaps with reminders, auto-enroll, or manager alerts. Pass the same scoping as a prior audit_compliance_gaps call plus the remediation toggles.
 
     Runs a compliance audit, then applies remediation actions based on severity.
 
@@ -450,7 +450,7 @@ async def export_audit_report_html(
     department: str | None = None,
     region: str | None = None,
 ) -> dict[str, Any]:
-    """Export an audit report to a styled HTML file.
+    """Export an audit report to a styled HTML file. Returns the written file path and a report summary. Use when a shareable artifact is needed. Pass output_path for the target file; optionally pass department or region to scope it.
 
     Args:
         output_path: Where to save the HTML file
@@ -478,7 +478,7 @@ async def export_compliance_dashboard(
     region: str | None = None,
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Generate a self-contained HTML compliance dashboard.
+    """Generate a self-contained HTML compliance dashboard from the current audit and snapshot history (read-only export). Returns the dashboard path and summary stats. Use when presenting trends to leadership. Pass output_path and db_path; optionally pass department or region.
 
     Combines the current audit with snapshot history into a static file:
     summary cards, severity breakdown, department bars, gap-count trend,
@@ -518,7 +518,7 @@ async def send_notification(
     subject: str,
     body: str,
 ) -> dict[str, Any]:
-    """Mutating side effect: send a custom external email notification.
+    """Send a custom external email notification (mutating). Returns a dict with sent (boolean) and optional error. Use when an authorized operator surface must email out. Pass to_address, subject, and body from the notification request.
 
     Gated at notifications:manage. The default proposal-only MCP role
     (agent_service_account) lacks notifications:manage and is therefore DENIED,
@@ -543,7 +543,7 @@ async def send_notification(
 
 @mcp.tool()
 async def check_readiness(db_path: str = "complyos.db") -> dict[str, Any]:
-    """Read-only: check enterprise/school readiness controls without making compliance claims.
+    """Check enterprise/school readiness controls without making compliance claims (read-only). Returns readiness posture, control statuses, a global watchlist, and forbidden claim language. Use when assessing posture pre-audit. Pass db_path for the local cache.
 
     Args:
         db_path: SQLite database path.
@@ -562,7 +562,7 @@ async def preview_import_batch(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Read-only/proposal-gated: preview and quarantine CSV rows before promotion.
+    """Preview and quarantine CSV rows before promotion (read-only). Returns a batch id, validation counts, issues, and a can_promote flag. Use when ingesting new CSV data. Pass csv_text from the source export; optionally pass source_system, profile, and db_path.
 
     This does not mutate active learning records. Bad rows fail closed and require
     explicit decisions before promotion.
@@ -591,7 +591,7 @@ async def promote_import_batch(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating: promote a validated import batch into active learning records.
+    """Promote a validated import batch into active learning records (mutating). Returns promotion status, promoted and blocked row counts, and an evidence id. Use when a previewed batch is cleared. Pass batch_id from a prior preview_import_batch result.
 
     Promotion requires service-layer permission and blocks if rows are rejected,
     pending, or need a decision.
@@ -621,7 +621,7 @@ async def decide_import_row(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating metadata: record an explicit import-row decision.
+    """Record an explicit decision on a quarantined import row (mutating metadata). Returns the decision result and resulting row status. Use when clearing flagged rows during promotion. Pass batch_id and row_id from a prior preview_import_batch result plus decision_type.
 
     Args:
         batch_id: Import batch ID returned by preview_import_batch.
@@ -655,7 +655,7 @@ async def list_evidence_ledger(
     tenant_id: str = "local-default",
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Read-only: list evidence ledger entries and hashes.
+    """List evidence ledger entries and their hashes (read-only). Returns ledger entries for the tenant. Use when proving an audit's evidence chain. Pass tenant_id to scope and limit to cap rows.
 
     Args:
         db_path: SQLite database path.
@@ -680,7 +680,7 @@ async def propose_field_mapping(
     target_schema: str = "learning_records",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Proposal-only: suggest CSV/header mappings with stored provenance.
+    """Suggest CSV/header-to-schema mappings as a stored, non-mutating proposal. Returns a proposal id, suggested mappings, hashes, and provenance. Use when normalizing an unknown CSV layout. Pass headers from the source file's header row.
 
     The proposal cannot promote imports, mark compliance, or mutate records.
 
@@ -705,7 +705,7 @@ async def approve_ai_proposal(
     proposal_id: str,
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating metadata only: approve an AI proposal record without changing compliance truth.
+    """Approve an AI proposal record (mutating metadata only, no compliance-truth change). Returns the approved proposal metadata and provenance. Use when a human confirms a proposal. Pass proposal_id from a prior propose_field_mapping result.
 
     Args:
         proposal_id: Proposal id returned by propose_field_mapping.
@@ -728,7 +728,7 @@ async def collect_security_evidence(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Collect a readiness-only security/SOC2 evidence packet for auditor review."""
+    """Collect a readiness-only security/SOC2 evidence packet for auditor review. Returns the evidence packet model. Use when assembling an auditor packet. Optionally pass period and profile."""
     context = _mcp_context(track=profile)
     return (
         SecurityEvidenceService(LocalRepository(db_path))
@@ -743,7 +743,7 @@ async def collect_governance_packet(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Collect a readiness-only AI, HR-boundary, and school governance packet."""
+    """Collect a readiness-only AI, HR-boundary, and school governance packet. Returns the governance packet model. Use when assembling a governance audit packet. Optionally pass lane and profile."""
     context = _mcp_context(track=profile)
     return (
         GovernancePacketService(LocalRepository(db_path))
@@ -761,7 +761,7 @@ async def create_privacy_request(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Create a privacy/data-subject request case.
+    """Open a privacy/data-subject request case. Returns the privacy request metadata. Use when a subject invokes access, export, correction, deletion, restriction, or objection. Pass subject_id and request_type from the subject's request.
 
     Args:
         subject_id: Subject/user identifier.
@@ -794,7 +794,7 @@ async def export_privacy_subject(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Export subject data for a scoped privacy request."""
+    """Export subject data scoped to a privacy request. Returns the exported subject data. Use when fulfilling an approved access/export request. Pass request_id from a prior create_privacy_request result."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -810,7 +810,7 @@ async def approve_privacy_request(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Record controller approval before exporting or deleting subject data."""
+    """Record controller approval before exporting or deleting subject data. Returns the approval metadata. Use when a human controller signs off. Pass request_id from a prior create_privacy_request result."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -825,7 +825,7 @@ async def delete_privacy_subject(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Delete subject data unless blocked by an active legal hold."""
+    """Delete subject data unless blocked by an active legal hold. Returns the deletion result. Use when fulfilling an approved deletion request. Pass request_id from a prior approve_privacy_request result."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -842,7 +842,7 @@ async def create_legal_hold(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Create an active legal hold that blocks deletion workflows."""
+    """Create an active legal hold that blocks deletion workflows. Returns the legal-hold record. Use when litigation or regulation requires preservation. Pass subject_id, scope, and reason from the preservation request."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -857,7 +857,7 @@ async def release_legal_hold(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Release a legal hold."""
+    """Release a legal hold so deletion workflows can proceed. Returns the release result. Use when a preservation reason ends. Pass hold_id from a prior create_legal_hold result."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -876,7 +876,7 @@ async def configure_privacy_retention(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Configure tenant retention settings for privacy program evidence."""
+    """Configure tenant retention settings for privacy program evidence. Returns the retention policy model. Use when setting how long each artifact class is kept. Pass the per-class day counts from the retention policy."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -898,7 +898,7 @@ async def run_privacy_retention(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Run retention cleanup for closed privacy program artifacts."""
+    """Run retention cleanup for closed privacy program artifacts. Returns the cleanup result. Use when enforcing the retention policy. Pass dry_run=true to preview before deleting."""
     context = _mcp_context(track=profile)
     return (
         PrivacyProgramService(LocalRepository(db_path))
@@ -914,7 +914,7 @@ async def list_attestations(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """List recorded AI-use-policy / AI-literacy attestations (read-only).
+    """List recorded AI-use-policy/AI-literacy attestations (read-only). Returns the tenant's attestation records. Use when reporting which learners are un-attested. Optionally pass user_id or requirement_id to filter.
 
     Read-only: the default proposal-only agent role may list attestations so it
     can report which learners are un-attested, but it cannot record one (see
@@ -946,7 +946,7 @@ async def record_attestation(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating: record that a learner attested to a named AI-use policy version.
+    """Record that a learner attested to a named AI-use policy version (mutating, human-only). Returns the recorded attestation, its learning-record id, and its evidence id. Use when a human is recording a real attestation. Pass user_id, requirement_id, and policy_version from the attestation event.
 
     An attestation is human-recorded evidence that a *person* read and accepted a
     policy. The default proposal-only MCP role lacks ``attestation:record`` and is
@@ -996,7 +996,7 @@ async def submit_intake(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Proposal-only: capture a training request (DRAFT) and draft its packet.
+    """Capture a training request as a DRAFT and draft its proposal-only packet. Returns the captured request and a draft packet flagging missing info with suggested priority and routing. Use when triaging an incoming training ask. Pass title and requester from the ask; never confirm scope.
 
     The default proposal-only agent role MAY do this (it holds ``intake:submit``).
     Submitting captures the request and drafts a proposal-only packet that flags
@@ -1046,7 +1046,7 @@ async def list_intake(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Read-only: list the tenant's training intake requests.
+    """List the tenant's training intake requests (read-only). Returns the request queue. Use when triaging the intake backlog. Optionally pass status (draft/confirmed/withdrawn).
 
     The default proposal-only agent role may list intake requests (it holds
     ``intake:submit``) so it can triage and report the queue.
@@ -1071,7 +1071,7 @@ async def confirm_intake_scope(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating: confirm scope for an intake request (DRAFT -> CONFIRMED).
+    """Confirm scope for an intake request, moving DRAFT to CONFIRMED (mutating, human-only). Returns the confirmed request with its human approver stamped. Use when a human agrees to take on the work. Pass request_id from a prior submit_intake or list_intake result.
 
     This is the human guardrail. The default proposal-only MCP role lacks
     ``intake:confirm`` and is therefore denied — an AI/agent can never confirm
@@ -1104,7 +1104,7 @@ async def request_roster_snapshot(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Proposal-only: preview a source export into quarantine and draft a roster view.
+    """Preview a source export into quarantine and draft a proposal-only roster view (non-mutating). Returns the captured snapshot and a proposal-only learners-x-items roster view. Use when a stakeholder needs a roster picture. Pass label and csv_text from the source export.
 
     The default proposal-only agent role MAY do this (it holds ``rosters:read``).
     The export is routed through the import preview, which QUARANTINES the batch —
@@ -1141,7 +1141,7 @@ async def list_rosters(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Read-only: list the tenant's roster snapshots.
+    """List the tenant's roster snapshots (read-only). Returns the snapshot queue. Use when triaging roster requests. Optionally pass status (draft/approved/withdrawn).
 
     The default proposal-only agent role may list roster snapshots (it holds
     ``rosters:read``) so it can triage and report the queue.
@@ -1166,7 +1166,7 @@ async def approve_roster_snapshot(
     profile: str = "workforce",
     db_path: str = "complyos.db",
 ) -> dict[str, Any]:
-    """Mutating: approve a roster snapshot and promote its quarantined import.
+    """Approve a roster snapshot and promote its quarantined import into truth (mutating, human-only). Returns the approved snapshot with its human approver stamped. Use when a human clears a previewed import. Pass snapshot_id from a prior request_roster_snapshot or list_rosters result.
 
     This is the quarantine guardrail. The default proposal-only MCP role lacks
     ``rosters:approve`` and is therefore denied — an AI/agent can never let a
