@@ -16,6 +16,7 @@ from pathlib import Path
 # Repo root: tests/security/<this file> -> parents[2] is the project root.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCAN_DIRS = ("complyos", "tests", "docs")
+_SCAN_ROOT_FILES = ("README.md",)
 
 # Directories/files that are not source we authored or that store opaque hashes.
 _SKIP_DIR_NAMES = {"__pycache__", ".git", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"}
@@ -70,6 +71,7 @@ _ALLOWED_SUBSTRINGS = {
     "change-me",
     "example",
     "placeholder",
+    "your-pass",  # README Workday configuration placeholder
     "redacted",
     "xxxxxxxx",
     "<token>",
@@ -99,7 +101,7 @@ def _is_allowed(matched_text: str, line: str) -> bool:
 
 
 def _scannable_files() -> list[Path]:
-    files: list[Path] = []
+    files = [_REPO_ROOT / name for name in _SCAN_ROOT_FILES]
     for top in _SCAN_DIRS:
         base = _REPO_ROOT / top
         if not base.exists():
@@ -116,6 +118,11 @@ def _scannable_files() -> list[Path]:
                 continue
             files.append(path)
     return files
+
+
+def test_root_readme_is_in_secrets_audit_scope() -> None:
+    """Keep the public README inside the retained secrets-leakage proof."""
+    assert (_REPO_ROOT / "README.md") in _scannable_files()
 
 
 def test_no_hardcoded_secrets_in_source_tests_or_docs() -> None:
