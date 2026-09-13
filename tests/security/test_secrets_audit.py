@@ -16,6 +16,7 @@ from pathlib import Path
 # Repo root: tests/security/<this file> -> parents[2] is the project root.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCAN_DIRS = ("complyos", "tests", "docs")
+_SCAN_ROOT_FILES = ("README.md",)
 
 # Directories/files that are not source we authored or that store opaque hashes.
 _SKIP_DIR_NAMES = {"__pycache__", ".git", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"}
@@ -37,7 +38,7 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "assigned_secret_literal",
         re.compile(
-            r"(?i)\b(?:api[_-]?key|api[_-]?token|secret|password|passwd|client[_-]?secret"
+            r"(?i)\b(?:workday_password|api[_-]?key|api[_-]?token|secret|password|passwd|client[_-]?secret"
             r"|webhook[_-]?secret|access[_-]?token|private[_-]?key)\b\s*[=:]\s*"
             r"['\"]([^'\"\n]{8,})['\"]"
         ),
@@ -85,6 +86,10 @@ _ALLOWED_SUBSTRINGS = {
     "complyos_mcp_role",
 }
 
+_ALLOWED_EXACT_MATCHES = {
+    'workday_password="your-pass"',  # README Workday configuration placeholder
+}
+
 _ALLOWED_REGEXES = (
     # A line that resolves its secret from the environment, not a literal.
     re.compile(r"(?i)os\.(?:getenv|environ)"),
@@ -93,13 +98,15 @@ _ALLOWED_REGEXES = (
 
 def _is_allowed(matched_text: str, line: str) -> bool:
     lowered = line.lower()
+    if matched_text.strip().lower() in _ALLOWED_EXACT_MATCHES:
+        return True
     if any(allowed in lowered for allowed in _ALLOWED_SUBSTRINGS):
         return True
     return any(rx.search(line) for rx in _ALLOWED_REGEXES)
 
 
 def _scannable_files() -> list[Path]:
-    files: list[Path] = []
+    files = [_REPO_ROOT / name for name in _SCAN_ROOT_FILES]
     for top in _SCAN_DIRS:
         base = _REPO_ROOT / top
         if not base.exists():
@@ -116,6 +123,29 @@ def _scannable_files() -> list[Path]:
                 continue
             files.append(path)
     return files
+
+
+def test_root_readme_is_in_secrets_audit_scope() -> None:
+    """Keep the public README inside the retained secrets-leakage proof."""
+    assert (_REPO_ROOT / "README.md") in _scannable_files()
+
+
+def test_readme_workday_placeholder_is_exactly_allowed() -> None:
+    line = 'export WORKDAY_PASSWORD="your-pass"'
+    pattern = dict(_SECRET_PATTERNS)["assigned_secret_literal"]
+    match = pattern.search(line)
+    assert match is not None
+    assert _is_allowed(match.group(0), line)
+
+
+def test_readme_placeholder_text_cannot_mask_another_secret() -> None:
+    """The narrow Workday allowance must not exempt a different match."""
+    line = 'api_key = "sk_live_5f3a9c2b8e1d7"  # WORKDAY_PASSWORD="your-pass"'
+    pattern = dict(_SECRET_PATTERNS)["assigned_secret_literal"]
+    match = pattern.search(line)
+    assert match is not None
+    assert match.group(0) == 'api_key = "sk_live_5f3a9c2b8e1d7"'
+    assert not _is_allowed(match.group(0), line)
 
 
 def test_no_hardcoded_secrets_in_source_tests_or_docs() -> None:
