@@ -23,7 +23,10 @@ jobs:
           if [ -f pyproject.toml ]; then python3 -m pip install --break-system-packages -e ".[dev]"; fi
       - name: Lint
         run: |
-          python3 -m pip install --break-system-packages ruff
+          # Pinned to match uv.lock; unpinned installs drift to newer ruff
+          # releases whose new rules (e.g. SIM222 changes) fail runs that
+          # are green against the version the repo develops with.
+          python3 -m pip install --break-system-packages ruff==0.15.16
           python3 -m ruff check .
       - name: Typecheck
         run: |
