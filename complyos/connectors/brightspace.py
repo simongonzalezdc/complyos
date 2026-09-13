@@ -303,7 +303,16 @@ def _parse_enrollment_record(
     completed = bool(item.get("IsCompleted") or completion.get("Completion"))
     completed_at = _parse_datetime(item.get("CompletionDate") or completion.get("CompletionDate"))
     status = LearningRecordStatus.COMPLETED if completed else _access_status(item)
-    record_id = str(item.get("Id") or f"{org_unit_id}:{user_id}" or _hash_payload(item))
+    # SIM222 (ruff>=0.16): the f-string is structurally never empty — the literal ":"
+    # separator keeps it truthy even when both parts are empty — so the hash term is
+    # flagged as dead. It is kept deliberately as a defensive fallback. Reachability
+    # proof (synthetic-data script, 2026-09-13): org_unit_id is invariantly non-empty
+    # on every connector-driven path because the scope guard at brightspace.py:126-131
+    # raises before any pull when no org unit is configured (cli.py:448 and
+    # services/audit.py:95 call get_learning_records() with no course_ids); user_id
+    # alone can be empty on a malformed payload; both empty would require a caller to
+    # explicitly pass course_ids=[""], which no in-repo caller does.
+    record_id = str(item.get("Id") or f"{org_unit_id}:{user_id}" or _hash_payload(item))  # noqa: SIM222
     merged: dict[str, Any] = {**item, "FinalGrade": grade} if grade else dict(item)
     return LearningRecord(
         id=record_id,
