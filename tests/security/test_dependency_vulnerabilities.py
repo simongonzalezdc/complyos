@@ -69,6 +69,7 @@ def _run_pip_audit() -> tuple[int, str, str]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=180,
         env={**os.environ, "PIP_DISABLE_PIP_VERSION_CHECK": "1"},
         cwd=str(_REPO_ROOT),
     )
@@ -108,7 +109,17 @@ def test_no_known_dependency_vulnerabilities() -> None:
     if binary is None:
         pytest.skip("pip-audit not installed; see test_pip_audit_binary_is_available")
 
-    rc, stdout, stderr = _run_pip_audit()
+    try:
+        rc, stdout, stderr = _run_pip_audit()
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            "pip-audit exceeded the 180-second budget; cannot determine "
+            "dependency vulnerability status. This usually means the OSV "
+            "Advisory Database fetch is blocked or slow in this environment. "
+            "Investigate the runner's egress to osv.dev / PyPI before "
+            "retrying, or run pip-audit manually and attach its output.\n"
+            f"stderr (truncated):\n{(exc.stderr or b'').decode(errors='replace')[-2000:]}"
+        )
 
     # pip-audit exits 0 only when no vulns are reported; any non-zero exit
     # either means vulns (rc=1) or a hard error (rc>=2). For rc>=2 with an
@@ -167,7 +178,14 @@ def test_pip_audit_finds_a_real_advisory_in_a_planted_dependency() -> None:
     if binary is None:
         pytest.skip("pip-audit not installed; see test_pip_audit_binary_is_available")
 
-    rc, stdout, _stderr = _run_pip_audit()
+    try:
+        rc, stdout, _stderr = _run_pip_audit()
+    except subprocess.TimeoutExpired:
+        # If pip-audit hangs in this test we cannot meaningfully verify
+        # advisory IDs, so treat the gate as inconclusive and pass: the
+        # primary gate test (above) will already have failed with the
+        # same timeout and surfaced the underlying network issue.
+        pytest.skip("pip-audit timed out; primary gate test will report")
     try:
         payload = json.loads(stdout) if stdout.strip() else {"dependencies": []}
     except json.JSONDecodeError:
