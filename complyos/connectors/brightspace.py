@@ -12,7 +12,11 @@ Auth mirrors the Cornerstone OAuth2 client-credentials token machinery (token
 fetch + refresh with an expiry buffer). Brightspace's production OAuth2 uses a
 JWT client-assertion against ``auth.brightspace.com``; this connector keeps the
 same shared-secret ``client_credentials`` shape as the other workforce OAuth
-connectors and points ``token_url`` at the D2L auth host by default.
+connectors. The token endpoint is **fail-closed**: when client credentials are
+configured without an explicit ``token_url``, construction raises
+:class:`ConnectorConfigurationError` rather than implicitly dialing D2L's
+public auth host — every connector endpoint, including auth, must come from
+operator configuration.
 
 Brightspace paginates list responses with bookmark-based ``PagedResultSet``
 objects (``PagingInfo.Bookmark`` + ``PagingInfo.HasMoreItems``); this connector
@@ -22,7 +26,9 @@ Environment variables:
     BRIGHTSPACE_BASE_URL: e.g. https://school.brightspace.com
     BRIGHTSPACE_CLIENT_ID: OAuth2 client id
     BRIGHTSPACE_CLIENT_SECRET: OAuth2 client secret
-    BRIGHTSPACE_TOKEN_URL: optional override for the OAuth2 token endpoint
+    BRIGHTSPACE_TOKEN_URL: OAuth2 token endpoint — REQUIRED whenever client
+        credentials are set (fail-closed; D2L's public endpoint, for reference,
+        is https://auth.brightspace.com/core/connect/token)
     BRIGHTSPACE_ORG_UNIT_ID: optional default course (org unit) scope
     BRIGHTSPACE_LP_VERSION: optional Learning Platform API version (default 1.49)
     BRIGHTSPACE_LE_VERSION: optional Learning Environment API version (default 1.82)
@@ -38,7 +44,7 @@ from typing import Any
 
 import httpx
 
-from complyos.connectors.base import LMSConnector
+from complyos.connectors.base import ConnectorConfigurationError, LMSConnector
 from complyos.models.domain import (
     Course,
     EmploymentStatus,
@@ -51,7 +57,19 @@ from complyos.models.domain import (
 # Safe floor API versions (lp 1.46-1.48 / le 1.75-1.81 are deprecated).
 _DEFAULT_LP_VERSION = "1.49"
 _DEFAULT_LE_VERSION = "1.82"
-_DEFAULT_TOKEN_URL = "https://auth.brightspace.com/core/connect/token"
+# D2L's public OAuth2 token endpoint, referenced in configuration-error
+# messages only — never dialed implicitly (fail-closed: a connector with
+# credentials must get its token endpoint from operator configuration).
+_D2L_PUBLIC_TOKEN_URL = "https://auth.brightspace.com/core/connect/token"
+
+_TOKEN_URL_REQUIRED_MESSAGE = (
+    "Brightspace connector is misconfigured: token_url is required when client "
+    "credentials are set. Set connectors.brightspace.token_url in the ComplyOS "
+    "config file or the BRIGHTSPACE_TOKEN_URL environment variable (D2L's "
+    f"public endpoint, for reference: {_D2L_PUBLIC_TOKEN_URL}). ComplyOS "
+    "refuses to dial a hardcoded vendor auth endpoint implicitly; no network "
+    "request was made."
+)
 
 
 class BrightspaceConnector(LMSConnector):
@@ -73,9 +91,11 @@ class BrightspaceConnector(LMSConnector):
         self.base_url = (base_url or os.getenv("BRIGHTSPACE_BASE_URL") or "").rstrip("/")
         self.client_id = client_id or os.getenv("BRIGHTSPACE_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("BRIGHTSPACE_CLIENT_SECRET")
-        self.token_url = (
-            token_url or os.getenv("BRIGHTSPACE_TOKEN_URL") or _DEFAULT_TOKEN_URL
-        )
+        self.token_url = token_url or os.getenv("BRIGHTSPACE_TOKEN_URL")
+        if not self.token_url and self.client_id and self.client_secret:
+            # Credentials without an operator-provided token endpoint: fail
+            # closed at construction, before any socket can exist.
+            raise ConnectorConfigurationError(_TOKEN_URL_REQUIRED_MESSAGE)
         self.org_unit_id = org_unit_id or os.getenv("BRIGHTSPACE_ORG_UNIT_ID")
         self.lp_version = lp_version or os.getenv("BRIGHTSPACE_LP_VERSION") or _DEFAULT_LP_VERSION
         self.le_version = le_version or os.getenv("BRIGHTSPACE_LE_VERSION") or _DEFAULT_LE_VERSION
@@ -210,6 +230,10 @@ class BrightspaceConnector(LMSConnector):
             return self._access_token
         if not (self.base_url and self.client_id and self.client_secret):
             raise ValueError("Brightspace OAuth configuration is incomplete")
+        if not self.token_url:
+            # Defense in depth: never POST credentials to an endpoint that did
+            # not come from operator configuration, whatever the object's state.
+            raise ConnectorConfigurationError(_TOKEN_URL_REQUIRED_MESSAGE)
 
         response = await self.client.post(
             self.token_url,

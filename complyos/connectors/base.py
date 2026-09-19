@@ -8,6 +8,15 @@ from typing import Any
 from complyos.models.domain import Course, Enrollment, LearningRecord, User
 
 
+class ConnectorConfigurationError(ValueError):
+    """A connector was configured in a way that cannot run safely.
+
+    Raised at construction time — before any network dial — when operator
+    configuration names credentials without the endpoint they authenticate
+    against, instead of silently falling back to a hardcoded vendor host.
+    """
+
+
 class LMSConnector(ABC):
     """Abstract base for all LMS connectors."""
 

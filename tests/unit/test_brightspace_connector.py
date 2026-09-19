@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import socket
+
 import httpx
 import pytest
 import respx
 from httpx import Response
 
+from complyos.connectors.base import ConnectorConfigurationError
 from complyos.connectors.brightspace import BrightspaceConnector
 from complyos.models.domain import EnrollmentStatus, LearningRecordStatus
 
@@ -14,6 +17,35 @@ BASE_URL = "https://school.brightspace.test"
 TOKEN_URL = "https://auth.brightspace.test/core/connect/token"
 LP = "1.49"
 LE = "1.82"
+
+
+class _SocketGuard:
+    """Fail-loud guard proving a code path never reaches the network layer.
+
+    DNS resolution and TCP connects are recorded and raise immediately, so a
+    regression that dials out (e.g. to the real auth.brightspace.com) cannot
+    silently pass — it either trips the guard's AssertionError or shows up in
+    ``attempts`` and fails the zero-attempts assertion.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.attempts: list[str] = []
+        for name in ("getaddrinfo", "create_connection"):
+            monkeypatch.setattr(
+                socket,
+                name,
+                lambda *a, _n=name, **kw: self._forbid(_n, *a, **kw),
+            )
+        monkeypatch.setattr(
+            socket.socket,
+            "connect",
+            lambda self_, address: self._forbid("socket.connect", address),
+        )
+
+    def _forbid(self, what: str, *args: object, **kwargs: object) -> None:
+        detail = " ".join(str(a) for a in args[:2])
+        self.attempts.append(f"{what}({detail})")
+        raise AssertionError(f"network egress attempted during fail-closed path: {what} {detail}")
 
 
 @pytest.fixture
@@ -246,3 +278,90 @@ async def test_brightspace_learning_records_require_course_scope() -> None:
 @pytest.mark.asyncio
 async def test_brightspace_trigger_reminder_is_read_only(connector: BrightspaceConnector) -> None:
     assert await connector.trigger_reminder("42", "6606") is False
+
+
+def test_brightspace_credentials_without_token_url_fail_closed_before_dial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adversary caveat 2 (2026-09-19): creds + no token_url must NEVER dial.
+
+    The old code silently fell back to the hardcoded real
+    auth.brightspace.com endpoint; the fix must raise a structured
+    configuration error at construction — before any socket exists. The socket
+    guard makes any egress attempt (DNS or TCP, including to the real host)
+    fail the test loudly.
+    """
+    guard = _SocketGuard(monkeypatch)
+    monkeypatch.delenv("BRIGHTSPACE_TOKEN_URL", raising=False)
+
+    with pytest.raises(ConnectorConfigurationError) as excinfo:
+        BrightspaceConnector(
+            base_url=BASE_URL, client_id="fake-id", client_secret="fake-secret"
+        )
+
+    message = str(excinfo.value)
+    assert "token_url" in message
+    assert "BRIGHTSPACE_TOKEN_URL" in message
+    assert "no network request was made" in message
+    assert guard.attempts == []
+
+
+@pytest.mark.asyncio
+async def test_brightspace_env_credentials_without_token_url_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env-var credentials follow the same fail-closed rule as config creds."""
+    guard = _SocketGuard(monkeypatch)
+    monkeypatch.setenv("BRIGHTSPACE_BASE_URL", BASE_URL)
+    monkeypatch.setenv("BRIGHTSPACE_CLIENT_ID", "fake-id")
+    monkeypatch.setenv("BRIGHTSPACE_CLIENT_SECRET", "fake-secret")
+    monkeypatch.delenv("BRIGHTSPACE_TOKEN_URL", raising=False)
+
+    with pytest.raises(ConnectorConfigurationError):
+        BrightspaceConnector()
+
+    assert guard.attempts == []
+
+
+def test_brightspace_explicit_token_url_constructs_without_dial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit token_url keeps the connector usable — fail-closed, not broken."""
+    monkeypatch.delenv("BRIGHTSPACE_TOKEN_URL", raising=False)
+
+    connector = BrightspaceConnector(
+        base_url=BASE_URL,
+        client_id="client-id",
+        client_secret="client-secret",
+        token_url=TOKEN_URL,
+    )
+
+    assert connector.token_url == TOKEN_URL
+
+
+@pytest.mark.asyncio
+async def test_brightspace_token_fetch_never_dials_without_explicit_token_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defense in depth: ``_token()`` re-checks token_url before the POST.
+
+    Covers attribute mutation after construction (bypassing the __init__
+    guard): the token fetch must raise the structured error, and health_check
+    must surface it as a clean auth failure — with zero socket attempts.
+    """
+    guard = _SocketGuard(monkeypatch)
+    connector = BrightspaceConnector(
+        base_url=BASE_URL,
+        client_id="client-id",
+        client_secret="client-secret",
+        token_url=TOKEN_URL,
+    )
+    connector.token_url = None  # simulate a bypassed/mutated configuration
+
+    with pytest.raises(ConnectorConfigurationError):
+        await connector._token()
+
+    health = await connector.health_check()
+    assert health["status"] in ("auth_failed", "error")
+    assert health["authenticated"] is False
+    assert guard.attempts == []
