@@ -237,6 +237,14 @@ complyos mcp
 
 Then configure your MCP client (Claude Code, Cursor, etc.) to point to the server.
 
+**Network posture (default: no egress at startup).** The server disables the
+FastMCP dependency's startup update check by setting
+`FASTMCP_CHECK_FOR_UPDATES=off` before FastMCP loads, so a default install
+never contacts pypi.org (relevant for regulated/air-gapped estates). Set
+`FASTMCP_CHECK_FOR_UPDATES=stable` (or `prerelease`) in the environment to
+re-enable the dependency's update notice, or `off` to keep it disabled — an
+explicit value always wins over the built-in default.
+
 ---
 
 ## Connectors
@@ -250,8 +258,15 @@ Then configure your MCP client (Claude Code, Cursor, etc.) to point to the serve
 | Canvas | ✅ Supported (read-only) | Bearer API token |
 | Moodle | ✅ Supported (read-only) | Web Services token (`wstoken`) |
 | Blackboard Learn | ✅ Supported (read-only) | OAuth 2.0 (client credentials) |
-| D2L Brightspace | ✅ Supported (read-only) | OAuth 2.0 (client credentials) |
+| D2L Brightspace | ✅ Supported (read-only) | OAuth 2.0 (client credentials, explicit `token_url` required) |
 | Mock (seed data) | ✅ Built-in | None |
+
+Fail-closed rule for the Brightspace connector: when client credentials are
+configured without an explicit `token_url` (config key
+`connectors.brightspace.token_url` or env `BRIGHTSPACE_TOKEN_URL`), connector
+construction raises a structured configuration error instead of implicitly
+dialing D2L's public auth endpoint — every connector endpoint, including
+OAuth token endpoints, must come from operator configuration.
 
 ### CSV Configuration
 

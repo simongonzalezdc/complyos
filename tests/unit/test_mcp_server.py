@@ -360,3 +360,46 @@ class TestExportMCPTool:
         assert result["gaps_found"] >= 2
         assert len(result["evidence_hash"]) == 64
         assert (tmp_path / "dashboard.html").exists()
+
+
+class TestNoDefaultEgress:
+    """Adversary caveat 1 (2026-09-19): the default install must never phone
+    pypi.org at startup. FastMCP's banner update check reads its env var when
+    its Settings object is built at import time, so the default must be
+    applied before ``import fastmcp`` inside complyos.api.mcp_server. These
+    tests run in subprocesses so pytest's own import of this module cannot
+    mask an ordering regression."""
+
+    def _import_in_subprocess(self, preset: str | None) -> str | None:
+        import os
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "FASTMCP_CHECK_FOR_UPDATES"}
+        if preset is not None:
+            env["FASTMCP_CHECK_FOR_UPDATES"] = preset
+        script = (
+            "import os\n"
+            "assert os.environ.get('FASTMCP_CHECK_FOR_UPDATES') "
+            f"== {preset!r}, os.environ.get('FASTMCP_CHECK_FOR_UPDATES')\n"
+            "import complyos.api.mcp_server\n"
+            "print(os.environ.get('FASTMCP_CHECK_FOR_UPDATES', '<unset>'))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        value = result.stdout.strip().splitlines()[-1]
+        return None if value == "<unset>" else value
+
+    def test_importing_mcp_server_disables_update_check_by_default(self) -> None:
+        """No explicit operator choice -> default off (no pypi.org dial)."""
+        assert self._import_in_subprocess(preset=None) == "off"
+
+    def test_importing_mcp_server_respects_explicit_operator_choice(self) -> None:
+        """An explicit FASTMCP_CHECK_FOR_UPDATES choice is never overridden."""
+        assert self._import_in_subprocess(preset="stable") == "stable"

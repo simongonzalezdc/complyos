@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastmcp import FastMCP
-
 from complyos.config import ComplyOSConfig, resolve_env_placeholder
 from complyos.connectors.base import LMSConnector
 from complyos.connectors.blackboard import BlackboardConnector
@@ -45,6 +43,17 @@ from complyos.services.readiness import ReadinessService
 from complyos.services.remediation import RemediationService
 from complyos.services.rosters import RostersService
 from complyos.services.security_evidence import SecurityEvidenceService
+
+# Fail-closed network default: FastMCP's startup banner otherwise phones
+# pypi.org once per 12-hour cache window (anonymous public metadata GET,
+# fastmcp/utilities/version_check.py). FastMCP builds its Settings object
+# from the environment at `import fastmcp` time, so this default MUST be
+# applied before that import executes. setdefault keeps an operator's
+# explicit FASTMCP_CHECK_FOR_UPDATES choice (stable | prerelease | off)
+# authoritative — set "stable" or "prerelease" to re-enable the check.
+os.environ.setdefault("FASTMCP_CHECK_FOR_UPDATES", "off")
+
+from fastmcp import FastMCP  # noqa: E402 (must follow the env default above)
 
 mcp = FastMCP("complyos")
 
